@@ -1,5 +1,5 @@
 # SYN-001: Casca do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: human
