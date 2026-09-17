@@ -1,5 +1,5 @@
 # SYN-001: Casca do PC
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: human

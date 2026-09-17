@@ -1,7 +1,9 @@
 # Gate: typecheck, lint e testes de tudo que existir em pc/ e android/.
 # Sai com codigo diferente de zero se qualquer passo falhar.
+# Ancorado em $PSScriptRoot: rodar de qualquer diretorio da o mesmo resultado.
 
 $ErrorActionPreference = "Stop"
+$root = $PSScriptRoot
 $failed = $false
 
 function Run-Step {
@@ -20,18 +22,18 @@ function Run-Step {
     }
 }
 
-if (Test-Path "pc/src-tauri") {
-    Run-Step "cargo fmt --check (pc)" "pc/src-tauri" { cargo fmt --check }
-    Run-Step "cargo clippy (pc)" "pc/src-tauri" { cargo clippy --all-targets -- -D warnings }
-    Run-Step "cargo test (pc)" "pc/src-tauri" { cargo test }
+if (Test-Path "$root/pc/src-tauri") {
+    Run-Step "cargo fmt --check (pc)" "$root/pc/src-tauri" { cargo fmt --check }
+    Run-Step "cargo clippy (pc)" "$root/pc/src-tauri" { cargo clippy --all-targets -- -D warnings }
+    Run-Step "cargo test (pc)" "$root/pc/src-tauri" { cargo test }
 }
 
-if (Test-Path "pc/ui") {
-    Run-Step "tsc --noEmit (pc/ui)" "pc" { npx tsc --noEmit }
+if (Test-Path "$root/pc/ui") {
+    Run-Step "tsc --noEmit (pc/ui)" "$root/pc" { npx tsc --noEmit }
 }
 
-if (Test-Path "android") {
-    Run-Step "gradle check (android)" "android" { ./gradlew check }
+if (Test-Path "$root/android") {
+    Run-Step "gradle check (android)" "$root/android" { .\gradlew.bat check }
 }
 
 if ($failed) {

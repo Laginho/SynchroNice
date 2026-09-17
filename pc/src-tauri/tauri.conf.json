@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pc",
+  "productName": "SynchroNice",
   "version": "0.1.0",
   "identifier": "dev.synchronice.pc",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "pc",
+        "title": "SynchroNice",
         "width": 800,
         "height": 600
       }

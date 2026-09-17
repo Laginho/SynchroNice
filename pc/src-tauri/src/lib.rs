@@ -6,23 +6,27 @@ use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_dialog::DialogExt;
 
+/// Pede a Pasta se ainda não houver uma escolhida. Não-bloqueante: `setup` roda
+/// na thread principal, onde `blocking_pick_folder` travaria o event loop.
+/// Cancelar não grava nada — pergunta de novo na próxima abertura.
 fn ask_pasta_on_first_run(app: &tauri::AppHandle) {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .expect("app config dir resolves");
+    let Ok(config_dir) = app.path().app_config_dir() else {
+        eprintln!("sem diretório de configuração: a Pasta não será lembrada");
+        return;
+    };
 
     if config::load_pasta(&config_dir).is_some() {
         return;
     }
 
-    if let Some(pasta) = app.dialog().file().blocking_pick_folder() {
-        let pasta = pasta
-            .into_path()
-            .expect("picked folder has a filesystem path");
-        config::save_pasta(&config_dir, &pasta).expect("saving the Pasta path");
-        let _ = app.autolaunch().enable();
-    }
+    app.dialog().file().pick_folder(move |pasta| {
+        let Some(pasta) = pasta.and_then(|p| p.into_path().ok()) else {
+            return;
+        };
+        if let Err(e) = config::save_pasta(&config_dir, &pasta) {
+            eprintln!("não foi possível gravar a Pasta: {e}");
+        }
+    });
 }
 
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -59,6 +63,11 @@ pub fn run() {
         ))
         .setup(|app| {
             let handle = app.handle().clone();
+            // Idempotente, e fora do primeiro uso: um perfil que já tem Pasta
+            // gravada também precisa estar no autostart.
+            if let Err(e) = handle.autolaunch().enable() {
+                eprintln!("não foi possível registrar no autostart: {e}");
+            }
             ask_pasta_on_first_run(&handle);
             setup_tray(&handle)?;
             Ok(())
