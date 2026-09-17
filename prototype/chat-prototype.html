@@ -1,0 +1,248 @@
+<!doctype html>
+<!--
+  PROTÓTIPO DESCARTÁVEL — SynchroNice
+  Pergunta: como deve ser o chat? Três variantes estruturais em ?variant=A|B|C,
+  largura em ?w=phone|pc. Estado só em memória. Não é código de produção.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>SynchroNice · protótipo</title>
+<style>
+  :root{
+    --bg:#1f1f1f; --bg2:#2a2a2a; --line:#3a3a3a;
+    --card:#faedc8; --card2:#e8ba55; --card3:#e5633a;
+    --ink:#1b1b1b; --ink-dim:#7a6a45; --fg:#eaeaea; --fg-dim:#8a8a8a;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#111;color:var(--fg);
+    font:15px/1.4 system-ui,Segoe UI,Roboto,sans-serif}
+  #frame{position:absolute;inset:0;margin:auto;background:var(--bg);overflow:hidden;
+    display:flex;flex-direction:column}
+  body[data-w="phone"] #frame{width:375px;height:min(812px,100vh);border-radius:24px;
+    box-shadow:0 0 0 8px #000,0 0 40px #0008}
+  body[data-w="pc"] #frame{width:min(1100px,100vw);height:min(720px,100vh);
+    border-radius:8px;box-shadow:0 0 0 1px #444}
+
+  /* ---- comum ---- */
+  .scroll{flex:1;overflow-y:auto;padding:16px;scroll-behavior:smooth}
+  .composer{display:flex;align-items:center;gap:10px;padding:10px 14px;
+    background:var(--bg2);border-top:1px solid var(--line)}
+  .composer input{flex:1;background:transparent;border:0;outline:0;color:var(--fg);
+    font:inherit;padding:8px 4px}
+  .composer input::placeholder{color:var(--fg-dim)}
+  .composer .hint{color:var(--fg-dim);font-size:12px;white-space:nowrap}
+  .composer .send{width:34px;height:34px;border-radius:50%;border:0;background:#333;
+    color:#ddd;cursor:pointer}
+  .empty{color:var(--fg-dim);text-align:center;margin-top:30%;font-size:14px}
+  .empty b{display:block;color:#bbb;margin-bottom:6px;font-weight:600}
+  .drop{outline:3px dashed var(--card2);outline-offset:-8px}
+
+  .item{background:var(--card);color:var(--ink);border-radius:var(--r);
+    padding:10px 12px;position:relative;max-width:100%;word-break:break-word}
+  .item.file{padding:8px}
+  .item img{display:block;max-width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;cursor:grab}
+  .item .fname{display:flex;align-items:center;gap:8px;font-size:14px}
+  .item .fname .ic{width:36px;height:44px;border-radius:6px;background:var(--card2);
+    display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--ink);flex:none}
+  .item .meta{display:flex;gap:8px;align-items:center;justify-content:flex-end;
+    font-size:11px;color:var(--ink-dim);margin-top:6px}
+  .item.pending{opacity:.55}
+  .item.pending .meta::before{content:"";width:9px;height:9px;border-radius:50%;
+    border:2px solid var(--ink-dim);border-top-color:transparent;
+    animation:spin 1s linear infinite}
+  .bar{height:5px;border-radius:3px;background:#0002;overflow:hidden;margin-top:8px}
+  .bar i{display:block;height:100%;width:var(--p,0%);background:var(--ink);
+    transition:width .3s;background-image:linear-gradient(90deg,#0000 0,#fff5 50%,#0000 100%);
+    background-size:60px 100%;animation:shine 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes shine{to{background-position:60px 0}}
+
+  /* ---- A: bolhas esquerda/direita ---- */
+  .vA .scroll{display:flex;flex-direction:column;gap:8px}
+  .vA .item{max-width:72%;align-self:flex-start;border-bottom-left-radius:4px}
+  .vA .item.mine{align-self:flex-end;background:var(--card2);border-bottom-left-radius:var(--r);
+    border-bottom-right-radius:4px}
+  .vA .daysep{align-self:center;font-size:11px;color:var(--fg-dim);margin:6px 0}
+
+  /* ---- B: feed de cartões, mais novo no topo ---- */
+  .vB{flex-direction:column-reverse}
+  .vB .scroll{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+    gap:12px;align-content:start}
+  .vB .item{min-height:120px;display:flex;flex-direction:column}
+  .vB .item .body{flex:1}
+  .vB .item.from-pc{background:var(--card3)}
+  .vB .item .tag{position:absolute;top:8px;right:10px;font-size:10px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-dim)}
+  .vB .composer{border-top:0;border-bottom:1px solid var(--line)}
+
+  /* ---- C: texto de um lado, arquivos do outro ---- */
+  .vC .panes{flex:1;display:flex;min-height:0}
+  .vC .pane{flex:1;display:flex;flex-direction:column;min-width:0}
+  .vC .pane+.pane{border-left:1px solid var(--line)}
+  .vC .pane h2{margin:0;padding:10px 16px;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--fg-dim);border-bottom:1px solid var(--line)}
+  .vC .texts{display:flex;flex-direction:column;gap:6px}
+  .vC .texts .item{align-self:flex-start;max-width:85%}
+  .vC .texts .item.mine{align-self:flex-end;background:var(--card2)}
+  .vC .files{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;align-content:start}
+  .vC .files .item{aspect-ratio:1;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;padding:6px}
+  .vC .files .item img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:var(--r)}
+  .vC .files .item .meta{position:relative;background:#faedc8dd;border-radius:6px;padding:2px 6px;margin:0}
+  .vC .files .item .fname{position:relative}
+  body[data-w="phone"] .vC .panes{flex-direction:column}
+  body[data-w="phone"] .vC .pane+.pane{border-left:0;border-top:1px solid var(--line)}
+
+  /* ---- switcher (não faz parte do design) ---- */
+  #sw{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:6px;
+    align-items:center;background:#fff;color:#000;border-radius:999px;padding:6px 10px;
+    font:12px system-ui;box-shadow:0 4px 20px #000a;z-index:9;user-select:none}
+  #sw button{border:0;background:#eee;border-radius:999px;padding:4px 9px;cursor:pointer;font:inherit}
+  #sw button.on{background:#000;color:#fff}
+  #sw .sep{width:1px;height:16px;background:#ccc}
+</style>
+</head>
+<body>
+<div id="frame"></div>
+
+<div id="sw">
+  <button id="prev">←</button><b id="label"></b><button id="next">→</button>
+  <span class="sep"></span>
+  <button data-w="phone">celular</button><button data-w="pc">PC</button>
+  <span class="sep"></span>
+  <button id="online" class="on">PC online</button>
+  <span class="sep"></span>
+  <button id="fake">simular do celular</button>
+</div>
+
+<script>
+// ---------- estado em memória ----------
+const VARIANTS = {A:'bolhas', B:'feed', C:'texto | arquivos'};
+const q = new URLSearchParams(location.search);
+let variant = VARIANTS[q.get('variant')] ? q.get('variant') : 'A';
+let width = q.get('w') === 'phone' ? 'phone' : 'pc';
+let online = true;
+const items = []; // {id, kind:'text'|'file', from:'phone'|'pc', text, name, size, url, status:'pending'|'sending'|'delivered', progress}
+
+const seed = [
+  {kind:'text', from:'phone', text:'cobrar miguel do áudio da marina'},
+  {kind:'file', from:'phone', name:'IMG_20260916_1043.jpg', size:2.3e6, url:pic('#e5633a')},
+  {kind:'text', from:'pc', text:'https://exemplo.dev/artigo-longo-sobre-nada'},
+  {kind:'file', from:'pc', name:'prova-cana.pdf', size:412e3},
+  {kind:'file', from:'phone', name:'IMG_20260916_1051.jpg', size:1.8e6, url:pic('#e8ba55')},
+];
+seed.forEach(s => items.push({...s, id:Math.random(), status:'delivered', progress:100}));
+
+function pic(color){
+  return 'data:image/svg+xml;utf8,'+encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="${color}"/><circle cx="120" cy="110" r="50" fill="#fff6"/><rect x="40" y="200" width="320" height="60" rx="8" fill="#0003"/></svg>`);
+}
+function fmt(b){ return b>1e9?(b/1e9).toFixed(1)+' GB': b>1e6?(b/1e6).toFixed(1)+' MB': Math.round(b/1e3)+' KB'; }
+function time(){ return new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+
+function add(it){
+  it.id = Math.random(); it.t = time();
+  const peerOnline = it.from==='pc' ? true : online; // do celular pro PC depende do PC estar online
+  it.status = peerOnline ? 'sending' : 'pending';
+  it.progress = 0;
+  items.push(it); render();
+  if (peerOnline) transfer(it);
+}
+function transfer(it){
+  it.status='sending';
+  const big = it.kind==='file' && it.size > 5e6;
+  const steps = big ? 40 : 3;
+  let n=0;
+  const tick=setInterval(()=>{ n++; it.progress=Math.round(n/steps*100);
+    if(n>=steps){clearInterval(tick); it.status='delivered';}
+    render(); }, big?120:80);
+}
+function setOnline(v){
+  online=v; document.getElementById('online').textContent = v?'PC online':'PC offline';
+  document.getElementById('online').classList.toggle('on',v);
+  if (v) items.filter(i=>i.status==='pending').forEach(transfer);
+  render();
+}
+
+// ---------- entradas reais: Enter, drop, Ctrl+V ----------
+function sendText(inp){
+  const t=inp.value.trim(); if(!t) return; inp.value='';
+  add({kind:'text', from: width==='pc'?'pc':'phone', text:t});
+}
+function addFiles(files){
+  for (const f of files){
+    const it={kind:'file', from: width==='pc'?'pc':'phone', name:f.name||'colado.png', size:f.size};
+    if (f.type.startsWith('image/')) it.url=URL.createObjectURL(f);
+    add(it);
+  }
+}
+document.addEventListener('dragover',e=>{e.preventDefault(); frame.classList.add('drop');});
+document.addEventListener('dragleave',()=>frame.classList.remove('drop'));
+document.addEventListener('drop',e=>{e.preventDefault(); frame.classList.remove('drop'); addFiles(e.dataTransfer.files);});
+document.addEventListener('paste',e=>{ if(e.clipboardData.files.length){ e.preventDefault(); addFiles(e.clipboardData.files);} });
+
+// ---------- render ----------
+const frame=document.getElementById('frame');
+function itemHTML(it, extra=''){
+  const me = width==='pc'?'pc':'phone';
+  const cls=`item ${it.kind} from-${it.from} ${it.from===me?'mine':''} ${it.status}`;
+  const meta=`<div class="meta">${it.status==='pending'?'pendente':it.t||''}</div>`;
+  const bar=(it.status==='sending' && it.kind==='file' && it.size>5e6)?`<div class="bar"><i style="--p:${it.progress}%"></i></div>`:'';
+  if(it.kind==='text') return `<div class="${cls}">${extra}<div class="body">${esc(it.text)}</div>${meta}</div>`;
+  const body = it.url ? `<img src="${it.url}" draggable="true" alt="">`
+    : `<div class="fname"><span class="ic">${esc(it.name.split('.').pop().toUpperCase())}</span><span>${esc(it.name)}<br><small>${fmt(it.size)}</small></span></div>`;
+  return `<div class="${cls}" draggable="true">${extra}${body}${bar}${meta}</div>`;
+}
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function composer(){
+  const hint = width==='pc' ? '<span class="hint">Enter envia · arraste ou Ctrl+V</span>' : '';
+  return `<div class="composer"><input id="inp" placeholder="${width==='pc'?'texto para o celular…':'texto para o PC…'}" autocomplete="off">${hint}<button class="send">➤</button></div>`;
+}
+const EMPTY=`<div class="empty"><b>Nada aqui ainda</b>Compartilhe algo do celular, ou arraste um arquivo.</div>`;
+
+function render(){
+  document.body.dataset.w=width;
+  frame.className='v'+variant;
+  let html='';
+  if(variant==='A'){
+    html=`<div class="scroll">${items.length?`<span class="daysep">hoje</span>`+items.map(i=>itemHTML(i)).join(''):EMPTY}</div>${composer()}`;
+  } else if(variant==='B'){
+    html=`<div class="scroll">${items.length?[...items].reverse().map(i=>itemHTML(i,`<span class="tag">${i.from==='pc'?'PC':'celular'}</span>`)).join(''):EMPTY}</div>${composer()}`;
+  } else {
+    const t=items.filter(i=>i.kind==='text'), f=items.filter(i=>i.kind==='file');
+    html=`<div class="panes">
+      <div class="pane"><h2>texto</h2><div class="scroll texts">${t.map(i=>itemHTML(i)).join('')||'<div class="empty">—</div>'}</div></div>
+      <div class="pane"><h2>arquivos</h2><div class="scroll files">${f.map(i=>itemHTML(i)).join('')||'<div class="empty">—</div>'}</div></div>
+    </div>${composer()}`;
+  }
+  frame.innerHTML=html;
+  const inp=frame.querySelector('#inp');
+  inp.onkeydown=e=>{ if(e.key==='Enter') sendText(inp); };
+  frame.querySelector('.send').onclick=()=>sendText(inp);
+  if(variant!=='B') frame.querySelectorAll('.scroll').forEach(s=>s.scrollTop=1e9);
+  label.textContent=`${variant} (${VARIANTS[variant]})`;
+  document.querySelectorAll('#sw [data-w]').forEach(b=>b.classList.toggle('on',b.dataset.w===width));
+  history.replaceState(null,'',`?variant=${variant}&w=${width}`);
+}
+
+// ---------- switcher ----------
+const keys=Object.keys(VARIANTS);
+function cycle(d){ variant=keys[(keys.indexOf(variant)+d+keys.length)%keys.length]; render(); }
+prev.onclick=()=>cycle(-1); next.onclick=()=>cycle(1);
+document.querySelectorAll('#sw [data-w]').forEach(b=>b.onclick=()=>{width=b.dataset.w;render();});
+document.getElementById('online').onclick=()=>setOnline(!online);
+document.getElementById('fake').onclick=()=>{
+  // simula "Compartilhar" no Android: 3 fotos viram 3 Itens, uma delas grande (vídeo)
+  add({kind:'file',from:'phone',name:'IMG_1101.jpg',size:3.1e6,url:pic('#c9a36b')});
+  setTimeout(()=>add({kind:'file',from:'phone',name:'VID_1102.mp4',size:1.9e9}),200);
+  setTimeout(()=>add({kind:'text',from:'phone',text:'olha isso'}),400);
+};
+document.addEventListener('keydown',e=>{
+  if(/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if(e.key==='ArrowLeft')cycle(-1); if(e.key==='ArrowRight')cycle(1);
+});
+render();
+</script>
+</body>
+</html>
