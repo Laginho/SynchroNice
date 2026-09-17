@@ -1,5 +1,5 @@
 # SYN-001: Casca do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: human
@@ -44,3 +44,11 @@ Critérios 1 a 6: manual, descrever o que foi visto no Resolution.
 - `pc/src-tauri/tests/config.rs`: gravar e reler o caminho da Pasta em um diretório temporário; ausência de config devolve "não escolhida". Vermelho porque o módulo de configuração não existe.
 
 ## Comments
+
+- 2026-09-17 (stage 2): critérios 1–6 são manuais e dependem de uma janela
+  nativa (diálogo de Pasta, bandeja, autostart) que esta sessão não tem como
+  observar — sem ferramenta de automação de GUI nativa disponível, e rodar
+  `cargo tauri dev` dispara de fato o diálogo nativo na tela. Não tentei
+  rodar, para não abrir uma janela sem avisar. `cargo build`, `cargo test` e
+  o gate completo passam (critérios 7 e 8, verificados). Falta ao humano
+  rodar `cargo tauri dev` e descrever o que viu para 1–6.
