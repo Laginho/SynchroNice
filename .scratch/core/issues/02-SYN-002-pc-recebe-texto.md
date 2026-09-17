@@ -39,3 +39,11 @@ Critérios 1, 4 e 6: manual.
 - `pc/src-tauri/tests/server.rs`: sobe o servidor em porta aleatória com token conhecido; POST de texto com token devolve sucesso e a lista de Itens contém o texto; POST sem token devolve 401 e a lista fica vazia; dois POSTs preservam ordem. Vermelho porque o servidor não existe.
 
 ## Comments
+
+- 2026-09-17 (revisão de SYN-001): o passo `tsc --noEmit` do gate hoje não
+  checa nada. `pc/tsconfig.json` tem `include: ["ui"]` e `pc/ui/` só contém
+  `styles.css` e `vite-env.d.ts` — zero TypeScript, e `pc/index.html` não tem
+  `<script>`. O critério 7 de SYN-001 está cumprido na letra, mas o passo só
+  passa a valer quando este ticket adicionar o primeiro `.ts` e o `<script>`
+  que o carrega. Vale conferir que o gate fica vermelho com um erro de tipo de
+  propósito antes de confiar nele.
