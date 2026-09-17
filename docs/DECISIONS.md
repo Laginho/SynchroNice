@@ -16,3 +16,10 @@
 - 2026-09-16 — **Veredito do protótipo: variante A (bolhas).** Lados relativos,
   como numa conversa: "eu" à direita, "o outro" à esquerda, em ambos os
   aparelhos. Variantes B e C descartadas. Protótipo atualizado para refletir.
+- 2026-09-17 — **Gate do repositório: `gate.ps1` na raiz (SYN-001).** Roda
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` e
+  `cargo test` em `pc/src-tauri`, e `tsc --noEmit` em `pc/ui` (via
+  `pc/tsconfig.json`); roda `./gradlew check` em `android/` quando esse
+  diretório existir. Sai com código diferente de zero se qualquer passo
+  falhar. Skills e sessões de agente devem chamá-lo pelo caminho do binding
+  em `AGENTS.md`, nunca reimplementar os passos.

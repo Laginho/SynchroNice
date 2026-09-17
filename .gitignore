@@ -1,0 +1,11 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Android (build/, .gradle/ live inside android/ once it exists)
+android/build/
+android/.gradle/
+android/*/build/
