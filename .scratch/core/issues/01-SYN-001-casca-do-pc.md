@@ -1,5 +1,5 @@
 # SYN-001: Casca do PC
-Stage: to-merge
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: human
@@ -148,3 +148,10 @@ Critérios 7 e 8: verificados. Critérios 1 a 6: seus. Rode `cargo tauri dev` e
 confira janela, diálogo da Pasta, X escondendo na bandeja, "Abrir"/"Sair", e o
 autostart; o critério 6 (exe < 20 MB, ocioso < 80 MB) precisa de
 `cargo tauri build`.
+
+**Fechamento (2026-09-17).** Bruno rodou `npx tauri dev` e confirmou os
+critérios 1 a 5 (janela com estado vazio, diálogo da Pasta só na primeira
+abertura, X escondendo na bandeja, "Abrir"/"Sair", autostart registrado).
+Critério 6: `npx tauri build --no-bundle` gerou `pc.exe` com 4,4 MB
+(4.584.448 bytes). Autostart incondicional e composer `disabled` aceitos como
+estão. PR #1 mergeado em `main` (`2787fcd`).
