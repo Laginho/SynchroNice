@@ -21,7 +21,7 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
 
 - Gate: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` (criado por SYN-001; roda typecheck, lint e testes de tudo que existir em `pc/` e `android/`)
 - Base branch: `main`
-- Models: stage 1 fable, stage 2 opus, stage 3 opus
+- Models: stage 1 fable, stage 2 sonnet, stage 3 opus
 
 ## Layout
 
