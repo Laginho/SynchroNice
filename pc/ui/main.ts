@@ -268,6 +268,12 @@ function renderEnviado(item: Enviado): void {
     return;
   }
 
+  // Confirmação de um Item que esta Sessão nunca desenhou: ele foi enfileirado
+  // antes de sair pela bandeja e o celular só o buscou agora. A fila sobrevive
+  // ao reinício, a Sessão não — desenhar a bolha aqui encheria um chat que
+  // precisa abrir vazio.
+  if (item.entregue) return;
+
   empty.hidden = true;
   const bubble = item.kind === "text" ? renderTextoEnviado(item) : renderArquivoEnviado(item);
   enviadas.set(item.id, bubble);
@@ -357,10 +363,11 @@ async function main(): Promise<void> {
   await listen<Enviado>("enviado", (event) => renderEnviado(event.payload));
   await listen<boolean>("presenca", (event) => atualizarPresenca(event.payload));
 
+  // Só os recebidos da Sessão: a lista de Itens é em memória e morre com o
+  // processo. A fila de saída é persistida e sobrevive, mas não é Sessão —
+  // sair pela bandeja e reabrir tem que mostrar um chat vazio, com os
+  // Pendentes ainda na fila, esperando o celular.
   for (const item of await invoke<Item[]>("list_items")) renderRecebido(item);
-  for (const item of await invoke<(EnviadoTexto | EnviadoArquivo)[]>("list_pending")) {
-    renderEnviado({ ...item, entregue: false });
-  }
 
   ligarComposer();
   ligarDrop();

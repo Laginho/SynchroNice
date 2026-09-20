@@ -70,12 +70,6 @@ fn read_file_bytes(app: tauri::AppHandle, name: String) -> Result<Vec<u8>, Strin
     std::fs::read(pasta.join(server::sanitize_file_name(&name))).map_err(|e| e.to_string())
 }
 
-/// A fila de saída atual, para a janela se alinhar ao abrir (ou reabrir).
-#[tauri::command]
-fn list_pending(outbox: State<'_, Outbox>) -> Vec<OutItem> {
-    outbox.pending()
-}
-
 /// Enter no composer: enfileira o texto para o celular.
 #[tauri::command]
 fn send_text(outbox: State<'_, Outbox>, text: String) -> Result<(), String> {
@@ -221,7 +215,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_items,
             read_file_bytes,
-            list_pending,
             send_text,
             send_files,
             send_bytes,

@@ -1,5 +1,5 @@
 # SYN-004: PC envia texto e arquivos
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
