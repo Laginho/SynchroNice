@@ -395,8 +395,9 @@ async fn get_outbox_file(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     match state.outbox.file_bytes(id) {
-        Some(bytes) => (StatusCode::OK, bytes).into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Ok(bytes) => (StatusCode::OK, bytes).into_response(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 

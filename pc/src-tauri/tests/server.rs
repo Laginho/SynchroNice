@@ -523,7 +523,7 @@ fn fila_de_saida_sobrevive_a_recriar_o_servidor_do_mesmo_diretorio() {
         .find(|i| matches!(i.body, OutBody::File { .. }))
         .expect("item de arquivo entre os recarregados");
     assert_eq!(
-        recriada.file_bytes(item_arquivo.id),
+        recriada.file_bytes(item_arquivo.id).ok(),
         Some(b"conteudo persistido".to_vec()),
         "bytes do arquivo sobrevivem à recriação, não só os metadados"
     );
