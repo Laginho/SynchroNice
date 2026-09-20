@@ -1,5 +1,5 @@
 # SYN-007: Casca do Android
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-005
 Review: agent
@@ -225,3 +225,76 @@ arrisca o verde por nada).
   `gradle check`); `protocol-client` com 7/7 (4 antigos + 3 novos).
   Vermelho confirmado antes do código: erro de compilação por
   `ProtocolRejectedException` não existir ainda (`5abf269`).
+
+#### Resolution (2026-09-20)
+
+Verdict: Approve.
+
+**Critério 7 ✅** — `gate.ps1` roda os testes JVM do módulo e falha com eles.
+Gate completo verde nesta árvore: `cargo fmt --check`, `cargo clippy`,
+`cargo test` 18/18 no `server` + 4 + 2 + 0 doc-tests, `tsc --noEmit` limpo,
+`gradle check` BUILD SUCCESSFUL com `protocol-client` 7/7
+(`build/test-results/test/*.xml`: `tests="7" failures="0" errors="0"`).
+Critérios 1–6 seguem Adiados por decisão registrada acima (sem Android SDK
+nesta máquina) — não caíram, não foram entregues.
+
+**Os três ❌ da revisão anterior: fechados, e o vermelho é real.** Não
+aceitei o "erro de compilação" como prova (ele deixa vermelho todo mundo,
+inclusive quem já passava). Refiz o vermelho por comportamento: worktree
+descartável em `445ea64` (código pré-correção), o arquivo de teste de HEAD
+por cima e um `ProtocolRejectedException` stub só para compilar. Resultado —
+`7 tests completed, 3 failed`, e os três são exatamente os novos:
+
+    ProtocolClientTest > listen decodifica os escapes b e f() FAILED  (:178)
+    ProtocolClientTest > resposta nao-201 nao vira Pendente() FAILED  (:159)
+    ProtocolClientTest > sendText drena o Pendente em ordem ... FAILED (:142)
+
+Os 4 testes antigos passaram nesse mesmo estado, então nenhum dos três é
+vermelho por tabela. A separação teste/código também confere:
+`5abf269` toca só `ProtocolClientTest.kt`, `132e811` só `ProtocolClient.kt`
+e `FlatJson.kt`.
+
+Li as três correções e elas atacam a causa, não o sintoma: `sendText` drena
+antes de tentar a rede e, se a fila não esvaziar, entra no fim dela (nunca
+reordena); `trySendText` devolve `SendOutcome` e só `IOException` vira
+Pendente, qualquer HTTP não-201 vira `ProtocolRejectedException`; `FlatJson`
+decodifica `\b` e `\f`.
+
+**Consertado pelo revisor** (pequeno, dentro dos Primary files, sem teste
+novo — commit `5c2d7f1`): `listen()` só chamava `disconnect()` no caminho
+feliz e no não-200; uma falha lendo o corpo saía sem fechar. Virou
+`try { ... } finally { disconnect() }`, o mesmo tratamento que o stage 2 deu
+a `trySendText`. Gate rodado de novo depois da mudança, verde.
+
+**Achados que não reabrem o ticket** (nenhum critério cai por eles, e os dois
+primeiros são escopo de outro dono, já anotados lá):
+
+1. Uma recusa no meio da fila trava a fila. `retryPending()` faz `peek()` e,
+   num `Rejected`, lança com o Item ainda na cabeça — a partir daí todo
+   `sendText` lança e nada mais é entregue, e o texto novo dessa chamada é
+   perdido (não vai pra fila). Cenário real: o Par rotaciona o token
+   (SYN-005) enquanto há Pendente, o PC volta e responde 401. A política
+   (descartar? re-parear? marcar o Item como falho?) é da fila de Pendentes
+   em disco, que é **SYN-008** — anotado lá em `## Comments`.
+2. `ProtocolClient` não é thread-safe apesar do `ConcurrentLinkedQueue`:
+   `sendText` faz drenar-então-enviar sem exclusão, então duas threads podem
+   intercalar e furar a ordem. Hoje não tem chamador concorrente; o serviço
+   em primeiro plano de **SYN-008** é quem cria um — anotado lá também.
+3. `gradle check` falhou uma vez em quatro rodadas *do lado do Rust* nesta
+   revisão (`cargo test`: 17 passed, 1 failed no `--test server`; não
+   capturei o nome), e o stage 2 relatou o mesmo com
+   `dois_envios_concorrentes_do_mesmo_nome_preservam_ambos`. Nada de `pc/`
+   mudou neste ticket. Teste instável no gate é risco de todo sessão futura,
+   então virou **CLEAN-001**.
+
+Ruído confirmado como ruído: o FF literal (byte 0x0C) dentro do char literal
+em `FlatJson.kt:43` e da string esperada no teste — feio, mas se algum
+editor o comer o resultado é erro de compilação ou teste vermelho, nunca
+verde silencioso; e trocar por `''` pelas ferramentas de agente é uma
+armadilha (o `\u` é decodificado antes de chegar ao arquivo — três
+tentativas aqui, todas escreveram o FF de volta). Fica como está.
+
+Débito humano do run segue o já registrado: o app Android de fato
+(critérios 1–6) não existe nem foi verificado à mão.
+
+Merge: `6cb7b18` na branch de sessão `sweatshop/2026-09-19-2324`.

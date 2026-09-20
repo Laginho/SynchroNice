@@ -39,3 +39,21 @@ Critérios 1 a 5: manual, com PC real.
 - `android/.../test/ProtocolClientTest.kt`: envio de arquivo em stream emite progresso crescente e termina em 100; falha no meio deixa o Item Pendente; fila gravada em disco é relida ao recriar o cliente e drenada em ordem. Vermelho porque envio de arquivo e fila não existem.
 
 ## Comments
+
+- 2026-09-20 (revisão de SYN-007, para quem for implementar a fila em disco):
+  hoje uma recusa do PC trava a fila. `ProtocolClient.retryPending()` faz
+  `peek()` e, se a resposta não for 201, lança `ProtocolRejectedException`
+  com o Item ainda na cabeça da fila — daí em diante todo `sendText` lança
+  antes de chegar na rede, nada mais é entregue, e o texto daquela chamada
+  se perde (não entra na fila). Cenário real: o Par rotaciona o token
+  (SYN-005) enquanto há Pendente; o PC volta e responde 401. O critério 5
+  ("ao voltar para a rede do PC eles são entregues sem ação do usuário")
+  cobre o caso de indisponibilidade, não o de recusa — decidir aqui o que
+  acontece com um Item recusado (descartar, marcar como falho na bolha,
+  pedir re-pareamento) e escrever o teste junto com a fila em disco.
+- 2026-09-20 (revisão de SYN-007): `ProtocolClient` não é thread-safe. O
+  `ConcurrentLinkedQueue` protege a fila, mas `sendText` drena e então
+  envia sem exclusão nenhuma, então duas threads intercalando furam a ordem
+  que o próprio SYN-007 consertou. Sem chamador concorrente hoje; o serviço
+  em primeiro plano deste ticket é o primeiro. Vale um lock em volta do par
+  drenar/enviar quando o serviço entrar.
