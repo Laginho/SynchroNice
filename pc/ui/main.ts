@@ -173,6 +173,11 @@ function marcarArquivoSumido(bubble: HTMLElement): void {
   if (meta) meta.textContent = "o arquivo não está mais na Pasta";
 }
 
+/** Ligada enquanto um drag saído de uma bolha está no ar (SYN-006). Soltar
+ * esse drag em cima da própria janela é um drop como outro qualquer, e sem
+ * isto `ligarDrop` mandaria de volta ao celular o arquivo que veio dele. */
+let arrastandoDaBolha = false;
+
 /** O arquivo está na Pasta de novo (voltou, ou nunca faltou): a bolha volta
  * como estava, senão ela arrastaria dizendo que o arquivo sumiu. */
 function desmarcarArquivoSumido(bubble: HTMLElement): void {
@@ -204,6 +209,7 @@ async function iniciarDrag(nome: string, bubble: HTMLElement): Promise<void> {
   // O plugin exige o canal mesmo sem ninguém escutando: o resultado do drop
   // acontece fora da janela e a UI não tem o que fazer com ele.
   const onEvent = new Channel<{ result: "Dropped" | "Cancel"; cursorPos: { x: number; y: number } }>();
+  arrastandoDaBolha = true;
   try {
     await invoke("plugin:drag|start_drag", {
       item: [caminho],
@@ -215,6 +221,13 @@ async function iniciarDrag(nome: string, bubble: HTMLElement): Promise<void> {
     // Um drag que não começou não diz nada sobre o arquivo: a bolha fica como
     // está, em vez de mentir que ele sumiu.
     console.error(`o drag de ${nome} não começou: ${e}`);
+  } finally {
+    // O drop acontece dentro do laço nativo, antes de `start_drag` responder;
+    // o `setTimeout` só dá folga para o evento do drop, que vem por outro
+    // caminho, chegar antes da bandeira baixar.
+    setTimeout(() => {
+      arrastandoDaBolha = false;
+    }, 0);
   }
 }
 
@@ -434,6 +447,9 @@ function ligarComposer(): void {
 function ligarDrop(): void {
   void getCurrentWebview().onDragDropEvent((event) => {
     if (event.payload.type !== "drop") return;
+    // Arquivo que saiu de uma bolha e foi solto de volta na janela: quem
+    // desistiu do drag não pediu para reenviar ao celular (SYN-006).
+    if (arrastandoDaBolha) return;
     invoke("send_files", { paths: event.payload.paths }).catch((e) => {
       console.error(`não foi possível enfileirar os arquivos soltos: ${e}`);
     });
