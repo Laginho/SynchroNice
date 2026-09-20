@@ -8,8 +8,12 @@ const TOKEN: &str = "segredo-de-teste";
 /// Sobe o servidor em porta aleatória com token conhecido.
 fn sobe() -> (String, Items) {
     let items = Items::new();
-    let running = server::spawn("127.0.0.1:0".parse().unwrap(), TOKEN.to_string(), items.clone())
-        .expect("servidor sobe em porta aleatória");
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        items.clone(),
+    )
+    .expect("servidor sobe em porta aleatória");
     (format!("http://{}", running.addr), items)
 }
 
@@ -27,7 +31,10 @@ fn post_texto(base: &str, token: Option<&str>, texto: &str) -> u16 {
     if let Some(t) = token {
         req = req.header("Authorization", format!("Bearer {t}"));
     }
-    req.send(texto).expect("conexão com o servidor").status().as_u16()
+    req.send(texto)
+        .expect("conexão com o servidor")
+        .status()
+        .as_u16()
 }
 
 fn textos(items: &Items) -> Vec<String> {
