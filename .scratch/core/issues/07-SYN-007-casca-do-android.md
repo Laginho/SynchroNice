@@ -1,5 +1,5 @@
 # SYN-007: Casca do Android
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-005
 Review: agent
@@ -182,3 +182,46 @@ o critério de fallback testável, e SYN-008 dá a implementação de disco);
 `build.gradle.kts` declarando `kotlin("test")` e `kotlin("test-junit5")` (o
 segundo é redundante sob `useJUnitPlatform()`, mas mexer no build por estética
 arrisca o verde por nada).
+
+- 2026-09-20 (stage 2, reabertura — notas para o revisor): os três ❌ da
+  revisão anterior, um por vez, teste próprio antes do código (commits
+  `5abf269` teste-only vermelho, `132e811` só código):
+
+  1. **Fila furada**: `sendText` agora chama `retryPending()` antes de
+     tentar a rede. Se a fila não esvaziar (PC ainda fora), o texto novo
+     entra no fim dela sem tocar a rede — nunca reordena. Se esvaziar,
+     tenta mandar o texto direto. Teste novo: A pendente, servidor sobe,
+     `sendText("B")` sem chamar `retryPending()` à parte; servidor viu A
+     antes de B.
+  2. **Não-201 vira erro, não Pendente**: `trySendText` virou
+     `SendOutcome` (`Success` / `Unreachable` / `Rejected(code)`) em vez de
+     `Boolean` — só `IOException` é `Unreachable` (aí sim vai pra fila);
+     qualquer resposta HTTP que não seja 201 é `Rejected` e
+     `sendText`/`retryPending` relançam como `ProtocolRejectedException`
+     (novo, neste arquivo). Teste novo: fake server responde 401 direto,
+     `sendText` lança `ProtocolRejectedException`, `hasPending()` fica
+     falso.
+  3. **`\b`/`\f`**: `FlatJson.parseJsonString` tratava só `n`/`t`/`r`/`u` e
+     caía no `else -> sb.append(escaped)` pros demais, produzindo a letra
+     literal. Adicionei os dois casos (`\b` → 0x08, `\f` → 0x0C). Teste
+     novo: `/listen` com esses dois escapes no campo `text`, via
+     `client(port).listen()` — não testei `parseFlatJsonObject` isolado
+     porque o seam que a revisão pediu é o público (`listen()`), igual aos
+     testes que já existiam.
+
+  As duas notas "vale endereçar" também entraram, sem teste próprio
+  (concordo com a revisão — nenhuma delas muda comportamento observável
+  pelos testes existentes, só robustez): `trySendText` agora sempre chama
+  `disconnect()` num `finally` (antes vazava no caminho de
+  `IOException`, que é o cenário mais comum — PC fora do ar); `listen()`
+  agora olha `responseCode` e lança `ProtocolRejectedException` em vez de
+  contar com o `IOException` acidental do `inputStream` num 401.
+
+  `assertFailsWith<ProtocolRejectedException>` (`kotlin.test`) precisou de
+  um import novo no arquivo de teste; nada mais mudou lá fora dos três
+  testes novos.
+
+  Gate completo verde (`fmt`, `clippy`, `cargo test` 24/24, `tsc`,
+  `gradle check`); `protocol-client` com 7/7 (4 antigos + 3 novos).
+  Vermelho confirmado antes do código: erro de compilação por
+  `ProtocolRejectedException` não existir ainda (`5abf269`).
