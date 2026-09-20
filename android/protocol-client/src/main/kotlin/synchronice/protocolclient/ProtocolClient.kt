@@ -72,11 +72,17 @@ class ProtocolClient(
 
     /**
      * Tenta reenviar os Itens Pendentes, na ordem em que ficaram Pendentes;
-     * para no primeiro que ainda falha, para nunca reordenar a fila.
+     * para no primeiro que ainda falha, para nunca reordenar a fila. Um
+     * arquivo Pendente cujo payload sumiu é descartado em vez de travar a
+     * fila para sempre.
      */
     fun retryPending() {
         while (true) {
             val next = pending.firstOrNull() ?: return
+            if (next is PendingItem.PendingFile && !File(next.path).exists()) {
+                dequeueFirst()
+                continue
+            }
             val outcome = when (next) {
                 is PendingItem.PendingText -> trySendText(next.text)
                 is PendingItem.PendingFile -> trySendFile(File(next.path), next.name) {}
@@ -90,13 +96,12 @@ class ProtocolClient(
     }
 
     private fun enqueue(item: PendingItem) {
-        pending.add(item)
-        queueStore.save(pending)
+        pending.add(queueStore.enqueue(item))
     }
 
     private fun dequeueFirst() {
         pending.removeAt(0)
-        queueStore.save(pending)
+        queueStore.dequeueFirst()
     }
 
     private fun trySendText(text: String): SendOutcome {
