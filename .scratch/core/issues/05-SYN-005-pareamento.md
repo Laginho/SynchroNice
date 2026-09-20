@@ -1,5 +1,5 @@
 # SYN-005: Pareamento por QR e anúncio na rede
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -86,3 +86,52 @@ Critérios 1, 2 e 3 (parte visual): manual.
   obrigatório antes de `Stage: to-review`; `-TestsOnly` é só para a prova
   red-before-green. `AGENTS.md` ("Bindings do fluxo") já diz isso. Nada
   pendente das tentativas anteriores: driver reverteu tudo, sem branch órfã.
+
+- 2026-09-20 (stage 2, notas para o revisor): **Par, QR e mDNS
+  implementados**, gate completo verde (fmt, clippy, 22/22 testes — 4 em
+  `config.rs`, 18 em `server.rs` — e `tsc --noEmit`). Sessão interativa, não
+  o driver; `cargo` direto seguiu negado mesmo aqui, então usei o mesmo
+  runner do binding (`gate.ps1 -TestsOnly` para o vermelho, gate completo
+  antes de fechar).
+
+  `par::Par` (novo módulo) é a alça viva: nome de instância + token, criados
+  uma vez por `Par::load_or_create` e gravados em `config.rs` (dois campos
+  novos em `ConfigFile`). `server::TokenCell` é o que deixa a rotação valer
+  sem reiniciar o servidor — aceita tanto o `String` fixo que os 15 testes
+  antigos já passavam para `server::spawn` (nenhum deles mudou) quanto um
+  `Par`, compartilhando a mesma célula (`Arc<Mutex<String>>`); `authorized()`
+  lê sempre o valor atual. Os 3 testes do "Tests stage 2 writes" viraram 3
+  funções em `tests/server.rs` (+ um `sobe_com_par` ao lado de `sobe()`),
+  commit `test:` isolado, vermelho por `pc_lib::par` não existir — confirmado
+  antes de escrever qualquer código.
+
+  mDNS (`anuncio::Anuncio`, crate `mdns-sd`) registra `_synchronice._tcp` com
+  o nome de instância do Par e endereço auto-detectado; QR (`qr::par_svg`,
+  crate `qrcode`, feature `svg`) serializa `{instance_name, port, token}`
+  como JSON — formato meu, não ditado pelo ticket, escolhido por ser
+  decodificável sem ambiguidade pelo Android quando SYN-007 existir. Tela de
+  QR (`pc/index.html`, `main.ts`) troca de lugar com o chat: aparece sozinha
+  se `estado_par_inicial` disser que o Par não existia antes desta abertura,
+  ou sob demanda pelo botão ⟳ no composer (`parear_de_novo`, rotaciona e
+  devolve o SVG novo); some quando a presença fica online — presença só
+  acontece com token válido, então é o sinal de que o pareamento vingou.
+
+  **Não implementado, de propósito:** o achado da revisão de SYN-002 (guard
+  de instância única, tela de "servidor não está no ar") segue só em
+  `## Comments`, nunca dobrado no corpo do ticket — nem em Primary files nem
+  em critério numerado. Por regra do loop, comentário não dobrado é nota, não
+  requisito; não tratei como escopo deste ticket. Se for para entrar, precisa
+  virar critério + Primary files (aqui ou em ticket próprio) antes de um
+  stage 2 pegar.
+
+  **Manual, como o próprio ticket já marca:** critérios 1, 2 e 3 (parte
+  visual — QR aparece, `dns-sd -B` enxerga o serviço, novo QR depois de
+  parear de novo). Não tenho como abrir o app Windows nem rodar `dns-sd`
+  nesta sessão; o gate verde é a garantia que dá para dar de dentro daqui.
+  Critério 4 (sobrevive a reiniciar) e 5 (nome sem informação pessoal) estão
+  cobertos: 4 por `recriar_o_par_do_mesmo_diretorio_devolve_o_mesmo`, 5 por
+  construção (`synchronice-<8 hex aleatórios>`, sem hostname nem usuário do
+  Windows).
+
+  Débito humano: critérios 1, 2 e 3 (parte visual) — abrir o app, escanear o
+  QR de verdade e rodar `dns-sd -B _synchronice._tcp` na mesma rede.
