@@ -1,5 +1,5 @@
 # SYN-005: Pareamento por QR e anúncio na rede
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -135,3 +135,91 @@ Critérios 1, 2 e 3 (parte visual): manual.
 
   Débito humano: critérios 1, 2 e 3 (parte visual) — abrir o app, escanear o
   QR de verdade e rodar `dns-sd -B _synchronice._tcp` na mesma rede.
+
+#### Resolution (2026-09-20)
+
+Verdict: Needs your call: o QR nunca apareceria na janela (o `hidden` das duas
+telas não valia nada) — corrigi, mas é a terceira coisa seguida que só a mão
+humana confirma, e a spec pede descartar os Pendentes ao parear de novo, o que
+nenhum critério deste ticket cobre.
+
+**Achados corrigidos aqui** (pequenos: dentro dos Primary files, sem teste
+novo — interface está fora do teste automático por decisão da spec), commit
+`75c308d`:
+
+1. ❗ **`hidden` não valia nada nas duas telas** (`pc/ui/styles.css`).
+   `#frame` e `#qr-screen` passaram a nascer com o atributo `hidden`, mas os
+   dois têm `display:flex` vindo do autor, que vence o
+   `[hidden]{display:none}` da folha do navegador. As duas telas ficariam no
+   ar ao mesmo tempo, sobrepostas (`position:absolute; inset:0` nas duas), com
+   o `#frame` pintando por cima por vir depois no DOM: **o QR do primeiro uso
+   nunca apareceria, e o botão ⟳ rotacionaria o token sem mostrar nada** —
+   critérios 1 e 3 (parte visual) falhariam em silêncio. Corrigido com
+   `[hidden]{display:none!important}`. Nenhum portão automático pega isto: o
+   gate não abre a janela e o `tsc` não olha CSS.
+2. **Janela em branco quando o servidor não sobe** (`pc/ui/main.ts`).
+   `estado_par_inicial` era esperado sem `catch`; com o servidor fora do ar o
+   `Par` nunca é gerenciado, o comando falha, `main()` aborta antes de
+   `ligarComposer/ligarDrop/ligarColar/ligarParear` e — agora que as duas
+   telas nascem `hidden` — a janela fica **em branco**, pior que o chat vazio
+   de antes. É exatamente o modo de falha que o comentário da revisão de
+   SYN-002 já apontava. Agora cai no chat quando o comando falha.
+3. **Contrato do pareamento não documentado** (`pc/src-tauri/src/server.rs`).
+   ADR-0001: "o protocolo entre os lados precisa ser documentado, pois ninguém
+   compila os dois de um único fonte". O formato do QR
+   (`{"instance_name","port","token"}`) e os nomes do mDNS
+   (`_synchronice._tcp.local.`, host `<instance_name>.local.`) são contrato
+   com o Android e só existiam no código e numa nota do stage 2. Documentados
+   no mesmo cabeçalho onde SYN-002/003/004 documentaram os seus.
+
+**Achados não corrigidos** (fora dos critérios deste ticket; stage 1 decide se
+viram critério aqui ou ticket próprio):
+
+4. **Pendentes não são descartados ao parear de novo.** A spec, em "Um Par":
+   "Parear de novo gera token novo e invalida o anterior. **A fila de
+   Pendentes é descartada junto: nada destinado ao Par antigo vai para o
+   novo.**" `Par::rotate` troca só o token; o `Outbox` não tem como ser
+   esvaziado e ninguém tenta. Na prática, o que estava na fila para o celular
+   antigo drena para o novo assim que ele conectar. Precisa de teste novo e de
+   uma decisão (descartar só os Pendentes, ou também o arquivo copiado na
+   pasta interna?), então não é conserto de revisão.
+5. **O QR só aparece na primeiríssima abertura.** `mostrar_qr` é
+   `!config::par_ja_existe`, e `Par::load_or_create` grava o token na mesma
+   abertura — quem abrir o app e não escanear vê o chat em todas as aberturas
+   seguintes, sem QR. Pelo texto do critério 1 ("sem Par gravado") está
+   cumprido, e o botão ⟳ é a saída; pelo glossário, porém, o Par é o *vínculo*
+   com o celular, e um token que o PC cunhou para si não é vínculo. Um
+   `pareado: bool` gravado quando o celular autentica pela primeira vez
+   resolveria — critério novo, não conserto.
+6. **`⟳` com o celular fora da rede prende o usuário na tela de QR**: só um
+   evento de presença volta para o chat. Falta um caminho de volta.
+7. **Glossário desatualizado** (`CONTEXT.md`, fora dos Primary files): o verbete
+   **Par** não menciona o nome de instância, que agora é parte persistida e
+   visível dele.
+8. **Cheiros, não defeitos** (julgamento, nada bloqueante): `sobe_com_par`
+   repete `sobe()` linha a linha em `tests/server.rs`; `qr::par_svg(par…)`
+   aparece idêntico em `estado_par_inicial` e `parear_de_novo` (cabia um
+   `Par::qr()`); `ParJaExistia` + `config::par_ja_existe` lê `config.json` só
+   para espiar o token um instante antes de `Par::load_or_create` lê-lo de
+   novo; `#faedc8` está escrito em `qr.rs` e como `--card` no CSS.
+
+**Critérios.** 1 ✅ (depois do achado 1; parte visual por conferir à mão),
+2 ✅ (por construção, `anuncio.rs` registra `_synchronice._tcp` com o nome do
+Par; por conferir à mão), 3 ✅ (`rotacionar_troca_o_token_e_o_servidor_recusa_o_antigo_e_aceita_o_novo`
+prova a recusa imediata; a `TokenCell` compartilha o `Arc` do `Par`, então vale
+em produção, não só no teste), 4 ✅
+(`recriar_o_par_do_mesmo_diretorio_devolve_o_mesmo`), 5 ✅ (`synchronice-<8
+hex>`, sem hostname nem usuário do Windows).
+
+**Vermelho-verde.** Commit de teste isolado `e540b9d` (só
+`pc/src-tauri/tests/server.rs`), vermelho porque `pc_lib::par` não existia;
+código em `b955bbf` sem tocar em teste. Confirmado pelo `diff --stat` dos dois
+commits.
+
+**Gate** (`powershell -ExecutionPolicy Bypass -File .\gate.ps1`), rodado antes
+e depois dos consertos da revisão: `gate: passou` — fmt, clippy, 22 testes
+(4 em `config.rs`, 18 em `server.rs`, 0 doc-tests) e `tsc --noEmit`.
+
+Débito humano: abrir o app e confirmar que a tela de QR aparece mesmo (achado
+1 foi corrigido às cegas, sem rodar a janela), que ⟳ mostra um QR diferente, e
+rodar `dns-sd -B _synchronice._tcp` na mesma rede para ver o serviço.
