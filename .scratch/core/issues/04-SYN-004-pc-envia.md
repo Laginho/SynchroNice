@@ -1,5 +1,5 @@
 # SYN-004: PC envia texto e arquivos
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -84,3 +84,18 @@ Critérios 3, 4, 5, 6 e 8: manual.
 - 2026-09-20 Attempt 1 failed: exit 0. Log tail: SYN-004 dispatches to stage 2 (`Stage: to-implement`, no ticket branch exists yet), but I hit the same wall the prior two sessions logged: `cargo --version` is denied by both the Bash and PowerShell tools, even though `.claude/settings.json` correctly has `Bash(cargo:*)` (added in `66ed735`) and `git --version` works fine through the same Bash tool. The human's fix on the ticket claims this was resolved and verified green at 09:59 today, but it's reproducing in this fresh session. /  / Since stage 2 needs real `cargo test` red/green proof (no subagent can fake that), I'm stopping before touching the ticket rather than looping a third identical "Attempt N failed" commit. Since you're right here: can you run `cargo --version` yourself in this same session/terminal and tell me whether it prompts, denies, or works? That'll tell us if it's a per-session permission cache issue (fixed by restarting the session) versus the Code-level bug attempt 2 already flagged. /
 
 - 2026-09-20 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: I reproduced the exact same blocker two prior sessions hit: `cargo --version` is denied by both Bash and PowerShell tools, even though `.claude/settings.json` has `Bash(cargo:*)` and no local override exists. This is a fresh session (not a permission cache issue) — the allow rule just isn't matching for `cargo`, confirming this is the Claude Code-level bug flagged in commit `75af933`. /  / SYN-004 dispatches to stage 2 (`Stage: to-implement`, no ticket branch yet), but I can't proceed — stage 2 needs real `cargo test` red/green proof, and no subagent can substitute for that. /  / I need one of: / 1. You fix the `cargo` permission-matching issue at the Claude Code app/settings level, or / 2. You run `cargo` commands yourself at checkpoints I flag and relay output back to me. /  / Which do you want? I haven't touched the ticket or created a branch, so no commit is needed yet — but let me know if you'd like me to log this attempt on the ticket regardless. /
+
+- 2026-09-20 (resposta do humano, corrigindo a anterior): **`cargo` não foi
+  liberado — a resposta acima estava errada.** O driver `sweatshop.ps1` passa
+  `--allowedTools`, que *restringe* o conjunto: só entram `git`, `gh`, `npx` e
+  `powershell` (primeiro token do gate). Regra `allow` em
+  `.claude/settings.json` não amplia isso — medido, o `66ed735` está inerte.
+  Não chamem `cargo` direto: é negado e não há como liberar de dentro do repo.
+  Solução, commit `0845832` nesta branch: `gate.ps1` ganhou `-TestsOnly` (só
+  testes, sem fmt/clippy/tsc). **Runner de testes do stage 2:**
+  `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly` — já
+  liberado porque entra por `powershell`. Verificado: passou, 8 testes (4 em
+  `config.rs`, 4 em `server.rs`). O gate completo (sem o switch) continua
+  obrigatório antes de `Stage: to-review`; `-TestsOnly` é só para a prova
+  red-before-green. `AGENTS.md` ("Bindings do fluxo") já diz isso. Nada
+  pendente das tentativas anteriores: driver reverteu tudo, sem branch órfã.

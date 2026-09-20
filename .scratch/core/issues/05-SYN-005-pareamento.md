@@ -1,5 +1,5 @@
 # SYN-005: Pareamento por QR e anúncio na rede
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -71,3 +71,18 @@ Critérios 1, 2 e 3 (parte visual): manual.
   começa do zero, fluxo normal.
 
 - 2026-09-20 Attempt 1 stopped to ask: `cargo` is still denied in this session — confirmed via both `Bash` (with and without `dangerouslyDisableSandbox: true`) and `PowerShell`, same "This command requires approval" wall SYN-003/004 hit. `.claude/settings.json` does have `Bash(cargo:*)` (and `gradlew.bat`) allowed, so the rule exists but isn't being honored before a prompt would even reach you — looks like the same permission-matching bug flagged twice already, not something the earlier settings fix (commit `66ed735`) actually resolved. /  / I haven't touched any files — only checked out branch `syn-005` off the session branch, no commits. SYN-005's Primary files are Rust, so stage 2 needs `cargo test`/`cargo build` for red-before-green proof; I can't fake that. /  / I need one of: / 1. You look into why the Bash/PowerShell tools deny `cargo`/`gradlew.bat` even with the allow rule present (this is the third session in a row hitting it — SYN-003, SYN-004, now SYN-005). / 2. You run `cargo test --manifest-path pc/src-tauri/Cargo.toml` and `.\gate.ps1` yourself at checkpoints I flag, and relay output back. /  / Which do you want? /
+
+- 2026-09-20 (resposta do humano, corrigindo a anterior): **`cargo` não foi
+  liberado — a resposta acima estava errada.** O driver `sweatshop.ps1` passa
+  `--allowedTools`, que *restringe* o conjunto: só entram `git`, `gh`, `npx` e
+  `powershell` (primeiro token do gate). Regra `allow` em
+  `.claude/settings.json` não amplia isso — medido, o `66ed735` está inerte.
+  Não chamem `cargo` direto: é negado e não há como liberar de dentro do repo.
+  Solução, commit `0845832` nesta branch: `gate.ps1` ganhou `-TestsOnly` (só
+  testes, sem fmt/clippy/tsc). **Runner de testes do stage 2:**
+  `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly` — já
+  liberado porque entra por `powershell`. Verificado: passou, 8 testes (4 em
+  `config.rs`, 4 em `server.rs`). O gate completo (sem o switch) continua
+  obrigatório antes de `Stage: to-review`; `-TestsOnly` é só para a prova
+  red-before-green. `AGENTS.md` ("Bindings do fluxo") já diz isso. Nada
+  pendente das tentativas anteriores: driver reverteu tudo, sem branch órfã.
