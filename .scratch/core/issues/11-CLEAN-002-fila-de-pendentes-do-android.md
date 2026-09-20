@@ -1,5 +1,5 @@
 # CLEAN-002: Fila de Pendentes do Android — limpeza e política de recusa
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -80,7 +80,7 @@ os critérios 1 a 4 e deixa o 5.
   em vez de virar descarte silencioso. Vermelho enquanto
   `copyIntoPayloadDir` capturar `IOException` inteira.
 
-#### Revisão (2026-09-20, stage 3)
+#### Revisão (2026-09-20, stage 3, primeira passada — reabriu)
 
 Verdict: Needs your call: o critério 4 foi implementado com uma captura larga
 demais, que troca uma exceção incômoda por perda silenciosa de arquivo; volta
@@ -132,11 +132,82 @@ próprio):
   chamador assim hoje; entra junto com a nota de thread-safety de SYN-007, no
   ticket da casca do app Android.
 
-Débito humano: a escrita atômica da fila (`persist()` com temporário +
-`ATOMIC_MOVE`) não tem teste que a observe — conferir à mão que matar o app no
-meio de um `enqueue` nunca deixa `pendentes.txt` truncado.
+#### Resolution (2026-09-20)
+
+Verdict: Needs your call: os critérios 1 a 4 estão fechados e o merge foi
+feito, mas o descarte silencioso de um Item cujo arquivo original sumiu — que
+o critério 4 autoriza — não tem carve-out na spec, que diz "Só a confirmação
+remove o Item da fila de Pendentes" (`spec.md`, "Protocolo de Itens"); os dois
+eixos da revisão apontaram a mesma tensão, e ela é decisão de comportamento,
+não de código.
+
+Decisão: aprovar os critérios 1 a 4 e mergear. O critério 5 continua fora,
+esperando stage 1, como o próprio ticket manda.
+
+Arquivos: `PendingQueueStore.kt`, `PendingItem.kt`, `ProtocolClient.kt`,
+`ProtocolClientTest.kt` — nada fora dos Primary files nas duas passadas do
+stage 2 nem nas correções do stage 3.
+
+Prova vermelho-verde do critério 4 (reaberto), refeita nesta revisão:
+revertendo só o `faca895` sobre a árvore de `07b4d03`, a suíte Kotlin dá
+`22 tests completed, 1 failed`, e a que falha é exatamente
+`falha de IO que nao seja arquivo sumido durante o enfileiramento sobe para
+quem chamou()` (`AssertionFailedError` em `ProtocolClientTest.kt:386`).
+Restaurado o arquivo, 22/22 verdes. Separação `diff --stat` teste-antes-de-
+código correta nos seis commits do stage 2 (`4a9d089`/`99aec28`,
+`e56a150`/`efb6a8d`, `c265d52`/`faca895`).
+
+Gate verde (`gate.ps1`, antes e depois das correções pequenas): Rust
+4 + 2 + 18 = 24 passaram, 0 falharam; Kotlin 22 passaram, 0 falharam;
+`cargo fmt --check`, `cargo clippy`, `tsc --noEmit` e `gradle check` limpos.
+
+Corrigido nesta revisão (correções pequenas, `1a13141` — Primary files, sem
+teste novo, os dois testes existentes prendem os dois lados):
+
+- **Critério 4** — a captura de `kotlin.io.NoSuchFileException` era um proxy
+  do que o critério diz em palavras, e deixava de fora a própria corrida que
+  ele descreve: `File.copyTo` só lança `NoSuchFileException` na checagem
+  inicial `!exists()`; se o arquivo sumir entre essa checagem e o
+  `inputStream()`, vem `java.io.FileNotFoundException`, que não é subtipo e
+  voltava a estourar para fora de `sendFile`. Passou a capturar `IOException`
+  e decidir pela pergunta direta — original ainda lá, sobe; original sumido,
+  descarta. Disco cheio e permissão negada continuam subindo, porque nesses
+  casos o original existe.
+- **Critério 4, kdoc** — `sendFile` prometia "deixa o arquivo Pendente em vez
+  de perder o Item" sem dizer que o arquivo sumido é a exceção, que é o
+  ajuste que o critério pede. Agora diz, e nomeia o que sobe.
+
+Notas que não bloqueiam (as da primeira passada continuam de pé; estas são
+novas, dos dois eixos desta):
+
+- **O teste do critério 4 prova a regra, não os exemplos.** Ele bloqueia a
+  pasta de payloads com um arquivo comum, então a falha vem do
+  `outputStream()` de destino — não do "disco cheio ou permissão negada" que
+  o critério cita. Prova que um `IOException` que não é arquivo-sumido sobe,
+  que é o que importa; os exemplos citados não são exercitados.
+- **Com a fila vazia**, um arquivo já sumido vira `Unreachable` no
+  `catch (_: IOException)` de `trySendFile` e só então é descartado pelo
+  `enqueue` nulo — o Item some mesmo com o PC alcançável, e o nome do caminho
+  mente. Comportamento autorizado pelo critério 4; só o rótulo é ruim.
+- **`send(makePending, attempt)` com duas lambdas** onde um `item:
+  PendingItem` bastaria (o kdoc admite "chamado no máximo uma vez"). Fica
+  como está de propósito: a lambda é o que garante o "construído uma vez só"
+  que o critério 1 pede, e não constrói nada no caminho de sucesso.
+- **Os testes recalculam à mão** a convenção de layout do store
+  (`File(queueFile.parentFile, "${queueFile.name}.payloads")`), passando a
+  depender de detalhe privado. Dois testes novos; cresce se a pasta mudar de
+  nome.
+- **`enqueue(): PendingItem?`** alargou a interface para um modo de falha de
+  uma implementação só — `InMemoryPendingQueueStore` nunca devolve `null`.
 
 ## Comments
+
+- Débito humano: a escrita atômica da fila (`persist()` com temporário +
+  `ATOMIC_MOVE`) não tem teste que a observe — conferir à mão que matar o app
+  no meio de um `enqueue` nunca deixa `pendentes.txt` truncado.
+- 2026-09-20 (stage 3, segunda passada): critérios 1 a 4 aprovados, duas
+  correções pequenas, merge em `sweatshop/2026-09-19-2324` (`10860c7`).
+  Detalhes no bloco de Resolution acima.
 
 - 2026-09-20 (stage 2, reaberto): critério 4 fechado — `copyIntoPayloadDir`
   passou a capturar só `NoSuchFileException`; o resto sobe para quem chamou.
