@@ -41,6 +41,21 @@
 //!                                 sempre (mesmo se o id já não existir mais,
 //!                                 para reenvio da confirmação ser inofensivo).
 //!   Authorization: Bearer <token>
+//!
+//! Pareamento e descoberta (SYN-005). O celular não compila do mesmo fonte,
+//! então os dois formatos abaixo são contrato (ADR-0001):
+//!
+//!   QR mostrado pelo PC     JSON de uma linha, exatamente estes campos:
+//!                           {"instance_name":"synchronice-<8 hex>",
+//!                            "port":47820,"token":"<32 hex>"}
+//!   Anúncio mDNS            serviço `_synchronice._tcp.local.`, nome de
+//!                           instância igual ao `instance_name` do QR, host
+//!                           `<instance_name>.local.`, porta igual à do QR.
+//!
+//! O celular resolve o nome de instância por mDNS para achar o IP atual do PC
+//! e manda o token em `Authorization: Bearer` em toda requisição acima.
+//! Parear de novo troca só o token; o nome de instância é estável por
+//! instalação.
 
 use crate::items::Items;
 use crate::outbox::{OutItem, Outbox};
@@ -60,9 +75,34 @@ use tokio::io::AsyncWriteExt;
 /// Porta fixa na rede local. O celular a conhece pelo QR (SYN-005).
 pub const PORT: u16 = 47820;
 
+/// Fonte do token que autentica as requisições: um `String` fixo (a maioria
+/// dos testes de integração) ou um `Par` (SYN-005). Vindo de um `Par`,
+/// compartilha a mesma célula — rotacionar o Par já vale para a próxima
+/// requisição, sem reiniciar o servidor.
+#[derive(Clone)]
+pub struct TokenCell(Arc<Mutex<String>>);
+
+impl From<String> for TokenCell {
+    fn from(token: String) -> Self {
+        TokenCell(Arc::new(Mutex::new(token)))
+    }
+}
+
+impl From<crate::par::Par> for TokenCell {
+    fn from(par: crate::par::Par) -> Self {
+        TokenCell(par.shared_token())
+    }
+}
+
+impl TokenCell {
+    fn get(&self) -> String {
+        self.0.lock().expect("token sem panic").clone()
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
-    token: String,
+    token: TokenCell,
     items: Items,
     outbox: Outbox,
     presence: Presence,
@@ -152,11 +192,12 @@ pub struct Running {
 /// real assim que estiver escutando.
 pub fn spawn(
     addr: SocketAddr,
-    token: String,
+    token: impl Into<TokenCell>,
     items: Items,
     outbox: Outbox,
     pasta: Option<PathBuf>,
 ) -> io::Result<Running> {
+    let token = token.into();
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
     let presence_da_thread = presence.clone();
@@ -214,12 +255,12 @@ fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-fn authorized(headers: &HeaderMap, token: &str) -> bool {
+fn authorized(headers: &HeaderMap, token: &TokenCell) -> bool {
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|t| t.trim() == token)
+        .is_some_and(|t| t.trim() == token.get())
 }
 
 async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: String) -> StatusCode {
