@@ -25,9 +25,12 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-tokio = { version = "1", features = ["rt", "net", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt", "net", "fs", "io-util", "sync"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = "0.3"
+# Lista de arquivos do clipboard do Windows (Ctrl+V de arquivo copiado no
+# Explorer, CF_HDROP) — formato que a Clipboard API da web não expõe.
+clipboard-win = "5"
 
 [dev-dependencies]
 tempfile = "3"

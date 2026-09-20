@@ -1,13 +1,32 @@
 pub mod config;
 pub mod items;
+pub mod outbox;
 pub mod server;
 
 use items::{Item, Items};
+use outbox::{OutItem, Outbox};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_dialog::DialogExt;
+
+/// Evento que a janela escuta para desenhar (ou atualizar) a bolha de um
+/// Item mandado ao celular.
+const SENT_EVENT: &str = "enviado";
+
+/// Evento que a janela escuta para o indicador de presença: `true` enquanto
+/// há uma conexão `/listen` viva, `false` quando ela cai.
+const PRESENCE_EVENT: &str = "presenca";
+
+/// Payload do evento `enviado`: o Item mais se ele já foi confirmado pelo
+/// celular (Entregue) ou ainda está Pendente.
+#[derive(Clone, serde::Serialize)]
+struct Enviado {
+    #[serde(flatten)]
+    item: OutItem,
+    entregue: bool,
+}
 
 /// Pede a Pasta se ainda não houver uma escolhida. Não-bloqueante: `setup` roda
 /// na thread principal, onde `blocking_pick_folder` travaria o event loop.
@@ -51,7 +70,57 @@ fn read_file_bytes(app: tauri::AppHandle, name: String) -> Result<Vec<u8>, Strin
     std::fs::read(pasta.join(server::sanitize_file_name(&name))).map_err(|e| e.to_string())
 }
 
-/// Sobe o servidor HTTP com o token do Par e liga a lista de Itens à janela.
+/// A fila de saída atual, para a janela se alinhar ao abrir (ou reabrir).
+#[tauri::command]
+fn list_pending(outbox: State<'_, Outbox>) -> Vec<OutItem> {
+    outbox.pending()
+}
+
+/// Enter no composer: enfileira o texto para o celular.
+#[tauri::command]
+fn send_text(outbox: State<'_, Outbox>, text: String) -> Result<(), String> {
+    outbox.enqueue_text(text).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Drop de arquivo na janela, ou Ctrl+V de arquivos copiados no Explorer:
+/// `paths` são caminhos no disco do PC, um Item por caminho (nunca
+/// agrupados, spec "Enviar do PC").
+#[tauri::command]
+fn send_files(outbox: State<'_, Outbox>, paths: Vec<String>) -> Result<(), String> {
+    for caminho in paths {
+        let bytes = std::fs::read(&caminho).map_err(|e| e.to_string())?;
+        let nome = std::path::Path::new(&caminho)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("arquivo")
+            .to_string();
+        outbox
+            .enqueue_file(nome, &bytes)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Ctrl+V com uma imagem no clipboard: `bytes` já é o PNG, lido no lado
+/// TypeScript pela Clipboard API do WebView2 — sem caminho no disco, ao
+/// contrário de `send_files`.
+#[tauri::command]
+fn send_bytes(outbox: State<'_, Outbox>, name: String, bytes: Vec<u8>) -> Result<(), String> {
+    outbox
+        .enqueue_file(name, &bytes)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Lista de caminhos de arquivo do clipboard do Windows (Ctrl+C num arquivo
+/// no Explorer) — formato `CF_HDROP`, que a Clipboard API da web não expõe.
+#[tauri::command]
+fn read_clipboard_file_list() -> Result<Vec<String>, String> {
+    clipboard_win::get_clipboard(clipboard_win::formats::FileList).map_err(|e| e.to_string())
+}
+
+/// Sobe o servidor HTTP com o token do Par, liga a lista de Itens e a fila
+/// de saída à janela, e disponibiliza a fila para os comandos de envio.
 fn start_server(app: &tauri::AppHandle, items: Items) {
     let config_dir = match app.path().app_config_dir() {
         Ok(dir) => dir,
@@ -71,6 +140,15 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     // jeito (texto funciona), e a rota de arquivo devolve 503 até a escolha.
     let pasta = config::load_pasta(&config_dir);
 
+    let outbox = match Outbox::new(config_dir.join("outbox")) {
+        Ok(outbox) => outbox,
+        Err(e) => {
+            eprintln!("sem fila de saída, o servidor não sobe: {e}");
+            return;
+        }
+    };
+    app.manage(outbox.clone());
+
     let handle = app.clone();
     items.on_new(move |item| {
         if let Err(e) = handle.emit(ITEM_EVENT, item) {
@@ -78,9 +156,28 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
         }
     });
 
+    let handle = app.clone();
+    outbox.on_change(move |item, entregue| {
+        let payload = Enviado {
+            item: item.clone(),
+            entregue,
+        };
+        if let Err(e) = handle.emit(SENT_EVENT, payload) {
+            eprintln!("não foi possível avisar a janela do envio {}: {e}", item.id);
+        }
+    });
+
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], server::PORT));
-    match server::spawn(addr, token, items, pasta) {
-        Ok(running) => println!("servidor HTTP em {}", running.addr),
+    match server::spawn(addr, token, items, outbox, pasta) {
+        Ok(running) => {
+            println!("servidor HTTP em {}", running.addr);
+            let handle = app.clone();
+            running.presence.on_change(move |online| {
+                if let Err(e) = handle.emit(PRESENCE_EVENT, online) {
+                    eprintln!("não foi possível avisar a janela da presença: {e}");
+                }
+            });
+        }
         Err(e) => eprintln!("servidor HTTP não subiu em {addr}: {e}"),
     }
 }
@@ -118,7 +215,15 @@ pub fn run() {
             None,
         ))
         .manage(Items::new())
-        .invoke_handler(tauri::generate_handler![list_items, read_file_bytes])
+        .invoke_handler(tauri::generate_handler![
+            list_items,
+            read_file_bytes,
+            list_pending,
+            send_text,
+            send_files,
+            send_bytes,
+            read_clipboard_file_list
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             start_server(&handle, app.state::<Items>().inner().clone());
