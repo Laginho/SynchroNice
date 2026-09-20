@@ -1,5 +1,5 @@
 # CLEAN-002: Fila de Pendentes do Android — limpeza e política de recusa
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -138,6 +138,11 @@ meio de um `enqueue` nunca deixa `pendentes.txt` truncado.
 
 ## Comments
 
+- 2026-09-20 (stage 2, reaberto): critério 4 fechado — `copyIntoPayloadDir`
+  passou a capturar só `NoSuchFileException`; o resto sobe para quem chamou.
+  Teste novo (`falha de IO que nao seja arquivo sumido...`) vermelho antes
+  (`c265d52`), verde depois (`faca895`). Gate verde: 24 Rust, 22 Kotlin, 0
+  falhas. Nenhum arquivo fora dos Primary files tocado.
 - 2026-09-20 (stage 3): reaberto. Critérios 1, 2 e 3 de pé; o 4 caiu pela
   captura larga de `IOException`. Detalhes no bloco de revisão acima.
 - 2026-09-20 (stage 2): critérios 1 a 4 implementados e com gate verde.
