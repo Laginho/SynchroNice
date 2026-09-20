@@ -99,7 +99,8 @@ class ProtocolClient(
     }
 
     private fun enqueue(item: PendingItem) {
-        pending.add(queueStore.enqueue(item))
+        val stored = queueStore.enqueue(item) ?: return
+        pending.add(stored)
     }
 
     private fun dequeueFirst() {

@@ -1,6 +1,7 @@
 package synchronice.protocolclient
 
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
@@ -12,9 +13,11 @@ interface PendingQueueStore {
     /**
      * Põe o Item no fim da fila; devolve o Item como ele deve ser mantido em
      * memória dali em diante (a implementação de disco troca o caminho de um
-     * arquivo pelo da cópia interna, para sobreviver ao original sumir).
+     * arquivo pelo da cópia interna, para sobreviver ao original sumir), ou
+     * `null` se o Item não pôde ser preservado (ex.: o arquivo original já
+     * sumiu quando a cópia foi tentada) — quem chama não o mantém em memória.
      */
-    fun enqueue(item: PendingItem): PendingItem
+    fun enqueue(item: PendingItem): PendingItem?
 
     /** Tira da fila o Item que estava na cabeça e libera o que a implementação tiver reservado para ele. */
     fun dequeueFirst()
@@ -46,10 +49,14 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
         if (file.exists()) decodeLines(file.readText()).toMutableList()
         else mutableListOf()
 
+    init {
+        sweepOrphanPayloads()
+    }
+
     override fun load(): List<PendingItem> = items.toList()
 
-    override fun enqueue(item: PendingItem): PendingItem {
-        val stored = if (item is PendingItem.File) copyIntoPayloadDir(item) else item
+    override fun enqueue(item: PendingItem): PendingItem? {
+        val stored = if (item is PendingItem.File) copyIntoPayloadDir(item) ?: return null else item
         items.add(stored)
         persist()
         return stored
@@ -62,11 +69,28 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
         persist()
     }
 
-    private fun copyIntoPayloadDir(item: PendingItem.File): PendingItem.File {
+    /** `null` se o arquivo original já tiver sumido — o Item é descartado em vez de estourar para quem chamou. */
+    private fun copyIntoPayloadDir(item: PendingItem.File): PendingItem.File? {
         payloadDir.mkdirs()
         val copy = File(payloadDir, "${UUID.randomUUID()}-${item.name}")
-        File(item.path).copyTo(copy, overwrite = true)
-        return item.copy(path = copy.absolutePath)
+        return try {
+            File(item.path).copyTo(copy, overwrite = true)
+            item.copy(path = copy.absolutePath)
+        } catch (_: IOException) {
+            null
+        }
+    }
+
+    /**
+     * Uma cópia em [payloadDir] sem Item na fila que a referencie é órfã —
+     * sobrou de um crash entre `copyIntoPayloadDir` e `persist()`. Varrida ao
+     * construir o store, para não acumular para sempre.
+     */
+    private fun sweepOrphanPayloads() {
+        val referenced = items.filterIsInstance<PendingItem.File>().mapTo(HashSet()) { File(it.path).absolutePath }
+        payloadDir.listFiles()?.forEach { candidate ->
+            if (candidate.absolutePath !in referenced) candidate.delete()
+        }
     }
 
     /**
