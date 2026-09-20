@@ -41,6 +41,21 @@
 //!                                 sempre (mesmo se o id já não existir mais,
 //!                                 para reenvio da confirmação ser inofensivo).
 //!   Authorization: Bearer <token>
+//!
+//! Pareamento e descoberta (SYN-005). O celular não compila do mesmo fonte,
+//! então os dois formatos abaixo são contrato (ADR-0001):
+//!
+//!   QR mostrado pelo PC     JSON de uma linha, exatamente estes campos:
+//!                           {"instance_name":"synchronice-<8 hex>",
+//!                            "port":47820,"token":"<32 hex>"}
+//!   Anúncio mDNS            serviço `_synchronice._tcp.local.`, nome de
+//!                           instância igual ao `instance_name` do QR, host
+//!                           `<instance_name>.local.`, porta igual à do QR.
+//!
+//! O celular resolve o nome de instância por mDNS para achar o IP atual do PC
+//! e manda o token em `Authorization: Bearer` em toda requisição acima.
+//! Parear de novo troca só o token; o nome de instância é estável por
+//! instalação.
 
 use crate::items::Items;
 use crate::outbox::{OutItem, Outbox};

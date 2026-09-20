@@ -421,7 +421,15 @@ async function main(): Promise<void> {
     if (event.payload) mostrarChat();
   });
 
-  const estadoPar = await invoke<EstadoParInicial>("estado_par_inicial");
+  // Se o servidor não subiu, o Par não existe no backend e este comando
+  // falha. A janela não pode ficar em branco por causa disso (as duas telas
+  // nascem `hidden`): cai no chat, que é o estado utilizável.
+  const estadoPar = await invoke<EstadoParInicial>("estado_par_inicial").catch(
+    (e): EstadoParInicial => {
+      console.error(`não foi possível ler o estado do Par: ${e}`);
+      return { mostrar_qr: false, svg: "" };
+    },
+  );
   if (estadoPar.mostrar_qr) mostrarQr(estadoPar.svg);
   else mostrarChat();
 

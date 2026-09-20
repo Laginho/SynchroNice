@@ -11,6 +11,13 @@
 * {
   box-sizing: border-box;
 }
+/* `[hidden]{display:none}` é regra da folha do navegador e perde para
+   qualquer regra do autor — sem este `!important`, o `display:flex` de
+   `#frame` e `#qr-screen` deixaria as duas telas no ar ao mesmo tempo e o
+   `hidden` que troca uma pela outra não valeria nada (SYN-005). */
+[hidden] {
+  display: none !important;
+}
 html,
 body {
   margin: 0;

@@ -1,5 +1,5 @@
 # SYN-005: Pareamento por QR e anúncio na rede
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
