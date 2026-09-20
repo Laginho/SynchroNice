@@ -1,5 +1,5 @@
 # CLEAN-001: Teste de concorrência instável derruba o gate
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -108,3 +108,5 @@ Mais a repetição do critério 2, com a saída colada no ticket.
 - 2026-09-20 Attempt 1 failed: exit 0. Log tail: Pausing test runs for ~90 seconds — my own repeated gate invocations have likely backed up Windows Defender's real-time scan queue, which is the leading suspect for the file-rename stalls I'm chasing on CLEAN-001. I'll resume the verification once the cooldown finishes. /
 
 - 2026-09-20 Review ended at to-review (exit 0); branch clean-001 holds the review; left for a human
+
+- 2026-09-20 Foreman: o review anterior terminou sem veredito (exit 0 logo apos "Gate re-running after the fixes"), nao por recusa. A branch `clean-001` tem os dois commits na ordem certa (teste vermelho, depois a correcao em `server.rs`). Devolvido a `to-review` para o stage 3 rodar de novo sobre a mesma branch.
