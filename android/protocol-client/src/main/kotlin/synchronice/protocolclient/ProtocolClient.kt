@@ -5,6 +5,15 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.util.concurrent.ConcurrentLinkedQueue
 
+/** O PC recusou a requisição (ex.: token errado) — não é indisponibilidade. */
+class ProtocolRejectedException(val code: Int) : Exception("PC recusou a requisição: HTTP $code")
+
+private sealed class SendOutcome {
+    object Success : SendOutcome()
+    object Unreachable : SendOutcome()
+    data class Rejected(val code: Int) : SendOutcome()
+}
+
 /**
  * Fala o protocolo HTTP do PC (spec, `server.rs`) pelo lado do celular: envia
  * texto com o token do Par, escuta Itens e resolve o PC na rede. A UI, a
@@ -19,12 +28,22 @@ class ProtocolClient(
     private val pending = ConcurrentLinkedQueue<String>()
 
     /**
-     * Manda um Item de texto ao PC. Se o PC não estiver alcançável, o texto
-     * fica Pendente e só sai na próxima chamada a [retryPending].
+     * Manda um Item de texto ao PC. Ao detectar o outro lado, drena o
+     * Pendente em ordem antes deste texto — nunca fura a fila. Se o PC não
+     * estiver alcançável, o texto entra no fim da fila; se o PC recusar a
+     * requisição (ex.: token errado), lança [ProtocolRejectedException] em
+     * vez de ficar Pendente, porque recusa não é indisponibilidade.
      */
     fun sendText(text: String) {
-        if (!trySendText(text)) {
+        retryPending()
+        if (pending.isNotEmpty()) {
             pending.add(text)
+            return
+        }
+        when (val outcome = trySendText(text)) {
+            SendOutcome.Success -> {}
+            SendOutcome.Unreachable -> pending.add(text)
+            is SendOutcome.Rejected -> throw ProtocolRejectedException(outcome.code)
         }
     }
 
@@ -37,21 +56,26 @@ class ProtocolClient(
     fun retryPending() {
         while (true) {
             val next = pending.peek() ?: return
-            if (!trySendText(next)) return
-            pending.poll()
+            when (val outcome = trySendText(next)) {
+                SendOutcome.Success -> pending.poll()
+                SendOutcome.Unreachable -> return
+                is SendOutcome.Rejected -> throw ProtocolRejectedException(outcome.code)
+            }
         }
     }
 
-    private fun trySendText(text: String): Boolean {
+    private fun trySendText(text: String): SendOutcome {
+        var connection: HttpURLConnection? = null
         return try {
-            val connection = open("/items/text", "POST")
+            connection = open("/items/text", "POST")
             connection.doOutput = true
             connection.outputStream.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-            val created = connection.responseCode == HttpURLConnection.HTTP_CREATED
-            connection.disconnect()
-            created
+            val code = connection.responseCode
+            if (code == HttpURLConnection.HTTP_CREATED) SendOutcome.Success else SendOutcome.Rejected(code)
         } catch (_: IOException) {
-            false
+            SendOutcome.Unreachable
+        } finally {
+            connection?.disconnect()
         }
     }
 
@@ -62,6 +86,11 @@ class ProtocolClient(
      */
     fun listen(): List<Item> {
         val connection = open("/listen", "GET")
+        val code = connection.responseCode
+        if (code != HttpURLConnection.HTTP_OK) {
+            connection.disconnect()
+            throw ProtocolRejectedException(code)
+        }
         val body = connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
         connection.disconnect()
         return body.lineSequence()

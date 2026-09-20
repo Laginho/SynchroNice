@@ -39,6 +39,8 @@ private fun parseJsonString(json: String, start: Int): Pair<String, Int> {
                 'n' -> sb.append('\n')
                 't' -> sb.append('\t')
                 'r' -> sb.append('\r')
+                'b' -> sb.append('\b')
+                'f' -> sb.append('')
                 'u' -> {
                     sb.append(json.substring(i + 1, i + 5).toInt(16).toChar())
                     i += 4
