@@ -3,6 +3,7 @@ package synchronice.protocolclient
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.io.File
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import kotlin.test.Test
@@ -378,6 +379,66 @@ class ProtocolClientTest {
             assertTrue(client.hasPending())
         } finally {
             queueFile.delete()
+        }
+    }
+
+    @Test
+    fun `baixa Item de arquivo com progresso crescente, bytes identicos, e confirma o recebimento`() {
+        val port = freePort()
+        val content = ByteArray(50_000) { (it % 256).toByte() }
+        val ackedIds = mutableListOf<String?>()
+        val server = fakeServer(port, "/outbox/42/file") { exchange ->
+            exchange.sendResponseHeaders(200, content.size.toLong())
+            exchange.responseBody.use { it.write(content) }
+        }
+        server.createContext("/outbox/42/ack") { exchange ->
+            ackedIds.add(exchange.requestHeaders.getFirst("Authorization"))
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
+        try {
+            val progress = mutableListOf<Int>()
+
+            client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", content.size.toLong()), destination) { percent ->
+                progress.add(percent)
+            }
+
+            assertEquals(content.toList(), destination.readBytes().toList())
+            assertTrue(progress.isNotEmpty())
+            assertEquals(progress.sorted(), progress)
+            assertEquals(100, progress.last())
+            assertEquals(listOf("Bearer $TOKEN"), ackedIds)
+        } finally {
+            server.stop(0)
+            destination.delete()
+        }
+    }
+
+    @Test
+    fun `download interrompido nao marca o Item como completo e nao envia o ack`() {
+        val port = freePort()
+        val ackedIds = mutableListOf<String>()
+        val server = fakeServer(port, "/outbox/42/file") { exchange ->
+            val partial = byteArrayOf(1, 2, 3)
+            exchange.sendResponseHeaders(200, 10)
+            exchange.responseBody.use { it.write(partial) }
+        }
+        server.createContext("/outbox/42/ack") { exchange ->
+            ackedIds.add("chamado")
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
+        try {
+            assertFailsWith<IOException> {
+                client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", 10), destination) {}
+            }
+
+            assertTrue(ackedIds.isEmpty())
+        } finally {
+            server.stop(0)
+            destination.delete()
         }
     }
 }

@@ -1,5 +1,5 @@
 # SYN-009: Android recebe arquivos do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-004
 Review: agent
