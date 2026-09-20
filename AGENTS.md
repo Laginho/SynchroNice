@@ -21,6 +21,12 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
 
 - Gate: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` (criado por SYN-001; roda typecheck, lint e testes de tudo que existir em `pc/` e `android/`)
 - Base branch: `main`
+- Runner de testes (stage 2): `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly`
+  — **não chame `cargo` direto**, é negado. O driver só libera `git`, `gh`, `npx`
+  e o primeiro token do gate (`powershell`), e `--allowedTools` restringe: regra
+  `allow` em `settings.json` não amplia nada. `-TestsOnly` roda só os testes, sem
+  fmt/lint/typecheck, que é o que a prova red-before-green precisa; o gate
+  completo continua sendo o portão antes de `to-review`.
 - Models: stage 2 sonnet xhigh, stage 3 opus high
 - Times (stage 1 é sempre manual, sweatshop nunca roda). Trocar de time é
   reescrever a linha `Models:` acima — o driver lê a primeira que casar, então o
