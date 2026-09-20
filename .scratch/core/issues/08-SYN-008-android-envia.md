@@ -1,5 +1,5 @@
 # SYN-008: Android envia por Compartilhar
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-003
 Review: agent
@@ -303,3 +303,85 @@ numerado, não volta como ❌):
   `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL, `protocol-client`
   14/14 (10 antigos + 4 novos). Nada tocado fora de
   `android/protocol-client/` e deste ticket.
+
+#### Resolution (2026-09-20)
+
+Verdict: Approve
+
+Critério 7 passa, e os três ❌ do reopen estão resolvidos com teste de verdade,
+não com retoque. Verifiquei o que a revisão anterior derrubou, item por item,
+lendo o código e não o comentário de stage 2:
+
+1. **Cópia em vez de caminho.** `PendingQueueStore` trocou `save(items)` por
+   `enqueue(item): PendingItem` / `dequeueFirst()`, e é a implementação de disco
+   que decide o que guardar: `FilePendingQueueStore.enqueue` copia os bytes para
+   `<fila>.payloads/<uuid>-<nome>` e devolve o Item já apontando para a cópia —
+   é esse Item que `ProtocolClient` mantém em memória e grava na linha. A cópia
+   morre em `dequeueFirst()`. O teste apaga o original antes de drenar e confere
+   nome e bytes do lado do servidor (`4`,`5`,`6`): a persistência deixou de ser
+   nominal, que era o defeito.
+2. **Payload ausente não trava mais.** `retryPending()` checa
+   `File(next.path).exists()` antes de tentar enviar e descarta via
+   `dequeueFirst()`, continuando o laço — o `FileNotFoundException` virando
+   `Unreachable` não acontece mais. O teste prova o que importa: o Item seguinte
+   é entregue.
+3. **`\r` e fila corrompida.** `escape`/`unescape` cobrem `\r` (o caso que
+   `readLines()` transformava em duas linhas), e `decodeLine` virou
+   `decodeLineOrNull` + `mapNotNull`, fora do caminho de `error(...)` — construir
+   o cliente com lixo no arquivo não lança mais. O round-trip testa `\`, TAB,
+   `\n` e `\r` no mesmo texto.
+
+Separação teste/código: `6042500` toca só `ProtocolClientTest.kt` (+108),
+`0b19266` só `PendingQueueStore.kt` e `ProtocolClient.kt`. Mesmo padrão nos
+commits da primeira rodada (`4566dd2`/`793999e` teste, `7543830` código).
+
+Prova de vermelho refeita por mim, não aceita de segunda mão: worktree
+descartável em `6042500` (commit só-de-teste), `gate.ps1 -TestsOnly` →
+`14 tests completed, 4 failed`, e são exatamente os 4 novos, cada um pela razão
+certa — `AssertionFailedError` nos dois de fila de arquivo (linhas 301 e 332),
+`IllegalStateException` nos dois que o `error(...)` do decode derrubava (356,
+376); Rust intacto (18/18 em `server.rs`). Com `0b19266` em cima, verde.
+
+Gate completo na branch de sessão após o merge: `cargo fmt --check`,
+`cargo clippy`, `cargo test` 24/24 (4 config + 2 drag + 18 server),
+`tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL,
+`TEST-synchronice.protocolclient.ProtocolClientTest.xml`:
+`tests="14" skipped="0" failures="0" errors="0"`.
+
+**Uma rodada de gate em quatro falhou, e não é deste ticket.** A primeira
+rodada depois do merge terminou em `gate: FALHOU` com `gradle check` BUILD
+SUCCESSFUL logo acima — ou seja, a falha foi antes do Android, no lado Rust ou
+no `tsc`; as três rodadas seguintes, sem nenhuma mudança, passaram. É a terceira
+observação do mesmo intermitente que `CLEAN-001` já descreve (`--test server` do
+`pc/src-tauri`, que este ticket não toca), e anotei lá. Registro o que aconteceu
+de fato: não capturei o nome do teste dessa rodada, porque só olhei o fim da
+saída — erro meu, e é exatamente a informação que `CLEAN-001` precisa. Não
+seguro SYN-008 por isso: o critério 7 é sobre os testes JVM do módulo cliente,
+que passaram nas quatro rodadas.
+
+Contrato HTTP conferido de novo contra `pc/src-tauri/src/server.rs`: `POST
+/items/file`, `X-File-Name`, `Authorization: Bearer`, `Content-Length` por
+`setFixedLengthStreamingMode`, 201. Bate.
+
+Escopo: critérios 1–6 seguem no bloco "Adiado — precisa do Android SDK", pela
+resposta do humano de 2026-09-20, e a linha de `Débito humano` acima continua
+valendo. Nada fora de `android/protocol-client/` e deste ticket mudou.
+
+Findings que não voltam como ❌ (nenhum é do escopo reduzido, e os de Standards
+são refatoração — o fluxo manda parar em ticket próprio, não consertar no
+review): os quatro itens de Standards da revisão anterior seguem abertos e
+foram para `CLEAN-002`, junto com a decisão de política sobre Item recusado
+(401) e `503` sem Pasta, que precisa de stage 1 e de critério próprio.
+
+Dois detalhes novos que vi lendo o código e que também estão em `CLEAN-002`,
+nenhum dos dois em critério nem em caminho exercitado hoje:
+
+- `FilePendingQueueStore.enqueue` chama `copyTo` sem rede de proteção: mandar um
+  arquivo que sumiu entre a chamada e a falha de envio propaga `IOException` do
+  `sendFile`, em vez de deixar Pendente ou descartar.
+- Uma cópia em `<fila>.payloads/` fica órfã se o processo morrer entre `copyTo` e
+  `persist()` — vazamento de disco, nada que quebre a fila.
+
+Arquivos: `android/protocol-client/src/main/kotlin/synchronice/protocolclient/PendingItem.kt`
+(novo), `PendingQueueStore.kt` (novo), `ProtocolClient.kt`,
+`src/test/kotlin/synchronice/protocolclient/ProtocolClientTest.kt`.

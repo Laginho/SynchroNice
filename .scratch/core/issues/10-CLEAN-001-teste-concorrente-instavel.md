@@ -55,3 +55,14 @@ Mais a repetição do critério 2, com a saída colada no ticket.
 - 2026-09-20 (revisão de SYN-007): aberto pela revisão, fora dos Primary
   files de SYN-007 (nada de `pc/` mudou lá). Teste instável no gate é risco
   de toda sessão futura do fluxo — é o portão que decide `to-review`.
+- 2026-09-20 (revisão de SYN-008): terceira observação, mesma proporção de
+  antes — uma rodada de gate em quatro falhou na branch de sessão logo após o
+  merge de SYN-008, e as três seguintes passaram sem nenhuma mudança. O nome
+  do teste de novo não foi capturado (só o fim da saída foi olhado), mas a
+  rodada que falhou traz `gradle check` BUILD SUCCESSFUL antes do
+  `gate: FALHOU`, então a falha está antes do Android: `cargo fmt`,
+  `cargo clippy`, `cargo test` ou `tsc`. SYN-008 não toca em `pc/` nem em
+  `pc/ui/`. Recado para quem pegar este ticket: as três observações perderam o
+  nome do teste por olhar só o `tail` da saída — rodar o gate com a saída
+  inteira guardada em arquivo, ou o binário `--test server` em laço, é o
+  primeiro passo do critério 1.
