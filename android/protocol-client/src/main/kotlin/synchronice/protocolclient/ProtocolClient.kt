@@ -155,6 +155,57 @@ class ProtocolClient(
     }
 
     /**
+     * Baixa um Item de arquivo ainda Pendente na fila de saída do PC (`GET
+     * /outbox/{id}/file`) para [destination] em stream, chamando [onProgress]
+     * com o percentual (0 a 100) recebido. Confirma o recebimento (`POST
+     * /outbox/{id}/ack`) só depois de gravar o arquivo inteiro — só o `ack`
+     * tira o Item da fila do PC, então uma interrupção no meio do download
+     * propaga a exceção sem chamar o `ack`, e o PC reentrega no próximo
+     * `/listen`. Um download que fecha antes de entregar [Item.FileMeta.size]
+     * bytes lança [IOException] em vez de aceitar bytes de menos como
+     * completo — o servidor de teste fecha a conexão sem erro nenhum do lado
+     * do cliente, então a checagem de tamanho é a única forma confiável de
+     * detectar a interrupção.
+     */
+    fun downloadFile(item: Item.FileMeta, destination: File, onProgress: (Int) -> Unit = {}) {
+        val connection = open("/outbox/${item.id}/file", "GET")
+        try {
+            val code = connection.responseCode
+            if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)
+            var received = 0L
+            connection.inputStream.use { input ->
+                destination.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        received += read
+                        onProgress(if (item.size > 0) ((received * 100) / item.size).toInt() else 100)
+                    }
+                }
+            }
+            if (received != item.size) {
+                throw IOException("download incompleto: esperado ${item.size} bytes, recebido $received")
+            }
+            onProgress(100)
+        } finally {
+            connection.disconnect()
+        }
+        ack(item.id)
+    }
+
+    private fun ack(id: Long) {
+        val connection = open("/outbox/$id/ack", "POST")
+        try {
+            val code = connection.responseCode
+            if (code != HttpURLConnection.HTTP_NO_CONTENT) throw ProtocolRejectedException(code)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
      * Um ciclo de `/listen`: bloqueia até o PC ter ao menos um Item Pendente,
      * devolve os que vieram, em ordem. Reabrir para continuar escutando é
      * responsabilidade de quem chama.
