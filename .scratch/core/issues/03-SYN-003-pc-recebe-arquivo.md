@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -42,3 +42,18 @@ Critérios 1, 2 e 4: manual.
 ## Comments
 
 - 2026-09-20 Attempt 1 stopped to ask: I've hit a hard blocker: every attempt to run `cargo` (test, `--version`, even `where cargo`) in this session returns "This command requires approval" and gets denied — across both Bash and PowerShell, with or without sandbox override. `ls`/`git` work fine, so it's specifically compiler/toolchain execution that's gated, and nothing here is granting it. /  / This matters because stage 2 of `ticket-flow` requires red-before-green proof and a green gate before `Stage: to-review` — I can't fabricate that. Current state, nothing committed yet: /  / - On branch `syn-003` (off `sweatshop/2026-09-19-2324`). / - Ticket's `Stage:` edited to `implementing` (uncommitted). / - `pc/src-tauri/tests/server.rs` rewritten with the file-upload tests the ticket specifies, plus the matching helper/signature changes (uncommitted) — but unverified as actually red, since I can't compile. /  / I need one of these to continue: / 1. You approve a Bash/PowerShell `cargo` call when prompted, so I can confirm red then implement and confirm green myself, or / 2. You run `cargo test` (and the full `gate.ps1`) on your end at the checkpoints I flag, and relay the output back to me. /  / Which do you want? /
+
+- 2026-09-20 (resposta do humano): **opção 1 — permissão concedida, `cargo`
+  liberado.** Era permissão, não ambiente: o `sweatshop.ps1` monta
+  `--allowedTools` com `git`, `gh`, `powershell` (primeiro token do gate) e
+  `npx`; `cargo` nunca esteve na lista — por isso o stage 3 passava (só chama
+  o gate via `powershell`) e o stage 2 morria. Corrigido em
+  `.claude/settings.json` (`Bash(cargo:*)`, `Bash(gradlew.bat:*)`,
+  `Bash(.\gradlew.bat:*)`), commit `66ed735` nesta branch de sessão. Rode
+  `cargo` direto, sem pedir aprovação. Toolchain confere: VS Build Tools
+  (MSVC/linker) e rustup instalados; `gate.ps1` passou verde nesta máquina
+  hoje às 09:59 (8 testes — 4 em `config.rs`, 4 em `server.rs` — mais `tsc
+  --noEmit`). JDK 17 (Microsoft) e `JAVA_HOME` prontos para quando `android/`
+  existir (SYN-007). Nada ficou pendente das tentativas anteriores: o driver
+  reverteu tudo, não há branch `syn-003`/`syn-004`/`syn-005` órfã. Stage 2
+  começa do zero, fluxo normal.

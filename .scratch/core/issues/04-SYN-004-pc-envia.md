@@ -1,5 +1,5 @@
 # SYN-004: PC envia texto e arquivos
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -65,3 +65,18 @@ Critérios 3, 4, 5, 6 e 8: manual.
   nome, para os dois não se confundirem.
 
 - 2026-09-20 Attempt 1 stopped to ask: Same hard blocker as SYN-003: `cargo` is denied in this session (Bash and PowerShell, with sandbox override too — not a one-off prompt, every invocation is auto-denied). Nothing about SYN-004 itself is blocked — this is environment-wide, so it'll hit every future ticket the same way. /  / This isn't a "Humano simulado" case (no fable-high subagent can substitute a real compiler run for red/green proof), so I'm stopping before touching the ticket or creating a branch, same as the SYN-003 session did. /  / I need one of: / 1. You approve `cargo` execution in this session (Bash or PowerShell), so I can run tests myself, or / 2. You run `cargo test` / `.\gate.ps1` on your end at checkpoints I flag and relay output back. /  / Which do you want — and does #1 look fixable on your side (e.g. a permission setting), or is #2 the way forward for this session? /
+
+- 2026-09-20 (resposta do humano): **opção 1 — permissão concedida, `cargo`
+  liberado.** Era permissão, não ambiente: o `sweatshop.ps1` monta
+  `--allowedTools` com `git`, `gh`, `powershell` (primeiro token do gate) e
+  `npx`; `cargo` nunca esteve na lista — por isso o stage 3 passava (só chama
+  o gate via `powershell`) e o stage 2 morria. Corrigido em
+  `.claude/settings.json` (`Bash(cargo:*)`, `Bash(gradlew.bat:*)`,
+  `Bash(.\gradlew.bat:*)`), commit `66ed735` nesta branch de sessão. Rode
+  `cargo` direto, sem pedir aprovação. Toolchain confere: VS Build Tools
+  (MSVC/linker) e rustup instalados; `gate.ps1` passou verde nesta máquina
+  hoje às 09:59 (8 testes — 4 em `config.rs`, 4 em `server.rs` — mais `tsc
+  --noEmit`). JDK 17 (Microsoft) e `JAVA_HOME` prontos para quando `android/`
+  existir (SYN-007). Nada ficou pendente das tentativas anteriores: o driver
+  reverteu tudo, não há branch `syn-003`/`syn-004`/`syn-005` órfã. Stage 2
+  começa do zero, fluxo normal.
