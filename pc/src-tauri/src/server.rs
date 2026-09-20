@@ -355,6 +355,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     let final_path_bg = final_path.clone();
     let temp_path_bg = temp_path.clone();
     let concluido = tokio::spawn(async move {
+        // Move a reserva do nome para dentro da tarefa: ela só é liberada
+        // depois do rename, nunca enquanto ele ainda está em voo.
         let _lease = _lease;
         match tokio::fs::rename(&temp_path_bg, &final_path_bg).await {
             Ok(()) => {
@@ -371,7 +373,10 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         }
     })
     .await
-    .unwrap_or(false);
+    .unwrap_or_else(|e| {
+        eprintln!("tarefa de conclusão de {final_path:?} não terminou: {e}");
+        false
+    });
 
     if concluido {
         StatusCode::CREATED
@@ -502,7 +507,9 @@ fn reserve_path(dir: &Path, name: &str, leases: &Mutex<HashSet<PathBuf>>) -> Pat
 
 /// Libera, ao sair de escopo, o nome que `reserve_path` reservou — em todo
 /// retorno de `post_file`, sucesso ou erro, para um envio cortado não deixar
-/// o nome preso para sempre.
+/// o nome preso para sempre. Depois que o corpo chega inteiro o guarda passa
+/// para a tarefa que faz o rename, então a reserva só cai quando o arquivo já
+/// está no nome final (ou o rename falhou).
 struct LeaseGuard {
     leases: Arc<Mutex<HashSet<PathBuf>>>,
     path: PathBuf,
