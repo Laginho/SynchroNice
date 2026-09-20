@@ -2,6 +2,7 @@ package synchronice.protocolclient
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import kotlin.test.Test
@@ -21,11 +22,18 @@ private fun fakeServer(port: Int, path: String, handle: (HttpExchange) -> Unit):
     return server
 }
 
-private fun client(port: Int) = ProtocolClient(
+private fun client(port: Int, queueStore: PendingQueueStore = InMemoryPendingQueueStore()) = ProtocolClient(
     pairing = PairingInfo("synchronice-nao-importa", port, TOKEN),
     resolver = InstanceResolver { "127.0.0.1" },
     knownAddress = InMemoryKnownAddressStore(),
+    queueStore = queueStore,
 )
+
+private fun tempFile(bytes: ByteArray): File =
+    File.createTempFile("synchronice-test", ".bin").apply {
+        writeBytes(bytes)
+        deleteOnExit()
+    }
 
 class ProtocolClientTest {
 
@@ -111,6 +119,7 @@ class ProtocolClientTest {
                 pairing = PairingInfo("synchronice-nao-importa", port, TOKEN),
                 resolver = InstanceResolver { null },
                 knownAddress = InMemoryKnownAddressStore().apply { save("127.0.0.1") },
+                queueStore = InMemoryPendingQueueStore(),
             )
 
             client.sendText("oi")
@@ -175,9 +184,92 @@ class ProtocolClientTest {
         try {
             val items = client(port).listen()
 
-            assertEquals(listOf(Item.Text(1, 100, "linha\bfim")), items)
+            assertEquals(listOf(Item.Text(1, 100, "linha\bfim")), items)
         } finally {
             server.stop(0)
+        }
+    }
+
+    @Test
+    fun `envio de arquivo em stream emite progresso crescente ate 100`() {
+        val port = freePort()
+        val content = ByteArray(50_000) { (it % 256).toByte() }
+        val file = tempFile(content)
+        var receivedName: String? = null
+        var receivedBytes: ByteArray? = null
+        val server = fakeServer(port, "/items/file") { exchange ->
+            receivedName = exchange.requestHeaders.getFirst("X-File-Name")
+            receivedBytes = exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val progress = mutableListOf<Int>()
+
+            client(port).sendFile(file) { percent -> progress.add(percent) }
+
+            assertEquals(file.name, receivedName)
+            assertEquals(content.toList(), receivedBytes!!.toList())
+            assertTrue(progress.isNotEmpty())
+            assertEquals(progress.sorted(), progress)
+            assertEquals(100, progress.last())
+        } finally {
+            server.stop(0)
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `falha no envio de arquivo deixa o Item Pendente`() {
+        val port = freePort()
+        val file = tempFile(byteArrayOf(1, 2, 3))
+        try {
+            val client = client(port)
+
+            client.sendFile(file)
+
+            assertTrue(client.hasPending())
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `fila em disco e relida ao recriar o cliente e drenada em ordem`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        val fileToSend = tempFile(byteArrayOf(9, 8, 7))
+        try {
+            val client1 = client(port, FilePendingQueueStore(queueFile))
+            client1.sendText("A")
+            client1.sendFile(fileToSend)
+            assertTrue(client1.hasPending())
+
+            val requestOrder = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requestOrder.add("text:" + exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            server.createContext("/items/file") { exchange ->
+                requestOrder.add("file:" + exchange.requestHeaders.getFirst("X-File-Name"))
+                exchange.requestBody.readBytes()
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                val client2 = client(port, FilePendingQueueStore(queueFile))
+
+                client2.retryPending()
+
+                assertEquals(listOf("text:A", "file:${fileToSend.name}"), requestOrder)
+                assertFalse(client2.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            queueFile.delete()
+            fileToSend.delete()
         }
     }
 }

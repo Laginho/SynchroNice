@@ -1,5 +1,5 @@
 # SYN-008: Android envia por Compartilhar
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-003
 Review: agent
