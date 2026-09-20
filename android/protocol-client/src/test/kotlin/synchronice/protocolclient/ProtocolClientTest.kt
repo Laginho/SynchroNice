@@ -371,6 +371,27 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `falha de IO que nao seja arquivo sumido durante o enfileiramento sobe para quem chamou`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        val payloadDir = File(queueFile.parentFile, "${queueFile.name}.payloads")
+        val fileToSend = tempFile(byteArrayOf(1, 2, 3))
+        try {
+            // Um arquivo comum no lugar da pasta de payloads: o `mkdirs()` do
+            // store não consegue criar o diretório, e a cópia falha por causa
+            // que não é o arquivo original ter sumido.
+            payloadDir.writeText("nao sou um diretorio")
+            val client = client(port, FilePendingQueueStore(queueFile))
+
+            assertFailsWith<IOException> { client.sendFile(fileToSend) }
+        } finally {
+            payloadDir.delete()
+            queueFile.delete()
+            fileToSend.delete()
+        }
+    }
+
+    @Test
     fun `copia orfa em payloads e removida ao reconstruir o store`() {
         val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
         val payloadDir = File(queueFile.parentFile, "${queueFile.name}.payloads")
