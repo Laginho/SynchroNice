@@ -2,6 +2,7 @@
 
 use pc_lib::items::Items;
 use pc_lib::outbox::{OutBody, OutItem, Outbox};
+use pc_lib::par::Par;
 use pc_lib::server;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -26,6 +27,26 @@ fn sobe() -> (String, Items, Outbox, tempfile::TempDir) {
     )
     .expect("servidor sobe em porta aleatória");
     (format!("http://{}", running.addr), items, outbox, raiz)
+}
+
+/// Como `sobe()`, mas autentica com o token vivo de `par` em vez de um
+/// `TOKEN` fixo — rotacionar `par` depois já vale para o servidor, sem
+/// reiniciá-lo (SYN-005).
+fn sobe_com_par(par: Par) -> (String, tempfile::TempDir) {
+    let raiz = tempfile::tempdir().expect("tempdir");
+    let pasta = raiz.path().join("pasta");
+    std::fs::create_dir_all(&pasta).expect("cria Pasta");
+    let items = Items::new();
+    let outbox = Outbox::new(raiz.path().join("outbox")).expect("cria fila de saída");
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        par,
+        items,
+        outbox,
+        Some(pasta),
+    )
+    .expect("servidor sobe em porta aleatória");
+    (format!("http://{}", running.addr), raiz)
 }
 
 fn agent() -> ureq::Agent {
@@ -482,4 +503,58 @@ fn fila_de_saida_sobrevive_a_recriar_o_servidor_do_mesmo_diretorio() {
         Some(b"conteudo persistido".to_vec()),
         "bytes do arquivo sobrevivem à recriação, não só os metadados"
     );
+}
+
+// SYN-005: o Par (nome de instância e token do QR), gerado uma vez e
+// gravado na configuração; "parear de novo" rotaciona o token em voo.
+
+#[test]
+fn criar_par_gera_token_e_nome_de_instancia_e_os_grava() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let par = Par::load_or_create(dir.path()).expect("cria o Par");
+
+    assert!(
+        par.token().len() >= 16,
+        "token curto demais: {:?}",
+        par.token()
+    );
+    assert!(
+        !par.nome_instancia().is_empty(),
+        "nome de instância não pode ser vazio"
+    );
+}
+
+#[test]
+fn recriar_o_par_do_mesmo_diretorio_devolve_o_mesmo() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let primeiro = Par::load_or_create(dir.path()).expect("cria o Par");
+    let segundo = Par::load_or_create(dir.path()).expect("recria o Par");
+
+    assert_eq!(primeiro.token(), segundo.token());
+    assert_eq!(primeiro.nome_instancia(), segundo.nome_instancia());
+}
+
+#[test]
+fn rotacionar_troca_o_token_e_o_servidor_recusa_o_antigo_e_aceita_o_novo() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let par = Par::load_or_create(dir.path()).expect("cria o Par");
+    let antigo = par.token();
+    let (base, _raiz) = sobe_com_par(par.clone());
+
+    assert_eq!(
+        post_texto(&base, Some(&antigo), "antes de rotacionar"),
+        201
+    );
+
+    let novo = par.rotate().expect("rotaciona o token");
+
+    assert_ne!(antigo, novo, "rotacionar deve trocar o token");
+    assert_eq!(
+        post_texto(&base, Some(&antigo), "depois de rotacionar"),
+        401,
+        "o token antigo deve ser recusado imediatamente, sem reiniciar o servidor"
+    );
+    assert_eq!(post_texto(&base, Some(&novo), "com o token novo"), 201);
 }
