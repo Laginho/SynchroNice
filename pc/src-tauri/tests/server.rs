@@ -186,8 +186,8 @@ fn post_arquivo_grava_na_pasta_com_conteudo_identico() {
     let status = post_arquivo(&base, Some(TOKEN), "foto.jpg", bytes);
 
     assert_eq!(status, 201);
-    let gravado =
-        std::fs::read(raiz.path().join("pasta").join("foto.jpg")).expect("arquivo gravado na Pasta");
+    let gravado = std::fs::read(raiz.path().join("pasta").join("foto.jpg"))
+        .expect("arquivo gravado na Pasta");
     assert_eq!(gravado, bytes);
 }
 
@@ -313,8 +313,7 @@ fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
     std::thread::sleep(Duration::from_millis(300));
 
     let gravado_1 = std::fs::read(pasta.join("foto.jpg")).expect("primeiro arquivo");
-    let gravado_2 =
-        std::fs::read(pasta.join("foto (1).jpg")).expect("segundo arquivo, com sufixo");
+    let gravado_2 = std::fs::read(pasta.join("foto (1).jpg")).expect("segundo arquivo, com sufixo");
 
     let mut gravados = vec![gravado_1, gravado_2];
     gravados.sort();
