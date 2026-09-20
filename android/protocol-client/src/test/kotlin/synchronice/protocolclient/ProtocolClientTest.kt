@@ -408,7 +408,7 @@ class ProtocolClientTest {
             assertTrue(progress.isNotEmpty())
             assertEquals(progress.sorted(), progress)
             assertEquals(100, progress.last())
-            assertEquals(listOf("Bearer $TOKEN"), ackedIds)
+            assertEquals(listOf<String?>("Bearer $TOKEN"), ackedIds)
         } finally {
             server.stop(0)
             destination.delete()
