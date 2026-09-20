@@ -1,5 +1,6 @@
 pub mod anuncio;
 pub mod config;
+pub mod drag;
 pub mod items;
 pub mod outbox;
 pub mod par;
@@ -111,6 +112,19 @@ fn read_file_bytes(app: tauri::AppHandle, name: String) -> Result<Vec<u8>, Strin
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let pasta = config::load_pasta(&config_dir).ok_or("a Pasta ainda não foi escolhida")?;
     std::fs::read(pasta.join(server::sanitize_file_name(&name))).map_err(|e| e.to_string())
+}
+
+/// Caminho absoluto do arquivo de uma bolha recebida, para o drag nativo do
+/// SO (SYN-006). Erro se a Pasta ainda não foi escolhida ou o arquivo não
+/// está mais lá — a janela então não chama o drag e marca a bolha como
+/// sumida, em vez de arrastar um caminho que não existe.
+#[tauri::command]
+fn caminho_para_arrastar(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let pasta = config::load_pasta(&config_dir).ok_or("a Pasta ainda não foi escolhida")?;
+    drag::resolve(&pasta, &name)
+        .and_then(|caminho| caminho.to_str().map(str::to_string))
+        .ok_or_else(|| "o arquivo não está mais na Pasta".to_string())
 }
 
 /// Enter no composer: enfileira o texto para o celular.
@@ -265,6 +279,7 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_drag::init())
         .manage(Items::new())
         .invoke_handler(tauri::generate_handler![
             list_items,
@@ -274,7 +289,8 @@ pub fn run() {
             send_text,
             send_files,
             send_bytes,
-            read_clipboard_file_list
+            read_clipboard_file_list,
+            caminho_para_arrastar
         ])
         .setup(|app| {
             let handle = app.handle().clone();

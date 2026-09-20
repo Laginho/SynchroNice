@@ -1,7 +1,7 @@
 // A janela do chat. Desenha cada Item recebido como bolha à esquerda ("o
 // outro") e cada Item enviado como bolha à direita ("eu"), e enfileira o que
 // o composer, o drop e o Ctrl+V mandam para o celular (SYN-004).
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -161,9 +161,46 @@ function atualizarProgresso(bubble: HTMLElement, item: FileItem): void {
   }
 }
 
+/** A bolha some do jeito que está: o nome permanece, só a legenda muda. */
+function marcarArquivoSumido(bubble: HTMLElement): void {
+  bubble.classList.add("sumiu");
+  const meta = bubble.querySelector<HTMLElement>(".file-meta");
+  if (meta) meta.textContent = "o arquivo não está mais na Pasta";
+}
+
+/** Arrasta o arquivo de uma bolha recebida para fora da janela, como o
+ * arquivo real que está na Pasta (SYN-006). O backend resolve o caminho e
+ * confere que o arquivo ainda existe; só então o plugin de drag assume o
+ * rastreio nativo do mouse, no lugar da Drag and Drop API da web (que só
+ * entrega o arquivo dentro da própria janela). */
+function iniciarDrag(nome: string, bubble: HTMLElement): void {
+  invoke<string>("caminho_para_arrastar", { name: nome })
+    .then((caminho) => {
+      const onEvent = new Channel<{ result: "dropped" | "cancel" }>();
+      return invoke("plugin:drag|start_drag", {
+        item: [caminho],
+        image: caminho,
+        options: { mode: "copy" },
+        onEvent,
+      });
+    })
+    .catch((e) => {
+      marcarArquivoSumido(bubble);
+      console.error(`não foi possível arrastar ${nome}: ${e}`);
+    });
+}
+
 function renderArquivo(item: FileItem): HTMLElement {
   const bubble = document.createElement("div");
   bubble.className = "item file";
+  // Só uma bolha terminada arrasta: em progresso, `.enviando` ainda está
+  // presente (ver `atualizarProgresso`), e não há arquivo com nome final
+  // na Pasta para arrastar ainda.
+  bubble.addEventListener("mousedown", (event) => {
+    if (event.button === 0 && !bubble.classList.contains("enviando")) {
+      iniciarDrag(item.name, bubble);
+    }
+  });
 
   const ehImagem = IMAGEM.has(extensao(item.name));
   if (ehImagem) {

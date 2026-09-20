@@ -36,6 +36,9 @@ clipboard-win = "5"
 mdns-sd = { version = "0.21", default-features = false }
 # QR de pareamento (SYN-005), renderizado como SVG.
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+# Arrastar o arquivo de uma bolha para outro programa (SYN-006): drag nativo
+# do SO a partir do WebView, que a Drag and Drop API da web não faz.
+tauri-plugin-drag = "2"
 
 [dev-dependencies]
 tempfile = "3"

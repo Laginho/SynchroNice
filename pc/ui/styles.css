@@ -262,6 +262,14 @@ body {
 .item.file time {
   grid-column: 1 / 3;
 }
+/* Arrastar para fora da janela (SYN-006) — só a bolha terminada. */
+.item.file:not(.enviando) {
+  cursor: grab;
+}
+.item.file.sumiu {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 @keyframes progresso-listrado {
   from {
     background-position: 0 0;
