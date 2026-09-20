@@ -1,5 +1,5 @@
 # SYN-007: Casca do Android
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-005
 Review: agent
@@ -66,6 +66,53 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
 - 2026-09-20 Attempt 1 stopped to ask: ...on this machine: JDK 17 is present, but there's no system Gradle and **no Android SDK** (`ANDROID_HOME`/`ANDROID_SDK_ROOT` unset, no `%LOCALAPPDATA%\Android\Sdk`). Network access works, so I *could* download the Gradle wrapper and the full Android SDK (cmdline-tools + platform + build-tools — roughly 1–2GB), but that's a real install on your machine, not something scoped to the repo. /  / SYN-007 asks for a real Android app module (camera QR scan, chat UI, mDNS, background listening) — that needs `com.android.application` + the SDK to even compile, let alone pass `gradle check` in the full gate. Two ways I can go: /  / 1. **I install the Android SDK now** (cmdline-tools, platform 34, build-tools) so the ticket ships in full — app module included, gate builds it for real. / 2. **Scope this session to the protocol-client module only** — pure Kotlin/JVM, fully covered by the tests the ticket already specifies, gate wired for it (criterion 7). The actual app shell (UI/camera/mDNS/service, criteria 1–6) gets deferred to a follow-up ticket once the SDK exists on a build machine, tracked as a comment on SYN-007 rather than silently dropped. /  / Which do you want — install the SDK, or split the scope? /
 - 2026-09-20 Resposta (humano): **opção 2.** Não instale o Android SDK: 1–2 GB de SDK é mudança na máquina, não no repo, e essa decisão fica com o humano de verdade. O módulo cliente em Kotlin/JVM puro compila e testa só com o JDK 17 que já existe, e é exatamente o que o critério 7 pede. **Baixar o Gradle wrapper para dentro do repo está liberado** — `gradle/wrapper/gradle-wrapper.properties`, `gradle-wrapper.jar` da distribuição oficial e `gradlew.bat` são arquivos do projeto, prática padrão, não instalam nada no sistema; sem eles o `gate.ps1` não tem como rodar `.\gradlew.bat`. Escopo do ticket reduzido ao módulo cliente + critério 7; critérios 1–6 movidos para o bloco "Adiado — precisa do Android SDK" no corpo.
 - Débito humano: Android SDK não instalado nesta máquina — a casca do app (critérios 1–6: UI, câmera/QR, mDNS, serviço em background) não foi construída nem verificada; decidir se instala o SDK e abrir ticket para ela.
+
+- 2026-09-20 (stage 2, notas para o revisor): módulo `android/protocol-client`
+  em `synchronice.protocolclient`, Kotlin/JVM puro (`kotlin("jvm")`,
+  `jvmToolchain(17)`). `ProtocolClient` recebe um `PairingInfo` (nome de
+  instância, porta, token), um `InstanceResolver` (o mDNS de verdade é a
+  casca do app, adiada) e um `KnownAddressStore` — a resolução tenta o
+  resolvedor e cai pro último IP salvo quando ele devolve `null`, e todo IP
+  resolvido com sucesso é salvo, então a próxima falha já cai nele.
+
+  `sendText` tenta mandar na hora; se `IOException` (PC fora do ar), o texto
+  entra numa fila em memória (`ConcurrentLinkedQueue`) e só sai numa chamada
+  explícita a `retryPending()` — sem retry automático em background, porque
+  isso é "manter a conexão de escuta enquanto o app está em tela", que é
+  casca do app e está no bloco Adiado. `listen()` é um ciclo só do long-poll
+  (bloqueia, devolve os Itens da resposta, fecha); reabrir em loop também
+  fica pra casca do app.
+
+  Sem dependência de JSON: troquei kotlinx.serialization (que pediria o
+  plugin de serialização e mais uma versão pra casar com o Kotlin do
+  projeto) por um parser interno (`FlatJson.kt`) — o corpo de `/listen` é um
+  objeto plano de um nível (`id`, `at_ms`, `kind`, e `text` ou `name`+`size`,
+  spec em `server.rs`), então um parser geral seria mais superfície do que
+  o contrato pede.
+
+  Os 4 testes usam `com.sun.net.httpserver.HttpServer` (built-in do JDK, sem
+  dependência nova) como servidor fake: um por comportamento do "Tests stage
+  2 writes" — token na requisição, ordem dos Itens, Pendente-e-reenvio (porta
+  livre fechada primeiro pra simular indisponível, depois um servidor real
+  sobe nela pra simular reconectar), e resolução falhando usando o IP salvo.
+  Vermelho confirmado antes do código (módulo não existia, erro de
+  compilação); depois de escrever o código, sobrou um vermelho residual só
+  de inferência de tipo em dois `assertEquals` (kotlin.test usa
+  `@OnlyInputTypes`, que não generaliza `List<Pair<String, String>>` para
+  `List<Pair<String?, String>>` sem anotação) — ajustei em commit próprio,
+  ainda só teste, antes do código de verdade.
+
+  Gate completo verde (`fmt`, `clippy`, `cargo test`, `tsc`, `gradle check`).
+  Uma rodada anterior do gate completo pegou
+  `dois_envios_concorrentes_do_mesmo_nome_preservam_ambos` (pc/src-tauri)
+  falhando com `NotFound` — não toquei em nada de `pc/`, e uma segunda
+  rodada, sem qualquer mudança, passou; leio como flakiness pré-existente do
+  teste de concorrência, não como algo que este ticket introduziu.
+
+  Critério 7 verificado (`gate.ps1` roda os testes do módulo e falharia se
+  eles falhassem — foi exatamente isso que aconteceu antes do código
+  existir). Critérios 1–6 seguem Adiados, sem verificação manual nesta
+  entrega, como já registrado acima.
 
 - 2026-09-20 Attempt 1 stopped to ask: Hit a permission wall: writing `android/gradle/wrapper/gradle-wrapper.properties` is being auto-blocked as a "sensitive file" edit, even via heredoc. Content is just the standard Gradle wrapper config (distribution URL for `gradle-8.10-bin.zip`, no secrets) — I need it to point the wrapper at a real Gradle download so `gate.ps1 -TestsOnly` can run `.\gradlew.bat test`. /  / Can you approve that edit, or would you rather I write it a different way (e.g. you create the file, or you adjust the permission rule for `*.properties` under `android/`)? /
 - 2026-09-20 Resposta (humano): **obstáculo já removido, não recrie nada.** O wrapper está commitado nesta branch em `2c8b73c`: `android/gradlew`, `android/gradlew.bat`, `android/gradle/wrapper/gradle-wrapper.jar` e `android/gradle/wrapper/gradle-wrapper.properties` apontando para `gradle-8.10-bin.zip` (release final, não o rc). Não toque nesses quatro arquivos. O `gate.ps1` mudou no mesmo commit: ele agora dispara o Gradle quando existe `android/settings.gradle.kts`, não mais quando existe a pasta `android/` — o wrapper chega antes do módulo, e Gradle num projeto vazio derrubaria o gate dos stages seguintes. Verificado: com o wrapper no lugar e sem `settings.gradle.kts`, o gate completo passa verde. Consequência: no commit em que `android/settings.gradle.kts` aparecer, o módulo `protocol-client` já precisa buildar e passar nos testes, porque o Gradle entra no gate de verdade a partir dali. O clone temporário `.tmp-gradle-wrapper/` de uma sessão anterior já foi removido, árvore limpa. Escopo segue o decidido acima: `protocol-client` em Kotlin/JVM puro (critério 7); critérios 1–6 continuam no bloco "Adiado — precisa do Android SDK".
