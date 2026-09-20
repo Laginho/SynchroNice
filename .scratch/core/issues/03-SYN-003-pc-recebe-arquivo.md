@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -21,10 +21,10 @@ final.
 
 #### Acceptance criteria
 
-1. ❌ Enviar uma imagem via `curl` grava o arquivo na Pasta e mostra miniatura na bolha à esquerda. — grava, mas a miniatura nunca aparece com o `curl` do bloco Verification (review 2026-09-20, achado 1).
-2. ❌ Enviar um PDF grava o arquivo e mostra nome, `PDF` e tamanho legível na bolha. — grava, mas a bolha fica presa no estado "enviando", sem o tipo nem o tamanho (mesmo achado 1).
-3. ⚠️ Enviar `foto.jpg` duas vezes resulta em `foto.jpg` e `foto (1).jpg` na Pasta, ambos íntegros. — vale em sequência (teste verde); dois envios simultâneos do mesmo nome perdem um dos arquivos (achado 2).
-4. ❌ Durante um envio de mais de 100 MB, a bolha mostra progresso crescendo e uma animação visível. — a barra fica em 0% sem `X-File-Size` (mesmo achado 1).
+1. ✅ Enviar uma imagem via `curl` grava o arquivo na Pasta e mostra miniatura na bolha à esquerda.
+2. ✅ Enviar um PDF grava o arquivo e mostra nome, `PDF` e tamanho legível na bolha.
+3. ✅ Enviar `foto.jpg` duas vezes resulta em `foto.jpg` e `foto (1).jpg` na Pasta, ambos íntegros.
+4. ✅ Durante um envio de mais de 100 MB, a bolha mostra progresso crescendo e uma animação visível.
 5. ✅ Um envio interrompido no meio não deixa arquivo com nome final na Pasta.
 6. ✅ Um nome de arquivo com caminho (`../x.txt`) ou caracteres inválidos no Windows é saneado e o arquivo fica dentro da Pasta.
 
@@ -251,3 +251,117 @@ Achados menores, fora do que bloqueia — não mexer neles aqui:
   `sanitize_file_name`/dotfile/nome reservado do Windows, `random_suffix`
   duplicado, `sanitize_file_name` pública, `URL.createObjectURL` sem revogar)
   não foram tocados — continuam fora deste ticket.
+
+- Débito humano: critérios 1, 2 e 4 provados por harness jsdom sobre o
+  `main.ts`/`styles.css` reais (DOM, classes, texto da meta, largura da barra e
+  regra CSS animada casando), não a olho — fica sem verificação manual o que só
+  o WebView2 mostra: se a miniatura 56×56 aparece de fato à esquerda e legível
+  (Blob/ObjectURL decodificando a imagem), se as listras de 16px a 0,6s são
+  perceptíveis numa barra de 6px, e se a transição de largura de 0,15s parece
+  "progresso crescendo" com os pedaços que o servidor emite num upload real de
+  100 MB+.
+
+#### Resolution (2026-09-20)
+
+Verdict: Approve
+
+Higiene do fluxo. Separação teste/código limpa nos commits novos: `bc5a0c4` toca
+só `tests/server.rs`, `9ea4049` só `src/items.rs`, `src/server.rs` e
+`ui/main.ts` (`b0015f0` entre os dois é `cargo fmt` no arquivo de teste).
+Vermelho confirmado: em `bc5a0c4` o helper `arquivos()` desestrutura
+`ItemBody::File { name, size, received, done }` e `ItemBody::File` daquele
+commit não tinha `done` — a crate de teste não compilava, os três testes novos
+eram vermelhos. Gate completo verde nesta máquina: fmt, clippy, 15 testes
+(4 em `config.rs`, 11 em `server.rs`), `tsc --noEmit`.
+
+Prova extra de que o teste de concorrência morde. A review não aceitou "não
+compilava" como vermelho para o achado 2, porque isso não mostra a corrida.
+Desliguei só a checagem do aluguel em `reserve_path` (`!leased.contains(&candidate)`,
+o estado pré-correção) e rodei `gate.ps1 -TestsOnly`:
+`dois_envios_concorrentes_do_mesmo_nome_preservam_ambos` falhou —
+`segundo arquivo, com sufixo: NotFound` em `tests/server.rs:279`, os outros 10
+verdes. Edição revertida, árvore limpa. O teste detecta a regressão de verdade.
+
+Achado 1, fechado. `post_file` lê `content-length` primeiro e cai em
+`x-file-size` só quando ele falta (`server.rs:151`) — ajuste 1 da resposta do
+humano, e o bloco de protocolo no topo do arquivo foi atualizado junto, que é o
+contrato que SYN-008 vai ler. `ItemBody::File.done` é ligado por
+`Items::file_done` chamado depois do `rename` (`server.rs:208` e `:215`, nessa
+ordem), nunca por `received >= size`; `atualizarProgresso` lê `item.done`.
+
+Achado 2, fechado. `reserve_path` escolhe o nome e o insere num
+`HashSet<PathBuf>` no `AppState` sob o mesmo lock que faz o `exists()`, e um
+`LeaseGuard` o remove no `Drop`, o que cobre os quatro retornos de `post_file`
+(401/503/400/500 e o 201) — aluguel em memória, não arquivo vazio, exatamente o
+ajuste 2.
+
+Critérios 1, 2 e 4, que eram manuais. Verificados por um harness fora do repo
+(jsdom 24, `pc/index.html` e `pc/ui/styles.css` reais, `pc/ui/main.ts` real
+transpilado, só os três imports `@tauri-apps/*` stubados), alimentado com a
+sequência que `post_file` emite de fato — `start_file` → `file_progress` por
+pedaço → `file_done`. 56 asserções, todas verdes. Os pontos que importam:
+`read_file_bytes` **não** é chamado no estado `received == size, done: false`
+(a UI nunca tenta ler o `.part-<hex>`) e é chamado uma vez só, com o nome
+final, depois do `done`; `.file-meta` fecha em `JPG · 3,0 KB` e `PDF · 1,2 MB`;
+num envio de 120 MB a largura da barra cresce monotonicamente de 6,67% a 100%
+e a única regra do CSS que casa com ela enquanto `.enviando` está lá é
+`.item.file.enviando .progress .bar`, com `animation: progresso-listrado 0.6s
+linear infinite`. O que jsdom não prova está na linha `Débito humano:` acima.
+
+Achados menores desta rodada, fora do escopo deste ticket — para o stage 1
+transformar em `CLEAN-*` ou em critério novo, junto com os que a rodada
+anterior já tinha separado:
+
+- **Aluguel não cobre diferença de caixa no Windows.** `leases` é um
+  `HashSet<PathBuf>` que compara byte a byte, mas `exists()` no NTFS é
+  case-insensitive. `foto.jpg` e `Foto.jpg` concorrentes alugam caminhos
+  "diferentes", nenhum vê o outro, e os dois `rename` resolvem para o mesmo
+  arquivo — um sobrescreve o outro. Fere a história 24 ("nunca sobrescrever").
+  Em sequência não quebra, porque aí o `exists()` pega. Mesma família dos
+  achados de sistema de arquivos do Windows que a rodada anterior já parqueou
+  (nome reservado, dotfile). Precisa de teste novo, por isso não é conserto de
+  review.
+- **`size: 0` deixa a barra parada.** Com corpo chunked e sem `X-File-Size` o
+  `size` fica 0, e `main.ts:117` só mexe em `barra.style.width` sob
+  `item.size > 0` — a barra fica em 0% e a animação listrada roda numa largura
+  zero. O humano aceitou esse caminho ("a bolha conta bytes e termina pelo
+  sinal de fim") e só o contador de bytes se move; contra a história 26, uma
+  barra indeterminada seria melhor.
+- **`JPG · 0 B` no fim de um envio sem tamanho.** No mesmo caminho, ao
+  completar, a meta usa `tamanhoLegivel(item.size)` — com `size` desconhecido
+  mostra `0 B` para um arquivo que tem bytes. Deveria cair em `received`.
+  Achado independente da review e do harness.
+- **O teste de concorrência não afirma que houve sobreposição.** Ele ignora
+  `_items`. Se um dia o servidor passar a atender conexões em série, o teste
+  degrada em silêncio para uma cópia de `segundo_post_do_mesmo_nome_ganha_sufixo`
+  e fica verde com o aluguel quebrado. Uma asserção de que os dois Itens
+  nasceram antes de qualquer `done` fecharia isso. Os `sleep` fixos (300 ms
+  aqui, 200 ms no teste de envio cortado) são o outro risco de flake.
+- **Glossário: `done` é o "Entregue" do `CONTEXT.md`.** O estado ganhou três
+  nomes — `done` no enum e no JSON, `completo` no `main.ts`, "terminado" nos
+  comentários — enquanto o glossário já define **Entregue**. Os vizinhos no
+  mesmo enum (`name`, `size`, `received`) também são ingleses, então não é
+  desvio isolado; vale o stage 1 decidir de uma vez se o shape do Item fala
+  português.
+- **`file_progress` e `file_done` são a mesma forma** em `items.rs`: lock,
+  `find(|i| i.id == id)`, `if let ItemBody::File`, clone, notify. Um
+  `atualiza_arquivo(id, impl FnOnce(&mut ...))` serve os dois. `CLEAN-*`.
+- **`server.rs` acumulou o que não é protocolo**: saneamento de nome, colisão
+  ` (n)`, arquivo temporário e registro de aluguéis, a ponto de `lib.rs`
+  importar `server::sanitize_file_name` para uma miniatura. Um módulo `pasta.rs`
+  juntaria o que muda junto e resolveria de quebra a invariante "não sai da
+  Pasta" que hoje mora em dois lugares. `CLEAN-*`.
+- **`size: u64` com `0` significando "desconhecido"** é sentinel que já vazou
+  para dois `item.size > 0` na UI e para dois doc comments. `Option<u64>`
+  (JSON `null`) diria a verdade. Muda o shape do protocolo, então é decisão de
+  stage 1.
+- Duplicação menor nos testes: `post_arquivo` vs `post_arquivo_sem_x_file_size`
+  diferem por um cabeçalho, e a requisição HTTP crua é montada à mão em dois
+  testes.
+
+Arquivos: `pc/src-tauri/src/items.rs`, `pc/src-tauri/src/server.rs`,
+`pc/src-tauri/src/lib.rs`, `pc/src-tauri/tests/server.rs`, `pc/ui/main.ts`,
+`pc/ui/styles.css` — todos dentro dos Primary files. Fora deles, só
+`pc/src-tauri/Cargo.toml` e `Cargo.lock` (dependências `futures-util` e
+`getrandom` que a rota em stream exige), da rodada anterior. A review não mexeu
+em código.
