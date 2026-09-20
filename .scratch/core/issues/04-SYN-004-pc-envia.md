@@ -1,5 +1,5 @@
 # SYN-004: PC envia texto e arquivos
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -146,3 +146,108 @@ Critérios 3, 4, 5, 6 e 8: manual.
   critério de aceite deste ticket, e os bytes do arquivo enviado vivem na
   fila interna, não na Pasta que `read_file_bytes` lê — ficaria para um
   ticket que pedisse isso.
+
+- Débito humano: arrastar um arquivo do Explorer para a janela e ver a bolha
+  de arquivo à direita, Pendente (critério 3 — o drop nativo do WebView2 não
+  se reproduz sem o app aberto).
+- Débito humano: Ctrl+V com um print no clipboard cria bolha de imagem à
+  direita (critério 4 — confirmar que, lendo do `clipboardData` do evento, o
+  WebView2 não pede permissão nenhuma).
+- Débito humano: Ctrl+V com um e com dois arquivos copiados no Explorer cria
+  uma e duas bolhas de arquivo à direita (critério 5).
+- Débito humano: com um cliente em `/listen` (`curl -N`) o ponto de presença
+  fica verde e volta a cinza ao cortar a conexão (critério 8); observar de
+  quebra o piscar a cada envio do PC.
+- Débito humano: sair pela bandeja, reabrir, e confirmar que o chat abre
+  vazio com os Pendentes ainda na fila (critério 7 — a correção da revisão
+  está coberta só por leitura de código).
+
+- 2026-09-20 (revisão, achados deixados fora desta correção): três coisas
+  vistas na revisão que não são critério deste ticket e não valem reabri-lo.
+  (a) **A bolha de arquivo enviada desalinha**: `.item.file` é um grid de duas
+  colunas (`pc/ui/styles.css`), e a bolha enviada tem `.file-info` e `.rodape`
+  como filhos, então os dois caem lado a lado numa linha só; a regra
+  `.item.file time { grid-column: 1/3 }` não alcança o `<time>` de dentro do
+  `.rodape`. Cosmético, a bolha aparece à direita do mesmo jeito. (b)
+  **`send_files` lê o arquivo inteiro para a RAM** (`std::fs::read` em
+  `pc/src-tauri/src/lib.rs`) antes de `enqueue_file` gravá-lo de volta na
+  fila: um vídeo grande passa inteiro pela memória, contra a história 31 da
+  spec ("leve em disco e RAM"). (c) **Arrastar uma pasta aborta o resto do
+  lote**: `fs::read` num diretório dá erro e `send_files` retorna no primeiro
+  erro, então os caminhos depois dele no mesmo drop somem sem aviso (só
+  `console.error`). (b) e (c) precisam de teste novo para fechar.
+
+#### Resolution (2026-09-20)
+
+Verdict: Needs your call: as duas correções desta revisão são comportamento
+de janela que não consigo rodar — a do critério 4 em especial troca o caminho
+de leitura do clipboard com base em fontes do wry/tauri, não em teste com o
+app aberto.
+
+**Achado 1 — critério 7, o chat não abria vazio (corrigido, `e7b67e4`).**
+A janela chamava `list_pending` na abertura e desenhava cada Pendente
+persistido como bolha; `main()` só roda no início do processo, que é
+exatamente o caso que o critério nomeia — "o chat visível está vazio, a fila
+não". Contradizia também o glossário ("ao encerrar, o texto da Sessão é
+descartado") e a spec ("Sessão em memória… encerrar de fato o app limpa").
+Sumiu o comando `list_pending` (`pc/src-tauri/src/lib.rs`) e a replay na
+abertura (`pc/ui/main.ts`); junto, `renderEnviado` passou a ignorar a
+confirmação de um id que esta Sessão nunca desenhou — sem isso, o celular
+buscando um Pendente de antes do reinício faria brotar uma bolha já Entregue
+num chat que tem que abrir vazio.
+
+**Achado 2 — critério 4, Ctrl+V de print dependia de permissão (corrigido,
+`1903a91`).** A janela lia o print por `navigator.clipboard.read()`. No
+WebView2 essa API exige o grant de `CLIPBOARD_READ`, e o wry só instala o
+handler que o concede quando o app chama `enable_clipboard_access()`
+(`wry-0.55.1/src/webview2/mod.rs:497-515`); `WebviewAttributes::clipboard`
+nasce `false` (`tauri-runtime-2.11.3/src/webview.rs:516`), nada em
+`pc/src-tauri` liga isso e não existe chave para ele no `tauri.conf.json`.
+Sem o grant a leitura cai no prompt do próprio WebView2 — e colar um print
+não pode abrir caixa de diálogo. A imagem passou a sair do `clipboardData`
+do evento de colagem, que não pede permissão, extraída de forma síncrona
+(depois de um `await` o `clipboardData` já está vazio). Junto, a lista
+`CF_HDROP` do Explorer passou a ser consultada **antes** da imagem: é o
+sinal inequívoco de "copiei arquivos", e sem essa ordem a miniatura que o
+Explorer põe no clipboard junto de um `.png` faria um arquivo copiado virar
+bolha de imagem sem nome, quebrando o critério 5.
+
+**Critérios.** 1, 2 e 7 (metade da fila) cobertos por teste; 3, 5, 6 e 8
+conferidos por leitura do caminho ponta a ponta (evento do DOM → comando
+Tauri → `Outbox` → evento `enviado` → bolha), nomes de comando, argumento,
+evento e seletor todos batendo; 6 é inteiramente estático — `pc/index.html`
+tem um único `<button>`, o `.send`, nenhum `type="file"` e nenhum ícone de
+anexo, e `main.ts` nunca cria `button` nem `input`. 4 é o único que não
+consigo fechar nem por leitura, por isso o `Needs your call`.
+
+**Fila de Pendentes: a spec ganhou do ticket, e certo.** O "What to build"
+deste ticket diz "arquivo por caminho"; a spec diz o contrário ("arquivo
+copiado para uma pasta interna do app, nunca só o caminho, porque PNG
+temporário, arquivo movido e URI de Compartilhar do Android não sobrevivem
+até a entrega"). O stage 2 seguiu a spec — `enqueue_file` copia os bytes
+para `<id>.bin` no diretório da fila. É a leitura correta.
+
+**Prova red-before-green.** `0f879e2` toca só `tests/server.rs` e o ticket;
+`pc/src-tauri/src/outbox.rs` não existia nesse commit (`git ls-tree 0f879e2
+pc/src-tauri/src/`) e o arquivo de teste importa
+`pc_lib::outbox::{OutBody, OutItem, Outbox}` — o crate de teste não
+compilava, vermelho exatamente pela razão que "Tests stage 2 writes"
+previu (fila, escuta e download não existem). `b291fb9` toca só `src/`,
+sem tocar em teste; `52db6d2` só UI e `lib.rs`. A separação do `diff
+--stat` está limpa.
+
+**Gate verde** (`powershell -ExecutionPolicy Bypass -File .\gate.ps1`),
+depois das duas correções: `cargo fmt --check`, `cargo clippy`, 19 testes
+(4 em `config.rs`, 15 em `server.rs`), `tsc --noEmit`. `gate: passou`.
+
+**Arquivos das correções.** `pc/ui/main.ts`, `pc/src-tauri/src/lib.rs` —
+ambos dentro dos Primary files, nenhum teste novo (interface está fora de
+teste automático pela spec).
+
+**Deixado de fora de propósito**, cada um registrado em Comments acima ou no
+ticket vizinho: o piscar da presença (vai para SYN-009, é a cadência de
+reconexão do celular que o decide), o layout da bolha de arquivo enviada,
+`send_files` lendo o arquivo inteiro para a RAM, e o drop de uma pasta
+abortando o resto do lote. Nenhum é critério deste ticket, e os dois últimos
+precisariam de teste novo para fechar — reabrir por eles seria maior que o
+achado.
