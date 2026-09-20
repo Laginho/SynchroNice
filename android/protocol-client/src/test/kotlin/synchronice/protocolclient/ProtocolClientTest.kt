@@ -369,6 +369,40 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `fila truncada no meio da ultima linha ainda da um cliente construivel com os Itens integros`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        try {
+            val client1 = client(port, FilePendingQueueStore(queueFile))
+            client1.sendText("item-um")
+            client1.sendText("item-dois")
+            assertTrue(client1.hasPending())
+
+            val raw = queueFile.readText()
+            queueFile.writeText(raw.substring(0, raw.length - 3))
+
+            val requests = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                val client2 = client(port, FilePendingQueueStore(queueFile))
+
+                client2.retryPending()
+
+                assertEquals(listOf("item-um"), requests)
+                assertFalse(client2.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            queueFile.delete()
+        }
+    }
+
+    @Test
     fun `arquivo de fila corrompido nao impede construir o cliente`() {
         val port = freePort()
         val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
