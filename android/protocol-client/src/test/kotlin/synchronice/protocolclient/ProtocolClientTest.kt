@@ -416,6 +416,63 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `anuncio de arquivo vindo do listen e baixado pela mesma costura`() {
+        val port = freePort()
+        val content = ByteArray(1_000) { (it % 256).toByte() }
+        val ackedIds = mutableListOf<String?>()
+        val server = fakeServer(port, "/listen") { exchange ->
+            val body = "{\"id\":99,\"at_ms\":300,\"kind\":\"file\",\"name\":\"relatorio.pdf\",\"size\":${content.size}}"
+            val bytes = body.toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/outbox/99/file") { exchange ->
+            exchange.sendResponseHeaders(200, content.size.toLong())
+            exchange.responseBody.use { it.write(content) }
+        }
+        server.createContext("/outbox/99/ack") { exchange ->
+            ackedIds.add(exchange.requestHeaders.getFirst("Authorization"))
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
+        try {
+            val announced = client(port).listen().single() as Item.FileMeta
+
+            client(port).downloadFile(announced, destination)
+
+            assertEquals(content.toList(), destination.readBytes().toList())
+            assertEquals(listOf<String?>("Bearer $TOKEN"), ackedIds)
+        } finally {
+            server.stop(0)
+            destination.delete()
+        }
+    }
+
+    @Test
+    fun `ack recusado pelo PC nao confirma o download`() {
+        val port = freePort()
+        val content = byteArrayOf(1, 2, 3)
+        val server = fakeServer(port, "/outbox/42/file") { exchange ->
+            exchange.sendResponseHeaders(200, content.size.toLong())
+            exchange.responseBody.use { it.write(content) }
+        }
+        server.createContext("/outbox/42/ack") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
+        try {
+            assertFailsWith<ProtocolRejectedException> {
+                client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", content.size.toLong()), destination) {}
+            }
+        } finally {
+            server.stop(0)
+            destination.delete()
+        }
+    }
+
+    @Test
     fun `download interrompido nao marca o Item como completo e nao envia o ack`() {
         val port = freePort()
         val ackedIds = mutableListOf<String>()
