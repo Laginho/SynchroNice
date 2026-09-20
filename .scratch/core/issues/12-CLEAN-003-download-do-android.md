@@ -1,5 +1,5 @@
 # CLEAN-003: Download do Android — streaming duplicado e restos de um download que falhou
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
