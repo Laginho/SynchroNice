@@ -79,7 +79,10 @@ fn list_pending(outbox: State<'_, Outbox>) -> Vec<OutItem> {
 /// Enter no composer: enfileira o texto para o celular.
 #[tauri::command]
 fn send_text(outbox: State<'_, Outbox>, text: String) -> Result<(), String> {
-    outbox.enqueue_text(text).map(|_| ()).map_err(|e| e.to_string())
+    outbox
+        .enqueue_text(text)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// Drop de arquivo na janela, ou Ctrl+V de arquivos copiados no Explorer:
