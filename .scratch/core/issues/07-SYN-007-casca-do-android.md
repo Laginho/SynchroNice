@@ -1,5 +1,5 @@
 # SYN-007: Casca do Android
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-005
 Review: agent
