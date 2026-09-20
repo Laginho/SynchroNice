@@ -6,6 +6,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -116,6 +117,65 @@ class ProtocolClientTest {
 
             assertEquals(listOf<String?>("Bearer $TOKEN"), requests)
             assertFalse(client.hasPending())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `sendText drena o Pendente em ordem antes do texto novo`() {
+        val port = freePort()
+        val client = client(port)
+
+        client.sendText("A")
+        assertTrue(client.hasPending())
+
+        val requests = mutableListOf<String>()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            client.sendText("B")
+
+            assertEquals(listOf("A", "B"), requests)
+            assertFalse(client.hasPending())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `resposta nao-201 nao vira Pendente`() {
+        val port = freePort()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        try {
+            val client = client(port)
+
+            assertFailsWith<ProtocolRejectedException> { client.sendText("oi") }
+            assertFalse(client.hasPending())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `listen decodifica os escapes b e f`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            val body = "{\"id\":1,\"at_ms\":100,\"kind\":\"text\",\"text\":\"linha\\b\\ffim\"}"
+            val bytes = body.toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        try {
+            val items = client(port).listen()
+
+            assertEquals(listOf(Item.Text(1, 100, "linha\bfim")), items)
         } finally {
             server.stop(0)
         }
