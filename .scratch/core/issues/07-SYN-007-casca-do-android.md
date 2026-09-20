@@ -1,5 +1,5 @@
 # SYN-007: Casca do Android
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-005
 Review: agent
@@ -41,3 +41,5 @@ Critérios 1 a 6: manual, com PC real.
 - `android/.../test/ProtocolClientTest.kt` contra um servidor falso local: enviar texto com token faz a requisição certa; escuta recebe Itens em ordem; servidor indisponível deixa o Item Pendente e ele é enviado ao reconectar; resolução falhando usa o último IP conhecido. Vermelho porque o módulo cliente não existe.
 
 ## Comments
+
+- 2026-09-20 Attempt 1 stopped to ask: ...on this machine: JDK 17 is present, but there's no system Gradle and **no Android SDK** (`ANDROID_HOME`/`ANDROID_SDK_ROOT` unset, no `%LOCALAPPDATA%\Android\Sdk`). Network access works, so I *could* download the Gradle wrapper and the full Android SDK (cmdline-tools + platform + build-tools — roughly 1–2GB), but that's a real install on your machine, not something scoped to the repo. /  / SYN-007 asks for a real Android app module (camera QR scan, chat UI, mDNS, background listening) — that needs `com.android.application` + the SDK to even compile, let alone pass `gradle check` in the full gate. Two ways I can go: /  / 1. **I install the Android SDK now** (cmdline-tools, platform 34, build-tools) so the ticket ships in full — app module included, gate builds it for real. / 2. **Scope this session to the protocol-client module only** — pure Kotlin/JVM, fully covered by the tests the ticket already specifies, gate wired for it (criterion 7). The actual app shell (UI/camera/mDNS/service, criteria 1–6) gets deferred to a follow-up ticket once the SDK exists on a build machine, tracked as a comment on SYN-007 rather than silently dropped. /  / Which do you want — install the SDK, or split the scope? /
