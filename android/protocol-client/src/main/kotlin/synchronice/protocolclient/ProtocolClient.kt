@@ -198,7 +198,8 @@ class ProtocolClient(
     private fun ack(id: Long) {
         val connection = open("/outbox/$id/ack", "POST")
         try {
-            connection.responseCode
+            val code = connection.responseCode
+            if (code != HttpURLConnection.HTTP_NO_CONTENT) throw ProtocolRejectedException(code)
         } finally {
             connection.disconnect()
         }
