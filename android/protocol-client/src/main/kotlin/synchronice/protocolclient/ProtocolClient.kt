@@ -36,16 +36,7 @@ class ProtocolClient(
      * vez de ficar Pendente, porque recusa não é indisponibilidade.
      */
     fun sendText(text: String) {
-        retryPending()
-        if (pending.isNotEmpty()) {
-            enqueue(PendingItem.PendingText(text))
-            return
-        }
-        when (val outcome = trySendText(text)) {
-            SendOutcome.Success -> {}
-            SendOutcome.Unreachable -> enqueue(PendingItem.PendingText(text))
-            is SendOutcome.Rejected -> throw ProtocolRejectedException(outcome.code)
-        }
+        send(makePending = { PendingItem.Text(text) }, attempt = { trySendText(text) })
     }
 
     /**
@@ -54,16 +45,34 @@ class ProtocolClient(
      * drena o Pendente antes, nunca fura, e uma falha no envio (o PC ficar
      * indisponível a qualquer momento da transferência) deixa o arquivo
      * Pendente em vez de perder o Item.
+     *
+     * Uma exceção, e só ela: se o arquivo original já tiver sumido quando a
+     * cópia interna for feita, não há o que guardar e o Item é descartado em
+     * silêncio (ver [PendingQueueStore.enqueue]). Qualquer outra falha ao
+     * guardar a cópia — disco cheio, permissão negada — sobe para quem
+     * chamou, em vez de virar perda silenciosa.
      */
     fun sendFile(file: File, onProgress: (Int) -> Unit = {}) {
+        send(
+            makePending = { PendingItem.File(file.absolutePath, file.name) },
+            attempt = { trySendFile(file, file.name, onProgress) },
+        )
+    }
+
+    /**
+     * Caminho único de envio: drena o Pendente antes, nunca fura a fila; se
+     * ainda houver Pendente à frente ou o PC estiver indisponível, o Item
+     * novo entra no fim da fila. [makePending] é chamado no máximo uma vez.
+     */
+    private fun send(makePending: () -> PendingItem, attempt: () -> SendOutcome) {
         retryPending()
         if (pending.isNotEmpty()) {
-            enqueue(PendingItem.PendingFile(file.absolutePath, file.name))
+            enqueue(makePending())
             return
         }
-        when (val outcome = trySendFile(file, file.name, onProgress)) {
+        when (val outcome = attempt()) {
             SendOutcome.Success -> {}
-            SendOutcome.Unreachable -> enqueue(PendingItem.PendingFile(file.absolutePath, file.name))
+            SendOutcome.Unreachable -> enqueue(makePending())
             is SendOutcome.Rejected -> throw ProtocolRejectedException(outcome.code)
         }
     }
@@ -79,13 +88,13 @@ class ProtocolClient(
     fun retryPending() {
         while (true) {
             val next = pending.firstOrNull() ?: return
-            if (next is PendingItem.PendingFile && !File(next.path).exists()) {
+            if (next is PendingItem.File && !File(next.path).exists()) {
                 dequeueFirst()
                 continue
             }
             val outcome = when (next) {
-                is PendingItem.PendingText -> trySendText(next.text)
-                is PendingItem.PendingFile -> trySendFile(File(next.path), next.name) {}
+                is PendingItem.Text -> trySendText(next.text)
+                is PendingItem.File -> trySendFile(File(next.path), next.name) {}
             }
             when (outcome) {
                 SendOutcome.Success -> dequeueFirst()
@@ -96,7 +105,8 @@ class ProtocolClient(
     }
 
     private fun enqueue(item: PendingItem) {
-        pending.add(queueStore.enqueue(item))
+        val stored = queueStore.enqueue(item) ?: return
+        pending.add(stored)
     }
 
     private fun dequeueFirst() {

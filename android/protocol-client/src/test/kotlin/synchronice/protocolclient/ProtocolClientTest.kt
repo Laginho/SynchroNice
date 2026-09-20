@@ -338,6 +338,76 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `sendFile nao lanca quando o arquivo sumiu antes do enfileiramento, e o Item e descartado`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        try {
+            val client = client(port, FilePendingQueueStore(queueFile))
+            client.sendText("primeiro")
+            assertTrue(client.hasPending())
+
+            val vanished = tempFile(byteArrayOf(1, 2, 3))
+            assertTrue(vanished.delete())
+
+            client.sendFile(vanished)
+
+            val requests = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                client.retryPending()
+
+                assertEquals(listOf("primeiro"), requests)
+                assertFalse(client.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            queueFile.delete()
+        }
+    }
+
+    @Test
+    fun `falha de IO que nao seja arquivo sumido durante o enfileiramento sobe para quem chamou`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        val payloadDir = File(queueFile.parentFile, "${queueFile.name}.payloads")
+        val fileToSend = tempFile(byteArrayOf(1, 2, 3))
+        try {
+            // Um arquivo comum no lugar da pasta de payloads: o `mkdirs()` do
+            // store não consegue criar o diretório, e a cópia falha por causa
+            // que não é o arquivo original ter sumido.
+            payloadDir.writeText("nao sou um diretorio")
+            val client = client(port, FilePendingQueueStore(queueFile))
+
+            assertFailsWith<IOException> { client.sendFile(fileToSend) }
+        } finally {
+            payloadDir.delete()
+            queueFile.delete()
+            fileToSend.delete()
+        }
+    }
+
+    @Test
+    fun `copia orfa em payloads e removida ao reconstruir o store`() {
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        val payloadDir = File(queueFile.parentFile, "${queueFile.name}.payloads")
+        payloadDir.mkdirs()
+        val orphan = File(payloadDir, "orfa-nao-referenciada.bin").apply { writeBytes(byteArrayOf(1)) }
+        try {
+            FilePendingQueueStore(queueFile)
+
+            assertFalse(orphan.exists())
+        } finally {
+            queueFile.delete()
+            payloadDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `fila em disco escapa e recupera barra, TAB, quebra de linha e retorno de carro`() {
         val port = freePort()
         val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
@@ -359,6 +429,40 @@ class ProtocolClientTest {
                 client2.retryPending()
 
                 assertEquals(listOf(text), requests)
+                assertFalse(client2.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            queueFile.delete()
+        }
+    }
+
+    @Test
+    fun `fila truncada no meio da ultima linha ainda da um cliente construivel com os Itens integros`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        try {
+            val client1 = client(port, FilePendingQueueStore(queueFile))
+            client1.sendText("item-um")
+            client1.sendText("item-dois")
+            assertTrue(client1.hasPending())
+
+            val raw = queueFile.readText()
+            queueFile.writeText(raw.substring(0, raw.length - 3))
+
+            val requests = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                val client2 = client(port, FilePendingQueueStore(queueFile))
+
+                client2.retryPending()
+
+                assertEquals(listOf("item-um"), requests)
                 assertFalse(client2.hasPending())
             } finally {
                 server.stop(0)

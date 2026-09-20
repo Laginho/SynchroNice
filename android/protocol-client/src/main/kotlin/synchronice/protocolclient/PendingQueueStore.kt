@@ -1,6 +1,9 @@
 package synchronice.protocolclient
 
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 /** Onde a fila de Pendentes vive entre chamadas — e, na implementação de disco, entre reinícios do app. */
@@ -10,9 +13,11 @@ interface PendingQueueStore {
     /**
      * Põe o Item no fim da fila; devolve o Item como ele deve ser mantido em
      * memória dali em diante (a implementação de disco troca o caminho de um
-     * arquivo pelo da cópia interna, para sobreviver ao original sumir).
+     * arquivo pelo da cópia interna, para sobreviver ao original sumir), ou
+     * `null` se o Item não pôde ser preservado (ex.: o arquivo original já
+     * sumiu quando a cópia foi tentada) — quem chama não o mantém em memória.
      */
-    fun enqueue(item: PendingItem): PendingItem
+    fun enqueue(item: PendingItem): PendingItem?
 
     /** Tira da fila o Item que estava na cabeça e libera o que a implementação tiver reservado para ele. */
     fun dequeueFirst()
@@ -41,13 +46,17 @@ class InMemoryPendingQueueStore : PendingQueueStore {
 class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     private val payloadDir = File(file.parentFile ?: File("."), "${file.name}.payloads")
     private val items: MutableList<PendingItem> =
-        if (file.exists()) file.readLines().filter { it.isNotEmpty() }.mapNotNull(::decodeLineOrNull).toMutableList()
+        if (file.exists()) decodeLines(file.readText()).toMutableList()
         else mutableListOf()
+
+    init {
+        sweepOrphanPayloads()
+    }
 
     override fun load(): List<PendingItem> = items.toList()
 
-    override fun enqueue(item: PendingItem): PendingItem {
-        val stored = if (item is PendingItem.PendingFile) copyIntoPayloadDir(item) else item
+    override fun enqueue(item: PendingItem): PendingItem? {
+        val stored = if (item is PendingItem.File) copyIntoPayloadDir(item) ?: return null else item
         items.add(stored)
         persist()
         return stored
@@ -56,32 +65,87 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     override fun dequeueFirst() {
         if (items.isEmpty()) return
         val removed = items.removeAt(0)
-        if (removed is PendingItem.PendingFile) File(removed.path).delete()
+        if (removed is PendingItem.File) File(removed.path).delete()
         persist()
     }
 
-    private fun copyIntoPayloadDir(item: PendingItem.PendingFile): PendingItem.PendingFile {
+    /**
+     * `null` se o arquivo original já tiver sumido — o Item é descartado em
+     * vez de estourar para quem chamou. Só esse caso é engolido: disco cheio
+     * ou permissão negada sobem, senão o Item se perderia em silêncio e
+     * `sendFile` voltaria como se tivesse dado certo. Quem decide é a
+     * pergunta "o original ainda está lá?", não o tipo da exceção: [copyTo]
+     * dá `kotlin.io.NoSuchFileException` quando o arquivo já sumiu na
+     * checagem inicial e `java.io.FileNotFoundException` quando ele some
+     * entre essa checagem e a abertura do stream, e os dois são o mesmo caso.
+     */
+    private fun copyIntoPayloadDir(item: PendingItem.File): PendingItem.File? {
         payloadDir.mkdirs()
+        val original = File(item.path)
         val copy = File(payloadDir, "${UUID.randomUUID()}-${item.name}")
-        File(item.path).copyTo(copy, overwrite = true)
-        return item.copy(path = copy.absolutePath)
+        return try {
+            original.copyTo(copy, overwrite = true)
+            item.copy(path = copy.absolutePath)
+        } catch (e: IOException) {
+            if (original.exists()) throw e
+            null
+        }
     }
 
+    /**
+     * Uma cópia em [payloadDir] sem Item na fila que a referencie é órfã —
+     * sobrou de um crash entre `copyIntoPayloadDir` e `persist()`. Varrida ao
+     * construir o store, para não acumular para sempre.
+     */
+    private fun sweepOrphanPayloads() {
+        val referenced = items.filterIsInstance<PendingItem.File>().mapTo(HashSet()) { File(it.path).absolutePath }
+        payloadDir.listFiles()?.forEach { candidate ->
+            if (candidate.absolutePath !in referenced) candidate.delete()
+        }
+    }
+
+    /**
+     * Escreve num arquivo temporário e troca pelo arquivo final com um
+     * rename atômico, para um crash no meio da escrita nunca deixar a fila
+     * (que existe justamente para sobreviver a isso) truncada. [Files.move]
+     * sem `ATOMIC_MOVE` pode cair para copiar-e-apagar, que reabre exatamente
+     * essa janela — o temporário fica na mesma pasta do arquivo final
+     * justamente para o rename atômico ser sempre possível.
+     */
     private fun persist() {
         file.parentFile?.mkdirs()
-        file.writeText(items.joinToString("") { encodeLine(it) + "\n" })
+        val tempFile = File(file.parentFile ?: File("."), "${file.name}.tmp")
+        tempFile.writeText(items.joinToString("") { encodeLine(it) + "\n" })
+        Files.move(
+            tempFile.toPath(),
+            file.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+        )
     }
 
     private fun encodeLine(item: PendingItem): String = when (item) {
-        is PendingItem.PendingText -> "T\t${escape(item.text)}"
-        is PendingItem.PendingFile -> "F\t${escape(item.path)}\t${escape(item.name)}"
+        is PendingItem.Text -> "T\t${escape(item.text)}"
+        is PendingItem.File -> "F\t${escape(item.path)}\t${escape(item.name)}"
+    }
+
+    /**
+     * A última linha só é confiável se o arquivo termina em quebra de linha
+     * — do contrário ela é a ponta de uma escrita interrompida (o `persist`
+     * antigo, sem arquivo temporário, podia deixar exatamente isso) e um
+     * fragmento truncado pode decodificar como um Item válido só que errado.
+     * Descartá-la mantém "Itens íntegros" em vez de aceitar dado corrompido.
+     */
+    private fun decodeLines(raw: String): List<PendingItem> {
+        val complete = if (raw.endsWith("\n")) raw else raw.substringBeforeLast("\n", "")
+        return complete.split("\n").filter { it.isNotEmpty() }.mapNotNull(::decodeLineOrNull)
     }
 
     private fun decodeLineOrNull(line: String): PendingItem? {
         val fields = line.split("\t").map(::unescape)
         return when {
-            fields.size >= 2 && fields[0] == "T" -> PendingItem.PendingText(fields[1])
-            fields.size >= 3 && fields[0] == "F" -> PendingItem.PendingFile(fields[1], fields[2])
+            fields.size >= 2 && fields[0] == "T" -> PendingItem.Text(fields[1])
+            fields.size >= 3 && fields[0] == "F" -> PendingItem.File(fields[1], fields[2])
             else -> null
         }
     }
