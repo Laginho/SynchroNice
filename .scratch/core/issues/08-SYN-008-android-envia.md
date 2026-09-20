@@ -1,5 +1,5 @@
 # SYN-008: Android envia por Compartilhar
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-003
 Review: agent
@@ -53,7 +53,7 @@ Critérios adiados:
 
 #### Acceptance criteria
 
-7. `gate.ps1` roda os testes JVM do módulo cliente para o envio de arquivo (`sendFile`: progresso crescente até 100, Pendente em falha) e para a fila de Pendentes em disco (relida e drenada em ordem ao recriar o cliente), e falha se eles falharem.
+7. `gate.ps1` roda os testes JVM do módulo cliente para o envio de arquivo (`sendFile`: progresso crescente até 100, Pendente em falha) e para a fila de Pendentes em disco (relida e drenada em ordem ao recriar o cliente, copiada para pasta interna, payload ausente descartado, sobrevive a `\r` e a arquivo corrompido), e falha se eles falharem.
 
 #### Verification
 
@@ -176,3 +176,130 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
   arquivo é só a linha de `Stage` e deve aplicar limpo. Depois gate completo
   e `to-review`, sem tocar em nada fora de `android/protocol-client/`.
 - Débito humano: fluxo de Compartilhar no app Android (critérios 1–6: intent filters SEND/SEND_MULTIPLE, serviço em primeiro plano com notificação de progresso, bolhas de arquivo com progresso, confirmação curta sem abrir o chat) não foi construído nem verificado à mão — depende do Android SDK numa máquina de build; decidir se instala e abrir ticket para ele, junto com a casca de SYN-007.
+
+- 2026-09-20 (stage 2, retomada): recuperados os três commits da tentativa 1
+  via `git cherry-pick 9a22f07 0e03055 e48df1a` numa `syn-008` nova a partir
+  da sessão, como a resposta acima pediu — sem reescrever teste nem código.
+  Prova de vermelho refeita num worktree descartável: em `793999e` (antes do
+  código), `gate.ps1 -TestsOnly` falha no `gradle test` com erro de
+  compilação (`sendFile`, `PendingQueueStore`, `InMemoryPendingQueueStore`,
+  `FilePendingQueueStore` não resolvidos), Rust intacto (24/24); com
+  `e48df1a` em cima, verde. Gate completo nesta branch: `cargo test` 24/24,
+  `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL,
+  `protocol-client` 10/10 (`TEST-synchronice.protocolclient.ProtocolClientTest.xml`:
+  `tests="10" failures="0" errors="0"`). Nada tocado fora de
+  `android/protocol-client/` e deste ticket.
+
+#### Review (2026-09-20, stage 3) — reaberto
+
+Verdict: Reopen. Gate verde nesta branch (Rust 18/18 + doc-tests, `tsc --noEmit`
+limpo, `gradle check` BUILD SUCCESSFUL, `protocol-client` 10/10 —
+`tests="10" failures="0" errors="0"`), separação teste/código real (`4566dd2` e
+`793999e` só tocam `ProtocolClientTest.kt`, `7543830` só código), e o contrato
+HTTP bate com o servidor (`pc/src-tauri/src/server.rs`: `POST /items/file`,
+`X-File-Name`, `Authorization: Bearer`, `Content-Length` via
+`setFixedLengthStreamingMode`, 201). `sendFile` em si está certo: stream sem
+bufferizar, progresso crescente terminando em 100, falha deixa Pendente.
+
+Cai o **critério 7**, na metade da fila em disco: os testes passam, mas o que foi
+persistido não é a Fila de Pendentes que a spec define. Os três itens abaixo
+estão todos em `android/protocol-client/` (dentro dos Primary files) e os três
+precisam de teste novo — pela regra mecânica do fluxo ("precisa de teste novo ⇒
+volta pro stage 2"), o revisor não conserta nenhum.
+
+1. ❌ **A fila guarda o caminho do arquivo, e a spec proíbe isso por escrito.**
+   `PendingItem.PendingFile(val path: String, …)` recebe `file.absolutePath`, e
+   `retryPending()` reabre `File(next.path)` na hora da entrega. `spec.md`,
+   "Fila de Pendentes": *"arquivo copiado para uma pasta interna do app, **nunca
+   só o caminho**, porque PNG temporário, arquivo movido e URI de Compartilhar
+   do Android não sobrevivem até a entrega"*. É exatamente o caso deste ticket
+   (Compartilhar), então a persistência entregue é nominal: sobrevive a recriar
+   o cliente, não sobrevive ao que a spec diz que acontece de verdade. O
+   `PendingQueueStore` precisa copiar os bytes para uma pasta interna quando o
+   Item entra na fila e apagar a cópia quando ele sai. Teste que falta: enfileira
+   um arquivo, **apaga o original**, recria o cliente, sobe o servidor, drena —
+   o PC recebe os bytes certos com o nome certo.
+2. ❌ **Um arquivo Pendente que sumiu trava a fila para sempre.**
+   `File(next.path).inputStream()` lança `FileNotFoundException`, que é
+   `IOException`, capturada como `SendOutcome.Unreachable`: `retryPending()`
+   volta com o Item ainda na cabeça, e daí em diante todo `sendText`/`sendFile`
+   vê `pending.isNotEmpty()` e enfileira atrás dele. Nada mais é entregue, e o
+   disco preserva o travamento entre reinícios. A cópia do item 1 resolve o caso
+   comum, mas o payload ausente ainda precisa de política (descartar o Item e
+   seguir a fila, não travar). Teste que falta: Pendente cujo payload não existe
+   mais não impede a entrega do Item seguinte.
+3. ❌ **Fila corrompida derruba o cliente no construtor, e um `\r` corrompe a
+   fila.** `decodeLine` chama `error(...)` e indexa `fields[1]`/`fields[2]` sem
+   checar aridade, e isso roda dentro do inicializador de `pending` — logo
+   `ProtocolClient(...)` lança, e o app não abre. Pior: `escape()` cobre `\`,
+   `\t` e `\n` mas **não** `\r`, enquanto `readLines()` quebra linha em `\r`
+   solto e `\r\n`; um texto Pendente com CR vira duas linhas, a segunda cai no
+   `else -> error(...)` e a fila inteira se perde — o único defeito que a
+   própria KDoc do `FilePendingQueueStore` promete não existir. Testes que
+   faltam: round-trip de um texto Pendente com `\`, TAB, `\n` e `\r` (o
+   escaping não tem teste nenhum hoje: o teste de disco enfileira só `"A"`), e
+   arquivo de fila corrompido não impede construir o cliente.
+
+Não bloqueiam a volta, ficam a critério de quem mexer no código (Standards):
+
+- `sendText` e `sendFile` repetem a mesma forma de quatro passos (drena,
+  enfileira-se-pendente, `when(outcome)`); um `private fun send(item: PendingItem)`
+  com os dois chamando-o mata a duplicação e o `PendingItem.PendingFile(...)`
+  construído duas vezes dentro de `sendFile`.
+- `PendingItem.PendingText`/`PendingFile` gagueja; `Item.kt` já nomeia as
+  variantes `Item.Text`/`Item.FileMeta`.
+- `save()` reescreve a fila inteira com `writeText` a cada enfileirar/desenfileirar:
+  crash no meio trunca. Arquivo temporário + rename combina melhor com "sobrevive
+  ao app ser fechado".
+- `onProgress` dispara a cada 8 KB — ~64 mil chamadas quase idênticas no vídeo de
+  500 MB do critério 4 (adiado). Emitir só quando o percentual muda.
+
+Fica como comentário, **fora** do escopo reduzido deste ticket (não é critério
+numerado, não volta como ❌):
+
+- A decisão sobre Item recusado que o comentário de SYN-007 pedia "aqui" não foi
+  tomada, e a resposta do humano que reduziu o escopo não a incluiu. Segue
+  valendo o diagnóstico daquele comentário, agora pior: com a fila em disco, um
+  401 na cabeça da fila trava a entrega **entre reinícios**. Junto com ela: o
+  `503` do PC sem Pasta escolhida (`server.rs`) hoje vira `Rejected` e o Item é
+  perdido sem entrar na fila, embora seja condição recuperável. As duas querem a
+  mesma decisão de política e um critério próprio — stage 1.
+- `retryPending()` drena arquivo com `onProgress` vazio (`{}`): a barra da bolha
+  não anda quando um Pendente é entregue. Só importa quando existir UI — vai
+  junto com o ticket da casca do app.
+- A nota de thread-safety de SYN-007 continua aberta e continua sem chamador
+  concorrente, porque o serviço em primeiro plano segue adiado.
+
+- 2026-09-20 (stage 2, resolve o reopen): os três ❌ acima, cada um com teste
+  novo em `ProtocolClientTest.kt`, commit de teste vermelho (`6042500`) antes
+  do de código (`0b19266`) — separação confirmada, `-TestsOnly` falhou nos 4
+  testes novos antes do código (3 por `AssertionFailedError`, 1 por
+  `IllegalStateException` no construtor por causa da linha corrompida) e
+  passou depois.
+  1. `PendingQueueStore` ganhou `enqueue(item)`/`dequeueFirst()` no lugar de
+     `save(items)` genérico: `FilePendingQueueStore.enqueue()` copia o arquivo
+     para `<fila>.payloads/` e devolve o Item com o caminho da cópia (é esse
+     Item que `ProtocolClient` passa a guardar em memória); `dequeueFirst()`
+     apaga a cópia. `InMemoryPendingQueueStore` vira passthrough puro (não
+     precisa copiar, nunca sobrevive a reinício mesmo).
+  2. `retryPending()` descarta (via `dequeueFirst()`) um `PendingFile` cujo
+     `File(path).exists()` é falso, antes de tentar enviar, e segue o loop —
+     não trava mais nos itens depois dele.
+  3. `escape()`/`unescape()` cobrem `\r` agora (por isso `readLines()` não
+     quebra mais um texto Pendente com CR em duas linhas). `decodeLine` virou
+     `decodeLineOrNull`: linha com tipo desconhecido ou aridade errada volta
+     `null` e é filtrada, em vez de `error(...)` dentro do inicializador de
+     `ProtocolClient` — uma fila corrompida não impede mais construir o
+     cliente, só perde a(s) linha(s) ilegível(is).
+
+  Não toquei nos itens de Standards do review (duplicação `sendText`/`sendFile`,
+  nome de `PendingItem.PendingText`/`PendingFile`, rewrite atômico do arquivo
+  de fila, throttling de `onProgress`) nem nos itens "fora do escopo reduzido"
+  (política de Item recusado, `503` sem Pasta, progresso do `retryPending`,
+  thread-safety) — nenhum deles precisava de teste novo nem está nos Primary
+  files além do que os 3 ❌ já cobrem.
+
+  Gate completo verde nesta branch: `cargo test` 24/24 + doc-tests,
+  `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL, `protocol-client`
+  14/14 (10 antigos + 4 novos). Nada tocado fora de
+  `android/protocol-client/` e deste ticket.
