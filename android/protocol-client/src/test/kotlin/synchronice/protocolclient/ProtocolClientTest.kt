@@ -576,17 +576,21 @@ class ProtocolClientTest {
         }
     }
 
+    // O HttpServer de teste fecha a conexão sem erro nenhum do lado do
+    // cliente quando o handler escreve menos bytes do que o Content-Length
+    // anunciado — por isso a checagem de tamanho em downloadFile é a única
+    // forma confiável de detectar a interrupção.
     @Test
     fun `download interrompido nao marca o Item como completo e nao envia o ack`() {
         val port = freePort()
-        val ackedIds = mutableListOf<String>()
+        var acked = false
         val server = fakeServer(port, "/outbox/42/file") { exchange ->
             val partial = byteArrayOf(1, 2, 3)
             exchange.sendResponseHeaders(200, 10)
             exchange.responseBody.use { it.write(partial) }
         }
         server.createContext("/outbox/42/ack") { exchange ->
-            ackedIds.add("chamado")
+            acked = true
             exchange.sendResponseHeaders(204, -1)
             exchange.close()
         }
@@ -596,7 +600,45 @@ class ProtocolClientTest {
                 client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", 10), destination) {}
             }
 
-            assertTrue(ackedIds.isEmpty())
+            assertFalse(acked)
+        } finally {
+            server.stop(0)
+            destination.delete()
+        }
+    }
+
+    @Test
+    fun `download interrompido nao deixa bytes parciais em destination`() {
+        val port = freePort()
+        val server = fakeServer(port, "/outbox/42/file") { exchange ->
+            exchange.sendResponseHeaders(200, 10)
+            exchange.responseBody.use { it.write(byteArrayOf(1, 2, 3)) }
+        }
+        val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
+        try {
+            assertFailsWith<IOException> {
+                client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", 10), destination) {}
+            }
+
+            assertEquals(0L, destination.length())
+        } finally {
+            server.stop(0)
+            destination.delete()
+        }
+    }
+
+    @Test
+    fun `404 no download do outbox e id inexistente ou ja confirmado, distinto de recusa`() {
+        val port = freePort()
+        val server = fakeServer(port, "/outbox/42/file") { exchange ->
+            exchange.sendResponseHeaders(404, -1)
+            exchange.close()
+        }
+        val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
+        try {
+            assertFailsWith<ItemGoneException> {
+                client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", 10), destination) {}
+            }
         } finally {
             server.stop(0)
             destination.delete()
