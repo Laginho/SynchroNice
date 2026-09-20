@@ -474,6 +474,30 @@ fn arquivo_enfileirado_e_baixado_pela_rota_devolve_bytes_identicos() {
 }
 
 #[test]
+fn arquivo_de_saida_ilegivel_no_disco_vira_500_nao_404() {
+    let (base, _items, outbox, raiz) = sobe();
+
+    let item = outbox
+        .enqueue_file("foto.jpg".to_string(), b"bytes originais")
+        .expect("enfileira arquivo");
+    let arquivo = raiz.path().join("outbox").join(format!("{}.bin", item.id));
+    std::fs::remove_file(&arquivo).expect("remove arquivo para simular erro de leitura");
+    std::fs::create_dir(&arquivo).expect("substitui por diretório: leitura falha sem ser NotFound");
+
+    let (status, _) = requisicao_crua(
+        &base,
+        "GET",
+        &format!("/outbox/{}/file", item.id),
+        Some(TOKEN),
+    );
+
+    assert_eq!(
+        status, 500,
+        "erro de leitura que não é \"arquivo sumiu\" não pode virar 404 (o celular lê 404 como Item já resolvido)"
+    );
+}
+
+#[test]
 fn fila_de_saida_sobrevive_a_recriar_o_servidor_do_mesmo_diretorio() {
     let raiz = tempfile::tempdir().expect("tempdir");
     let dir = raiz.path().join("outbox");
