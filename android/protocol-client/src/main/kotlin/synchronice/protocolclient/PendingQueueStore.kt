@@ -47,7 +47,7 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     override fun load(): List<PendingItem> = items.toList()
 
     override fun enqueue(item: PendingItem): PendingItem {
-        val stored = if (item is PendingItem.PendingFile) copyIntoPayloadDir(item) else item
+        val stored = if (item is PendingItem.File) copyIntoPayloadDir(item) else item
         items.add(stored)
         persist()
         return stored
@@ -56,11 +56,11 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     override fun dequeueFirst() {
         if (items.isEmpty()) return
         val removed = items.removeAt(0)
-        if (removed is PendingItem.PendingFile) File(removed.path).delete()
+        if (removed is PendingItem.File) File(removed.path).delete()
         persist()
     }
 
-    private fun copyIntoPayloadDir(item: PendingItem.PendingFile): PendingItem.PendingFile {
+    private fun copyIntoPayloadDir(item: PendingItem.File): PendingItem.File {
         payloadDir.mkdirs()
         val copy = File(payloadDir, "${UUID.randomUUID()}-${item.name}")
         File(item.path).copyTo(copy, overwrite = true)
@@ -73,15 +73,15 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     }
 
     private fun encodeLine(item: PendingItem): String = when (item) {
-        is PendingItem.PendingText -> "T\t${escape(item.text)}"
-        is PendingItem.PendingFile -> "F\t${escape(item.path)}\t${escape(item.name)}"
+        is PendingItem.Text -> "T\t${escape(item.text)}"
+        is PendingItem.File -> "F\t${escape(item.path)}\t${escape(item.name)}"
     }
 
     private fun decodeLineOrNull(line: String): PendingItem? {
         val fields = line.split("\t").map(::unescape)
         return when {
-            fields.size >= 2 && fields[0] == "T" -> PendingItem.PendingText(fields[1])
-            fields.size >= 3 && fields[0] == "F" -> PendingItem.PendingFile(fields[1], fields[2])
+            fields.size >= 2 && fields[0] == "T" -> PendingItem.Text(fields[1])
+            fields.size >= 3 && fields[0] == "F" -> PendingItem.File(fields[1], fields[2])
             else -> null
         }
     }
