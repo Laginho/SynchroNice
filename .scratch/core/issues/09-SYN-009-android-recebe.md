@@ -1,5 +1,5 @@
 # SYN-009: Android recebe arquivos do PC
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-004
 Review: agent
@@ -51,7 +51,7 @@ Critérios adiados:
 
 #### Acceptance criteria
 
-7. ❌ (revisão de 2026-09-20) `gate.ps1` roda os testes JVM do módulo cliente para o download de Item de arquivo (anúncio recebido pelo `/listen` baixa pela rota de download com progresso crescente até 100 e entrega bytes idênticos; download interrompido não marca o Item como completo nem envia o `ack`), e falha se eles falharem. — **Caiu por duas metades:** nenhum teste parte de um anúncio do `/listen` (os dois novos constroem `Item.FileMeta` à mão), e um `ack` recusado pelo PC é tratado como sucesso, então "confirma o recebimento" não é entregue de fato. Ver o bloco de revisão no fim do arquivo.
+7. `gate.ps1` roda os testes JVM do módulo cliente para o download de Item de arquivo (anúncio recebido pelo `/listen` baixa pela rota de download com progresso crescente até 100 e entrega bytes idênticos; download interrompido não marca o Item como completo nem envia o `ack`), e falha se eles falharem.
 
 #### Verification
 
@@ -61,9 +61,9 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
 
 ## Tests stage 2 writes (own commit, red)
 
-- `android/.../test/ProtocolClientTest.kt`: ao receber anúncio de Item de arquivo, o cliente baixa pela rota de download com progresso crescente e entrega bytes idênticos; download interrompido não marca o Item como completo. Vermelho porque o download não existe. ✅ feito em `15350e5`/`d3bcbef`, mas só a partir de um `Item.FileMeta` construído à mão — ver os dois de baixo.
-- (reaberto 2026-09-20) `android/.../test/ProtocolClientTest.kt`: o anúncio vem do `/listen` de verdade — servidor falso serve a linha NDJSON do Item de arquivo **e** `/outbox/{id}/file`, o teste chama `listen()` e passa o `Item.FileMeta` que voltou para `downloadFile`. Vermelho hoje? Não: passa, e é justamente por isso que falta — nada prova que a costura anúncio→download existe. Escreva-o mesmo assim, no commit de teste, e diga no commit que ele nasce verde por ser cobertura de uma costura já implementada.
-- (reaberto 2026-09-20) `android/.../test/ProtocolClientTest.kt`: `ack` recusado pelo PC (servidor falso responde 401 em `/outbox/{id}/ack`) faz `downloadFile` lançar `ProtocolRejectedException`, em vez de retornar como se tivesse confirmado. Vermelho porque `ack()` hoje lê `responseCode` e joga fora.
+- `android/.../test/ProtocolClientTest.kt`: ao receber anúncio de Item de arquivo, o cliente baixa pela rota de download com progresso crescente e entrega bytes idênticos; download interrompido não marca o Item como completo. Vermelho porque o download não existe. ✅ feito em `15350e5`/`d3bcbef`.
+- (reaberto 2026-09-20) `android/.../test/ProtocolClientTest.kt`: o anúncio vem do `/listen` de verdade — servidor falso serve a linha NDJSON do Item de arquivo **e** `/outbox/{id}/file`, o teste chama `listen()` e passa o `Item.FileMeta` que voltou para `downloadFile`. ✅ feito em `46ab988` (`anuncio de arquivo vindo do listen e baixado pela mesma costura`) — nasceu verde, como o comentário do reopen previu: a costura já funcionava, faltava só a cobertura.
+- (reaberto 2026-09-20) `android/.../test/ProtocolClientTest.kt`: `ack` recusado pelo PC (servidor falso responde 401 em `/outbox/{id}/ack`) faz `downloadFile` lançar `ProtocolRejectedException`, em vez de retornar como se tivesse confirmado. ✅ feito em `46ab988` (`ack recusado pelo PC nao confirma o download`), vermelho confirmado (`AssertionFailedError`, nenhuma exceção lançada) antes do fix em `546d832`.
 
 ## Comments
 
@@ -228,3 +228,31 @@ por isso reabre em vez de eu corrigir aqui.
 - No teste de interrupção, `val ackedIds = mutableListOf<String>()` recebe
   `"chamado"` — não guarda id nenhum. `ackCalls`, ou um booleano com
   `assertFalse(acked)`, seria honesto.
+
+- 2026-09-20 (stage 2, resposta ao reopen): branch `syn-009`, dois commits,
+  os dois itens ❌ da revisão acima.
+
+  `46ab988` (teste): `anuncio de arquivo vindo do listen e baixado pela mesma
+  costura` — servidor falso serve `/listen` (NDJSON com um Item de arquivo),
+  `/outbox/99/file` e `/outbox/99/ack`; o teste chama `listen()`, pega o
+  `Item.FileMeta` único que voltou e passa direto para `downloadFile`. Nasceu
+  verde, como a revisão previu (a costura já existia, só faltava a
+  cobertura). `ack recusado pelo PC nao confirma o download` — servidor falso
+  responde 401 em `/outbox/42/ack`; vermelho confirmado por `-TestsOnly`
+  antes do código (`AssertionFailedError`, nenhuma exceção lançada — `ack()`
+  lia `responseCode` e descartava).
+
+  `546d832` (código): `ack()` agora trata como sucesso só `204` (o único
+  código que `server.rs` devolve, idempotente inclusive para id já
+  confirmado — comentário de revisão de SYN-004 acima) e lança
+  `ProtocolRejectedException` para qualquer outro, igual ao resto do arquivo
+  (`listen`, `trySendText`, `trySendFile`). `protocol-client` 18/18 depois do
+  fix.
+
+  Não toquei nas "Observações que não seguram o ticket" (pump duplicado,
+  bytes parciais em `destination`, 404 vs id já confirmado, KDoc, `ackedIds`
+  do teste de interrupção) — nenhuma é `Tests stage 2 writes` nem Primary
+  files, e a revisão marcou todas como não-bloqueantes. Nada tocado fora de
+  `android/protocol-client/` e deste ticket. Gate completo verde:
+  `cargo fmt --check`, `cargo clippy`, `cargo test` 24/24 + doc-tests,
+  `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL.
