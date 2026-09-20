@@ -397,7 +397,10 @@ async fn get_outbox_file(
     match state.outbox.file_bytes(id) {
         Ok(bytes) => (StatusCode::OK, bytes).into_response(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(e) => {
+            eprintln!("falha ao ler o arquivo de saída do Item {id}: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 
