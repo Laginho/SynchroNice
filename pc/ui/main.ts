@@ -321,38 +321,61 @@ function ligarDrop(): void {
   });
 }
 
-/** Ctrl+V: imagem no clipboard (print) vira PNG lido aqui mesmo pela
- * Clipboard API do WebView2; arquivo(s) copiados no Explorer usam o formato
- * `CF_HDROP`, que essa API não expõe — só o lado Rust lê. */
+/** A primeira imagem da colagem, extraída de forma síncrona: `clipboardData`
+ * só é legível de dentro do handler, qualquer `await` antes disso o esvazia.
+ * O `File` devolvido é uma cópia dos bytes, então pode ser lido depois.
+ *
+ * Vem do evento, não de `navigator.clipboard.read()`: essa API depende, no
+ * WebView2, de um grant de `CLIPBOARD_READ` que o wry só instala quando o app
+ * chama `enable_clipboard_access()` — este não chama, e sem o grant a
+ * permissão cai no prompt do próprio WebView2. Colar um print não pode abrir
+ * uma caixa de diálogo. `clipboardData` não pede permissão nenhuma. */
+function imagemDaColagem(event: ClipboardEvent): { arquivo: File; ext: string } | null {
+  const itens = event.clipboardData?.items;
+  if (!itens) return null;
+  for (let i = 0; i < itens.length; i++) {
+    const item = itens[i];
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const arquivo = item.getAsFile();
+    if (arquivo) return { arquivo, ext: item.type.split("/")[1] ?? "png" };
+  }
+  return null;
+}
+
+/** Ctrl+V: arquivo(s) copiados no Explorer vêm em `CF_HDROP`, formato que só
+ * o lado Rust lê e que é o sinal inequívoco de "copiei arquivos" — por isso
+ * vem primeiro, senão a miniatura que o Explorer põe junto de um .png faria
+ * um arquivo copiado virar bolha de imagem sem nome. Sem `CF_HDROP`, o que
+ * sobra é um print, e ele sai do próprio evento de colagem. */
 function ligarColar(): void {
-  window.addEventListener("paste", () => {
-    void tratarColagem();
+  window.addEventListener("paste", (event) => {
+    void tratarColagem(event);
   });
 }
 
-async function tratarColagem(): Promise<void> {
-  try {
-    const itensDoClipboard = await navigator.clipboard.read();
-    for (const item of itensDoClipboard) {
-      const tipoDeImagem = item.types.find((t) => t.startsWith("image/"));
-      if (!tipoDeImagem) continue;
-      const blob = await item.getType(tipoDeImagem);
-      const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-      const ext = tipoDeImagem.split("/")[1] ?? "png";
-      await invoke("send_bytes", { name: `imagem-${Date.now()}.${ext}`, bytes });
-      return;
-    }
-  } catch (e) {
-    console.error(`clipboard sem imagem legível, tentando lista de arquivos: ${e}`);
-  }
+async function tratarColagem(event: ClipboardEvent): Promise<void> {
+  const imagem = imagemDaColagem(event);
+  // Colagem de texto puro não tem nem imagem nem arquivo: sai antes de
+  // incomodar o lado Rust, e o texto cai no composer como sempre.
+  const temArquivos = event.clipboardData?.types.includes("Files") ?? false;
+  if (!imagem && !temArquivos) return;
 
   try {
     const caminhos = await invoke<string[]>("read_clipboard_file_list");
     if (caminhos.length > 0) {
       await invoke("send_files", { paths: caminhos });
+      return;
     }
   } catch (e) {
-    console.error(`não foi possível colar do clipboard: ${e}`);
+    console.error(`clipboard sem lista de arquivos, tentando a imagem: ${e}`);
+  }
+
+  if (!imagem) return;
+  try {
+    const bytes = Array.from(new Uint8Array(await imagem.arquivo.arrayBuffer()));
+    await invoke("send_bytes", { name: `imagem-${Date.now()}.${imagem.ext}`, bytes });
+  } catch (e) {
+    console.error(`não foi possível enfileirar a imagem colada: ${e}`);
   }
 }
 
