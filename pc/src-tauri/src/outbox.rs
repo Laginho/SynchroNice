@@ -186,8 +186,11 @@ impl Outbox {
     }
 
     /// Bytes de um Item de arquivo ainda pendente, para a rota de download.
-    pub fn file_bytes(&self, id: u64) -> Option<Vec<u8>> {
-        std::fs::read(self.file_path(id)).ok()
+    /// `Err` carrega o `io::Error` original: quem chama distingue "não achou"
+    /// (`ErrorKind::NotFound`) de um erro de leitura de verdade, que não pode
+    /// virar 404 — o celular lê 404 como Item já resolvido, não como recusa.
+    pub fn file_bytes(&self, id: u64) -> io::Result<Vec<u8>> {
+        std::fs::read(self.file_path(id))
     }
 
     /// Remove um Item da fila de Pendentes — só a confirmação do celular faz

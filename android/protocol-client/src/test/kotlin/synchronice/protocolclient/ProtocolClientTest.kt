@@ -580,27 +580,21 @@ class ProtocolClientTest {
     // cliente quando o handler escreve menos bytes do que o Content-Length
     // anunciado — por isso a checagem de tamanho em downloadFile é a única
     // forma confiável de detectar a interrupção.
-    @Test
-    fun `download interrompido nao marca o Item como completo e nao envia o ack`() {
+    private fun downloadInterrompido(configureServer: (HttpServer) -> Unit = {}, assertions: (File) -> Unit) {
         val port = freePort()
-        var acked = false
         val server = fakeServer(port, "/outbox/42/file") { exchange ->
             val partial = byteArrayOf(1, 2, 3)
             exchange.sendResponseHeaders(200, 10)
             exchange.responseBody.use { it.write(partial) }
         }
-        server.createContext("/outbox/42/ack") { exchange ->
-            acked = true
-            exchange.sendResponseHeaders(204, -1)
-            exchange.close()
-        }
+        configureServer(server)
         val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
         try {
             assertFailsWith<IOException> {
                 client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", 10), destination) {}
             }
 
-            assertFalse(acked)
+            assertions(destination)
         } finally {
             server.stop(0)
             destination.delete()
@@ -608,22 +602,33 @@ class ProtocolClientTest {
     }
 
     @Test
-    fun `download interrompido nao deixa bytes parciais em destination`() {
-        val port = freePort()
-        val server = fakeServer(port, "/outbox/42/file") { exchange ->
-            exchange.sendResponseHeaders(200, 10)
-            exchange.responseBody.use { it.write(byteArrayOf(1, 2, 3)) }
-        }
-        val destination = File.createTempFile("synchronice-download", ".bin").apply { deleteOnExit() }
-        try {
-            assertFailsWith<IOException> {
-                client(port).downloadFile(Item.FileMeta(42, 100, "foto.png", 10), destination) {}
-            }
+    fun `download interrompido nao marca o Item como completo e nao envia o ack`() {
+        var acked = false
 
+        downloadInterrompido(configureServer = { server ->
+            server.createContext("/outbox/42/ack") { exchange ->
+                acked = true
+                exchange.sendResponseHeaders(204, -1)
+                exchange.close()
+            }
+        }) {
+            assertFalse(acked)
+        }
+    }
+
+    @Test
+    fun `download interrompido nao deixa bytes parciais em destination`() {
+        downloadInterrompido { destination ->
             assertEquals(0L, destination.length())
-        } finally {
-            server.stop(0)
-            destination.delete()
+        }
+    }
+
+    @Test
+    fun `download interrompido apaga o arquivo parcial ponto part`() {
+        downloadInterrompido { destination ->
+            val partial = File(destination.absoluteFile.parentFile, "${destination.name}.part")
+
+            assertFalse(partial.exists())
         }
     }
 
