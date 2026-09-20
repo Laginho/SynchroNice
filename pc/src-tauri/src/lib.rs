@@ -41,20 +41,35 @@ fn list_items(items: State<'_, Items>) -> Vec<Item> {
     items.snapshot()
 }
 
+/// Bytes de um arquivo já gravado na Pasta, para a miniatura de imagem na
+/// bolha. `name` é o nome final do Item (já saneado ao gravar); saneado de
+/// novo aqui para nunca ler fora da Pasta.
+#[tauri::command]
+fn read_file_bytes(app: tauri::AppHandle, name: String) -> Result<Vec<u8>, String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let pasta = config::load_pasta(&config_dir).ok_or("a Pasta ainda não foi escolhida")?;
+    std::fs::read(pasta.join(server::sanitize_file_name(&name))).map_err(|e| e.to_string())
+}
+
 /// Sobe o servidor HTTP com o token do Par e liga a lista de Itens à janela.
 fn start_server(app: &tauri::AppHandle, items: Items) {
-    let token = app
-        .path()
-        .app_config_dir()
-        .map_err(std::io::Error::other)
-        .and_then(|dir| config::load_or_create_token(&dir));
-    let token = match token {
+    let config_dir = match app.path().app_config_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("sem diretório de configuração, o servidor não sobe: {e}");
+            return;
+        }
+    };
+    let token = match config::load_or_create_token(&config_dir) {
         Ok(token) => token,
         Err(e) => {
             eprintln!("sem token do Par, o servidor não sobe: {e}");
             return;
         }
     };
+    // `None` se a Pasta ainda não foi escolhida: o servidor sobe do mesmo
+    // jeito (texto funciona), e a rota de arquivo devolve 503 até a escolha.
+    let pasta = config::load_pasta(&config_dir);
 
     let handle = app.clone();
     items.on_new(move |item| {
@@ -64,7 +79,7 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     });
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], server::PORT));
-    match server::spawn(addr, token, items) {
+    match server::spawn(addr, token, items, pasta) {
         Ok(running) => println!("servidor HTTP em {}", running.addr),
         Err(e) => eprintln!("servidor HTTP não subiu em {addr}: {e}"),
     }
@@ -103,7 +118,7 @@ pub fn run() {
             None,
         ))
         .manage(Items::new())
-        .invoke_handler(tauri::generate_handler![list_items])
+        .invoke_handler(tauri::generate_handler![list_items, read_file_bytes])
         .setup(|app| {
             let handle = app.handle().clone();
             start_server(&handle, app.state::<Items>().inner().clone());

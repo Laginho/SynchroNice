@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -90,3 +90,26 @@ Critérios 1, 2 e 4: manual.
   obrigatório antes de `Stage: to-review`; `-TestsOnly` é só para a prova
   red-before-green. `AGENTS.md` ("Bindings do fluxo") já diz isso. Nada
   pendente das tentativas anteriores: driver reverteu tudo, sem branch órfã.
+
+- 2026-09-20 Stage 2, decisões de implementação (não são blockers, registro
+  para a review): **Item ganhou um `body` (enum `ItemBody::Text|File`)** em
+  vez de manter `text` solto — o Item de arquivo precisa de `name`, `size` e
+  `received` (bytes já gravados) para a barra de progresso; texto e arquivo
+  não cabiam mais no mesmo shape plano. `Items::start_file` cria o Item com
+  `received: 0` assim que o upload começa (a bolha nasce antes dos bytes
+  chegarem) e `file_progress` atualiza e reemite pelo mesmo canal (`on_new`)
+  — o front end distingue criação de atualização pelo id já visto. /  /
+  **Pasta não escolhida ainda:** `server::spawn` recebe `Option<PathBuf>`;
+  sem Pasta, `/items/file` devolve 503 em vez de travar o servidor (texto
+  continua funcionando). É capturado uma vez no boot (`start_server`); se o
+  usuário escolher a Pasta depois do primeiro diálogo, o servidor só vê isso
+  num restart — não implementei atualização ao vivo, fora do que os critérios
+  de aceite pedem. /  / **Miniatura de imagem:** não usei o asset-protocol do
+  Tauri (escopo dinâmico por Pasta arbitrária, API que eu não conseguiria
+  verificar sem rodar o build). Em vez disso, um comando novo,
+  `read_file_bytes`, devolve os bytes do arquivo já gravado (mesma
+  sanitização do nome) e o front monta um `Blob`/`ObjectURL` — só chamado
+  depois que o arquivo termina de chegar. Critérios 1, 2 e 4 continuam
+  manuais (curl não testa UI); os 4 testes automatizados (conteúdo íntegro,
+  sufixo `(1)`, `../` contido na Pasta, envio cortado sem nome final) estão
+  verdes no gate completo.
