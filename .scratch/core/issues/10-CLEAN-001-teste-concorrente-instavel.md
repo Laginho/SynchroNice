@@ -67,4 +67,18 @@ Mais a repetição do critério 2, com a saída colada no ticket.
   inteira guardada em arquivo, ou o binário `--test server` em laço, é o
   primeiro passo do critério 1.
 
+- 2026-09-20 (revisão de CLEAN-004): **o nome que faltava nas três primeiras
+  observações, capturado duas vezes**, com a saída inteira guardada em arquivo
+  como o recado acima pedia. É
+  `dois_envios_concorrentes_do_mesmo_nome_preservam_ambos`, falhando sempre no
+  mesmo ponto — `tests\server.rs:336`, `std::fs::read(pasta.join("foto.jpg"))
+  .expect("primeiro arquivo")` com `Os { code: 2, kind: NotFound }`: o
+  **primeiro** arquivo é o que não aparece, não o do sufixo. Duas rodadas
+  vermelhas (uma em `447708a`, uma em `clean-004` HEAD), duas rodadas verdes no
+  mesmo HEAD sem nenhuma mudança; as vermelhas foram as que rodaram com a
+  máquina ocupada por outro build. Nada de CLEAN-004 toca `POST /inbox` nem
+  esse teste — a instabilidade é anterior e independente.
+  Confirma o que a Attempt 1 já tinha achado: não é só o relógio do teste, a
+  conclusão de um dos envios se perde de verdade.
+
 - 2026-09-20 Attempt 1 stopped to ask: ...g. This reproduced on a plain sequential run, no artificial load needed. /  / This means: the ticket's own theory ("just a race between reserving the name and the file appearing — wait for the event instead of the clock") is only half right. The event-based wait is strictly correct and worth keeping, but it can't make criterion 2 (20/20 green) pass on its own, because there's a real intermittent bug in production code where a concurrent upload's completion is sometimes lost outright — and CLEAN-001's Primary files scope me to the test file only. /  / Options: / 1. **Expand this ticket's Primary files** to include `pc/src-tauri/src/server.rs` (and possibly the tokio runtime setup) so I can chase down and fix the actual concurrency defect. / 2. **Split it**: keep CLEAN-001 as the test-measurement fix (already done, and a real improvement) and open a new ticket for the production race, going back to stage 1 to scope it. /  / I'd lean toward (2) — this is a different class of bug (production correctness, possibly affecting real concurrent uploads from multiple devices) and deserves its own investigation rather than being folded into a "make the test deterministic" ticket. Which way do you want to go? /
