@@ -4,13 +4,16 @@ use std::path::{Path, PathBuf};
 
 const FILE_NAME: &str = "config.json";
 
-/// Tudo que persiste além da Sessão: a Pasta e o token do Par.
+/// Tudo que persiste além da Sessão: a Pasta e o Par (nome de instância e
+/// token).
 #[derive(Serialize, Deserialize, Default)]
 struct ConfigFile {
     #[serde(default)]
     pasta: Option<PathBuf>,
     #[serde(default)]
     token: Option<String>,
+    #[serde(default)]
+    nome_instancia: Option<String>,
 }
 
 fn load(config_dir: &Path) -> ConfigFile {
@@ -38,7 +41,7 @@ pub fn save_pasta(config_dir: &Path, pasta: &Path) -> io::Result<()> {
 }
 
 /// O token secreto do Par. Gerado na primeira chamada e gravado; depois,
-/// sempre o mesmo. Parear de novo (SYN-005) é quem o troca.
+/// sempre o mesmo. Parear de novo (SYN-005) é quem o troca, via `save_token`.
 pub fn load_or_create_token(config_dir: &Path) -> io::Result<String> {
     let mut config = load(config_dir);
     if let Some(token) = config.token {
@@ -50,8 +53,45 @@ pub fn load_or_create_token(config_dir: &Path) -> io::Result<String> {
     Ok(token)
 }
 
-fn new_token() -> io::Result<String> {
+/// Sobrescreve o token gravado — "parear de novo" (SYN-005): o anterior
+/// passa a ser recusado assim que o chamador atualizar seu próprio estado.
+pub fn save_token(config_dir: &Path, token: &str) -> io::Result<()> {
+    let mut config = load(config_dir);
+    config.token = Some(token.to_string());
+    save(config_dir, &config)
+}
+
+/// O nome de instância do Par, usado no QR e no anúncio mDNS. Gerado na
+/// primeira chamada e gravado; depois, sempre o mesmo — estável por
+/// instalação e sem informação pessoal (SYN-005).
+pub fn load_or_create_nome_instancia(config_dir: &Path) -> io::Result<String> {
+    let mut config = load(config_dir);
+    if let Some(nome) = config.nome_instancia {
+        return Ok(nome);
+    }
+    let nome = new_nome_instancia()?;
+    config.nome_instancia = Some(nome.clone());
+    save(config_dir, &config)?;
+    Ok(nome)
+}
+
+/// Se já existe um Par gravado — usado só para decidir se a janela mostra o
+/// QR no primeiro uso (SYN-005); a criação em si é `Par::load_or_create`.
+pub fn par_ja_existe(config_dir: &Path) -> bool {
+    load(config_dir).token.is_some()
+}
+
+pub(crate) fn new_token() -> io::Result<String> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Só letras minúsculas, dígitos e hífen: além de instância do QR, também
+/// vira nome de host mDNS (`<nome>.local.`), que só aceita esse alfabeto.
+fn new_nome_instancia() -> io::Result<String> {
+    let mut bytes = [0u8; 4];
+    getrandom::fill(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
+    let sufixo: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(format!("synchronice-{sufixo}"))
 }

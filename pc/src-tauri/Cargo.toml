@@ -31,6 +31,11 @@ getrandom = "0.3"
 # Lista de arquivos do clipboard do Windows (Ctrl+V de arquivo copiado no
 # Explorer, CF_HDROP) — formato que a Clipboard API da web não expõe.
 clipboard-win = "5"
+# Anúncio do serviço na rede local (SYN-005): sem daemon do sistema, funciona
+# no Windows sem instalar Bonjour.
+mdns-sd = { version = "0.21", default-features = false }
+# QR de pareamento (SYN-005), renderizado como SVG.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [dev-dependencies]
 tempfile = "3"

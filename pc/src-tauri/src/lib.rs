@@ -1,10 +1,14 @@
+pub mod anuncio;
 pub mod config;
 pub mod items;
 pub mod outbox;
+pub mod par;
+pub mod qr;
 pub mod server;
 
 use items::{Item, Items};
 use outbox::{OutItem, Outbox};
+use par::Par;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State, WindowEvent};
@@ -26,6 +30,19 @@ struct Enviado {
     #[serde(flatten)]
     item: OutItem,
     entregue: bool,
+}
+
+/// Se um Par já estava gravado antes desta abertura do app — só para decidir
+/// se a janela abre na tela de QR (SYN-005). Guardado à parte do `Par` em si
+/// porque `Par::load_or_create` sempre devolve um (cria na primeira vez).
+struct ParJaExistia(bool);
+
+/// Devolvido ao abrir a janela: se ela deve abrir na tela de QR, e o QR do
+/// Par atual, para o caso de precisar mostrá-lo.
+#[derive(serde::Serialize)]
+struct EstadoParInicial {
+    mostrar_qr: bool,
+    svg: String,
 }
 
 /// Pede a Pasta se ainda não houver uma escolhida. Não-bloqueante: `setup` roda
@@ -58,6 +75,32 @@ const ITEM_EVENT: &str = "item";
 #[tauri::command]
 fn list_items(items: State<'_, Items>) -> Vec<Item> {
     items.snapshot()
+}
+
+/// Se a janela deve abrir na tela de QR (Par ainda não existia antes desta
+/// abertura), e o QR do Par atual — pronto se for preciso mostrá-lo depois
+/// (SYN-005).
+#[tauri::command]
+fn estado_par_inicial(
+    par: State<'_, Par>,
+    ja_existia: State<'_, ParJaExistia>,
+) -> EstadoParInicial {
+    EstadoParInicial {
+        mostrar_qr: !ja_existia.0,
+        svg: qr::par_svg(par.nome_instancia(), server::PORT, &par.token()),
+    }
+}
+
+/// "Parear de novo": rotaciona o token do Par e devolve o QR com o token
+/// novo — o anterior passa a ser recusado a partir desta chamada.
+#[tauri::command]
+fn parear_de_novo(par: State<'_, Par>) -> Result<String, String> {
+    par.rotate().map_err(|e| e.to_string())?;
+    Ok(qr::par_svg(
+        par.nome_instancia(),
+        server::PORT,
+        &par.token(),
+    ))
 }
 
 /// Bytes de um arquivo já gravado na Pasta, para a miniatura de imagem na
@@ -116,8 +159,9 @@ fn read_clipboard_file_list() -> Result<Vec<String>, String> {
     clipboard_win::get_clipboard(clipboard_win::formats::FileList).map_err(|e| e.to_string())
 }
 
-/// Sobe o servidor HTTP com o token do Par, liga a lista de Itens e a fila
-/// de saída à janela, e disponibiliza a fila para os comandos de envio.
+/// Sobe o servidor HTTP com o token do Par, anuncia o serviço por mDNS, liga
+/// a lista de Itens e a fila de saída à janela, e disponibiliza a fila para
+/// os comandos de envio.
 fn start_server(app: &tauri::AppHandle, items: Items) {
     let config_dir = match app.path().app_config_dir() {
         Ok(dir) => dir,
@@ -126,13 +170,17 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
             return;
         }
     };
-    let token = match config::load_or_create_token(&config_dir) {
-        Ok(token) => token,
+    let par_ja_existia = config::par_ja_existe(&config_dir);
+    let par = match Par::load_or_create(&config_dir) {
+        Ok(par) => par,
         Err(e) => {
-            eprintln!("sem token do Par, o servidor não sobe: {e}");
+            eprintln!("sem Par, o servidor não sobe: {e}");
             return;
         }
     };
+    app.manage(par.clone());
+    app.manage(ParJaExistia(par_ja_existia));
+
     // `None` se a Pasta ainda não foi escolhida: o servidor sobe do mesmo
     // jeito (texto funciona), e a rota de arquivo devolve 503 até a escolha.
     let pasta = config::load_pasta(&config_dir);
@@ -165,9 +213,15 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     });
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], server::PORT));
-    match server::spawn(addr, token, items, outbox, pasta) {
+    match server::spawn(addr, par.clone(), items, outbox, pasta) {
         Ok(running) => {
             println!("servidor HTTP em {}", running.addr);
+            match anuncio::Anuncio::subir(par.nome_instancia(), server::PORT) {
+                Ok(anuncio) => {
+                    app.manage(anuncio);
+                }
+                Err(e) => eprintln!("não foi possível anunciar o serviço por mDNS: {e}"),
+            }
             let handle = app.clone();
             running.presence.on_change(move |online| {
                 if let Err(e) = handle.emit(PRESENCE_EVENT, online) {
@@ -214,6 +268,8 @@ pub fn run() {
         .manage(Items::new())
         .invoke_handler(tauri::generate_handler![
             list_items,
+            estado_par_inicial,
+            parear_de_novo,
             read_file_bytes,
             send_text,
             send_files,

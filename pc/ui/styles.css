@@ -71,7 +71,8 @@ body {
   font-size: 12px;
   white-space: nowrap;
 }
-.composer .send {
+.composer .send,
+.composer .parear {
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -79,6 +80,40 @@ body {
   background: #333;
   color: #ddd;
   cursor: pointer;
+  flex: none;
+}
+
+/* tela de QR (SYN-005) — sem Par gravado, ou "parear de novo" */
+#qr-screen {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+#qr-screen b {
+  color: #eee;
+  font-size: 16px;
+}
+#qr-screen span {
+  color: var(--fg-dim);
+  font-size: 13px;
+  max-width: 260px;
+}
+#qr-screen .qr-svg {
+  background: var(--card);
+  border-radius: var(--r);
+  padding: 12px;
+}
+#qr-screen .qr-svg svg {
+  display: block;
+  width: 220px;
+  height: 220px;
 }
 
 /* indicador de presença — SYN-004: aceso enquanto há conexão de escuta do

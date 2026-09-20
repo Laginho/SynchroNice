@@ -44,6 +44,12 @@ interface EnviadoArquivo {
 
 type Enviado = EnviadoTexto | EnviadoArquivo;
 
+/** Devolvido por `estado_par_inicial` (SYN-005). */
+interface EstadoParInicial {
+  mostrar_qr: boolean;
+  svg: string;
+}
+
 const IMAGEM = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp"]);
 
 const scroll = document.querySelector<HTMLElement>(".scroll")!;
@@ -287,6 +293,30 @@ function atualizarPresenca(online: boolean): void {
   indicador.title = online ? "o celular está na rede" : "o celular está fora da rede";
 }
 
+/** Mostra a tela de QR com o `svg` do Par atual, no lugar do chat (SYN-005).
+ * O SVG vem do próprio PC (nunca da rede), então injetar como HTML é seguro. */
+function mostrarQr(svg: string): void {
+  document.querySelector<HTMLElement>("#qr-screen .qr-svg")!.innerHTML = svg;
+  document.querySelector<HTMLElement>("#qr-screen")!.hidden = false;
+  document.querySelector<HTMLElement>("#frame")!.hidden = true;
+}
+
+function mostrarChat(): void {
+  document.querySelector<HTMLElement>("#qr-screen")!.hidden = true;
+  document.querySelector<HTMLElement>("#frame")!.hidden = false;
+}
+
+/** Botão de "parear de novo" no composer: rotaciona o token e mostra o QR
+ * com o token novo. */
+function ligarParear(): void {
+  const botao = document.querySelector<HTMLButtonElement>(".composer .parear")!;
+  botao.addEventListener("click", () => {
+    invoke<string>("parear_de_novo")
+      .then((svg) => mostrarQr(svg))
+      .catch((e) => console.error(`não foi possível parear de novo: ${e}`));
+  });
+}
+
 /** Enter no composer, ou o botão de enviar: enfileira o texto e limpa o campo. */
 function ligarComposer(): void {
   const input = document.querySelector<HTMLInputElement>("#composer-input")!;
@@ -384,7 +414,16 @@ async function main(): Promise<void> {
   // `recebidas`/`enviadas` descartam o que vier duas vezes como criação.
   await listen<Item>("item", (event) => renderRecebido(event.payload));
   await listen<Enviado>("enviado", (event) => renderEnviado(event.payload));
-  await listen<boolean>("presenca", (event) => atualizarPresenca(event.payload));
+  await listen<boolean>("presenca", (event) => {
+    atualizarPresenca(event.payload);
+    // O celular só conecta com o token certo: presença é o próprio sinal de
+    // que o pareamento (o QR desta tela ou de um anterior) já vale.
+    if (event.payload) mostrarChat();
+  });
+
+  const estadoPar = await invoke<EstadoParInicial>("estado_par_inicial");
+  if (estadoPar.mostrar_qr) mostrarQr(estadoPar.svg);
+  else mostrarChat();
 
   // Só os recebidos da Sessão: a lista de Itens é em memória e morre com o
   // processo. A fila de saída é persistida e sobrevive, mas não é Sessão —
@@ -395,6 +434,7 @@ async function main(): Promise<void> {
   ligarComposer();
   ligarDrop();
   ligarColar();
+  ligarParear();
 }
 
 void main();

@@ -60,9 +60,34 @@ use tokio::io::AsyncWriteExt;
 /// Porta fixa na rede local. O celular a conhece pelo QR (SYN-005).
 pub const PORT: u16 = 47820;
 
+/// Fonte do token que autentica as requisições: um `String` fixo (a maioria
+/// dos testes de integração) ou um `Par` (SYN-005). Vindo de um `Par`,
+/// compartilha a mesma célula — rotacionar o Par já vale para a próxima
+/// requisição, sem reiniciar o servidor.
+#[derive(Clone)]
+pub struct TokenCell(Arc<Mutex<String>>);
+
+impl From<String> for TokenCell {
+    fn from(token: String) -> Self {
+        TokenCell(Arc::new(Mutex::new(token)))
+    }
+}
+
+impl From<crate::par::Par> for TokenCell {
+    fn from(par: crate::par::Par) -> Self {
+        TokenCell(par.shared_token())
+    }
+}
+
+impl TokenCell {
+    fn get(&self) -> String {
+        self.0.lock().expect("token sem panic").clone()
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
-    token: String,
+    token: TokenCell,
     items: Items,
     outbox: Outbox,
     presence: Presence,
@@ -152,11 +177,12 @@ pub struct Running {
 /// real assim que estiver escutando.
 pub fn spawn(
     addr: SocketAddr,
-    token: String,
+    token: impl Into<TokenCell>,
     items: Items,
     outbox: Outbox,
     pasta: Option<PathBuf>,
 ) -> io::Result<Running> {
+    let token = token.into();
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
     let presence_da_thread = presence.clone();
@@ -214,12 +240,12 @@ fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-fn authorized(headers: &HeaderMap, token: &str) -> bool {
+fn authorized(headers: &HeaderMap, token: &TokenCell) -> bool {
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|t| t.trim() == token)
+        .is_some_and(|t| t.trim() == token.get())
 }
 
 async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: String) -> StatusCode {
