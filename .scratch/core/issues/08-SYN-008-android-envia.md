@@ -1,5 +1,5 @@
 # SYN-008: Android envia por Compartilhar
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-003
 Review: agent
@@ -176,3 +176,16 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
   arquivo é só a linha de `Stage` e deve aplicar limpo. Depois gate completo
   e `to-review`, sem tocar em nada fora de `android/protocol-client/`.
 - Débito humano: fluxo de Compartilhar no app Android (critérios 1–6: intent filters SEND/SEND_MULTIPLE, serviço em primeiro plano com notificação de progresso, bolhas de arquivo com progresso, confirmação curta sem abrir o chat) não foi construído nem verificado à mão — depende do Android SDK numa máquina de build; decidir se instala e abrir ticket para ele, junto com a casca de SYN-007.
+
+- 2026-09-20 (stage 2, retomada): recuperados os três commits da tentativa 1
+  via `git cherry-pick 9a22f07 0e03055 e48df1a` numa `syn-008` nova a partir
+  da sessão, como a resposta acima pediu — sem reescrever teste nem código.
+  Prova de vermelho refeita num worktree descartável: em `793999e` (antes do
+  código), `gate.ps1 -TestsOnly` falha no `gradle test` com erro de
+  compilação (`sendFile`, `PendingQueueStore`, `InMemoryPendingQueueStore`,
+  `FilePendingQueueStore` não resolvidos), Rust intacto (24/24); com
+  `e48df1a` em cima, verde. Gate completo nesta branch: `cargo test` 24/24,
+  `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL,
+  `protocol-client` 10/10 (`TEST-synchronice.protocolclient.ProtocolClientTest.xml`:
+  `tests="10" failures="0" errors="0"`). Nada tocado fora de
+  `android/protocol-client/` e deste ticket.
