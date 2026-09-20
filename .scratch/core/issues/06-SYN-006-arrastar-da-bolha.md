@@ -84,3 +84,46 @@ Todos os critérios são manuais; descrever cada um no Resolution.
   Explorer/navegador/campo de upload de um site real. Gate completo verde
   (fmt, clippy, cargo test com os 2 testes novos de `drag.rs`, tsc) é a
   garantia que dá pra dar de dentro daqui.
+
+- 2026-09-20 (humano simulado, stage 3): nenhum dos 5 critérios foi
+  exercitado à mão — sem app aberto, sem celular, sem Explorer/navegador de
+  verdade. O que dá pra afirmar por inspeção do diff, do fonte dos crates
+  (`drag 2.1.1` e `tauri-plugin-drag 2.1.1` no registro local) e do gate
+  (`gate.ps1 -TestsOnly` rodado de novo aqui: 2 testes de `drag.rs` + 18 de
+  `server.rs` verdes): (a) a cadeia de `invoke` está coerente — plugin
+  registrado como `"drag"`, `drag:default` = `allow-start-drag`, os args
+  `item: [caminho]`/`image: caminho`/`options: {mode: "copy"}`/`onEvent`
+  casam com os `#[serde(untagged)]`/`camelCase` de `commands.rs`; (b) no
+  Windows o plugin monta o `IDataObject` do próprio Shell
+  (`SHCreateShellItemArrayFromIDLists` + `BindToHandler(BHID_DataObject)`)
+  e chama `DoDragDrop` com `DROPEFFECT_COPY`, então Explorer, navegador e
+  campo de upload recebem exatamente o que receberiam de um drag saído do
+  Explorer — é o argumento pelos critérios 1-3, não uma prova; (c) critério
+  4: o guard de `mousedown` checa `.enviando`, que só sai quando `done`,
+  e `file_done` só dispara depois do `rename` para o nome final
+  (`server.rs`); antes disso `resolve` também devolveria `None`, porque só
+  existe o `.part`; (d) critério 5: `caminho_para_arrastar` falha se
+  `is_file()` é falso, o `.catch` marca `.sumiu` + legenda e `start_drag`
+  nunca é chamado — a metade Rust tem teste, a metade JS é só leitura; (e)
+  o nome do Item é o `final_name` já com ` (1)`, então `resolve` acha o
+  arquivo certo mesmo com nome repetido; (f) PDF como `image`: WIC falha em
+  `read_path_to_hbitmap`, `.ok()` engole, drag segue sem preview, como o
+  stage 2 descreveu.
+
+  Dois achados para o revisor pesar, não verificados em execução: (1) o
+  drag começa no `mousedown`, sem esperar movimento, e `DropSource::
+  QueryContinueDrag` devolve `DRAGDROP_S_DROP` ao soltar o botão — um
+  clique simples numa bolha recebida vira um drop em cima do próprio
+  WebView (`dragDropEnabled` default true, `ligarDrop` escuta `drop`), o
+  que tende a chamar `send_files` e mandar o arquivo de volta pro celular;
+  (2) o `.catch` de `iniciarDrag` também pega falha do `start_drag` em si
+  (OLE, canonicalize), e rotula a bolha como "não está mais na Pasta" sem
+  ser o caso. Cosmético: `.item.file:not(.enviando) { cursor: grab }` pega
+  a bolha enviada (`.mine`), que não arrasta.
+
+  Débito humano: critério 1 — arrastar bolha de imagem recebida e soltar numa pasta do Explorer, conferir que copiou.
+  Débito humano: critério 2 — arrastar bolha de PDF e soltar no navegador, conferir que abre.
+  Débito humano: critério 3 — arrastar bolha de imagem para um campo de anexo de site real, conferir que anexa como do Explorer.
+  Débito humano: critério 4 — com um arquivo grande chegando, tentar arrastar a bolha em progresso e conferir que nada começa (e que arrasta depois de concluir).
+  Débito humano: critério 5 — apagar o arquivo da Pasta, tentar arrastar, conferir que não há drag e a legenda vira "o arquivo não está mais na Pasta".
+  Débito humano: clicar (sem arrastar) numa bolha recebida e conferir se o arquivo NÃO é reenviado ao celular (achado 1 acima).
