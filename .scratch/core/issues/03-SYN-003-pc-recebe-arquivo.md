@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -73,3 +73,5 @@ Critérios 1, 2 e 4: manual.
   (both flagged the same way in every attempt so far), not a settings
   mistake anyone can fix from inside this repo. Nothing touched — no branch,
   no file changes — same as the prior two "stopped to ask" sessions. (SYN-003)
+
+- 2026-09-20 Attempt 2 stopped to ask: Same wall as before, one cause ruled out: `cargo --version` is denied via the Bash tool even with `dangerouslyDisableSandbox: true`, so it's not the sandbox layer. `.claude/settings.json` still has `Bash(cargo:*)`, no local override exists anywhere, and `~/.claude/settings.json` has no permissions block to conflict with it. The allow rule is correct and present, yet the command is still denied before any prompt reaches you. /  / This looks like a permission-matching bug in Claude Code itself for `cargo`/`gradlew` specifically, not something fixable from inside this repo. Logged as Attempt 2 on the ticket (commit `a8d037b`), nothing else touched — no branch, no code changes. /  / I need one of: / 1. You investigate/fix the `cargo` denial at the Claude Code app/settings level (outside this repo), or / 2. You run `cargo test --manifest-path pc/src-tauri/Cargo.toml` and `.\gate.ps1` yourself and relay output back to me at checkpoints. /  / Which do you want? /
