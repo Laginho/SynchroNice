@@ -272,4 +272,112 @@ class ProtocolClientTest {
             fileToSend.delete()
         }
     }
+
+    @Test
+    fun `arquivo Pendente sobrevive ao original ser apagado, porque a fila guarda uma copia`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        val originalFile = tempFile(byteArrayOf(4, 5, 6))
+        val originalName = originalFile.name
+        try {
+            val client1 = client(port, FilePendingQueueStore(queueFile))
+            client1.sendFile(originalFile)
+            assertTrue(client1.hasPending())
+            assertTrue(originalFile.delete())
+
+            var receivedName: String? = null
+            var receivedBytes: ByteArray? = null
+            val server = fakeServer(port, "/items/file") { exchange ->
+                receivedName = exchange.requestHeaders.getFirst("X-File-Name")
+                receivedBytes = exchange.requestBody.readBytes()
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                val client2 = client(port, FilePendingQueueStore(queueFile))
+
+                client2.retryPending()
+
+                assertEquals(originalName, receivedName)
+                assertEquals(listOf<Byte>(4, 5, 6), receivedBytes!!.toList())
+                assertFalse(client2.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            queueFile.delete()
+        }
+    }
+
+    @Test
+    fun `arquivo Pendente sem payload e descartado e nao trava a entrega do Item seguinte`() {
+        val port = freePort()
+        val client = client(port)
+        val missingFile = tempFile(byteArrayOf(1, 2, 3))
+
+        client.sendFile(missingFile)
+        assertTrue(client.hasPending())
+        assertTrue(missingFile.delete())
+        client.sendText("depois")
+
+        val requests = mutableListOf<String>()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            client.retryPending()
+
+            assertEquals(listOf("depois"), requests)
+            assertFalse(client.hasPending())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `fila em disco escapa e recupera barra, TAB, quebra de linha e retorno de carro`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        val text = "linha\\um\ttab\nquebra\rcarro"
+        try {
+            val client1 = client(port, FilePendingQueueStore(queueFile))
+            client1.sendText(text)
+            assertTrue(client1.hasPending())
+
+            val requests = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                val client2 = client(port, FilePendingQueueStore(queueFile))
+
+                client2.retryPending()
+
+                assertEquals(listOf(text), requests)
+                assertFalse(client2.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            queueFile.delete()
+        }
+    }
+
+    @Test
+    fun `arquivo de fila corrompido nao impede construir o cliente`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        queueFile.writeText("linha sem formato valido\nT\ttexto valido\n")
+        try {
+            val client = client(port, FilePendingQueueStore(queueFile))
+
+            assertTrue(client.hasPending())
+        } finally {
+            queueFile.delete()
+        }
+    }
 }
