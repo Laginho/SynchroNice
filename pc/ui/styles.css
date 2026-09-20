@@ -92,6 +92,19 @@ body {
   border-bottom-left-radius: 4px;
   word-break: break-word;
 }
+.item .text {
+  white-space: pre-wrap;
+}
+.item a {
+  color: #1b4fa8;
+}
+.item time {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6b6350;
+  text-align: right;
+}
 .item.mine {
   align-self: flex-end;
   background: var(--card2);
