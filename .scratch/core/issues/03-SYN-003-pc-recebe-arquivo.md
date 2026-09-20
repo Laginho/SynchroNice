@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -225,3 +225,29 @@ Achados menores, fora do que bloqueia — não mexer neles aqui:
   `foto (1).jpg` íntegros. Achados menores ficam fora deste ticket, como a
   review pôs. `Stage: to-implement` já está certo; stage 2 segue nesta branch,
   em cima de `6203341`.
+
+- 2026-09-20 Stage 2, retomada (achados 1 e 2): três testes vermelhos novos
+  (`bc5a0c4`, só `tests/server.rs`) — POST sem `X-File-Size` completa com
+  `size` do `Content-Length`; POST de 0 byte completa com arquivo final de 0
+  byte; dois POSTs concorrentes de `foto.jpg` (cabeçalhos primeiro, corpos
+  intercalados em pedaços de 256 bytes numa conexão TCP crua, para os dois
+  ficarem em voo ao mesmo tempo no servidor de thread única) terminam os dois
+  íntegros. Vermelho confirmado: `ItemBody::File` ainda não tinha o campo
+  `done` que os testes já esperavam — não compilava. Implementação em
+  `9ea4049` (só `src/`, mais `pc/ui/main.ts`), gate completo verde: fmt,
+  clippy, 15 testes (4 `config.rs`, 11 `server.rs`), `tsc --noEmit`. Achado 1:
+  `post_file` lê `Content-Length` primeiro, `X-File-Size` só quando o corpo
+  vier chunked sem `Content-Length` — exatamente o ajuste 1 da resposta do
+  humano. `ItemBody::File` ganhou `done: bool`; `Items::file_done` o liga
+  depois do `rename` para o nome final (nunca antes — ajuste 1 também cobria
+  isso). `atualizarProgresso` em `main.ts` olha `item.done` em vez de
+  recalcular `received >= size`. Achado 2: `dedup_path` virou `reserve_path`,
+  que reserva o caminho escolhido num `HashSet<PathBuf>` em `AppState`
+  (`leases`), sob o mesmo lock que checa `exists()`; um `LeaseGuard` libera o
+  nome no `Drop`, cobrindo todo retorno de `post_file` — exatamente o ajuste 2
+  (aluguel em memória, não arquivo vazio). Rodei o teste concorrente 3 vezes
+  em sequência antes de confiar nele: sem flake nas três. Achados menores que
+  a review já tinha separado (`.part` órfão, `read_file_bytes` em memória,
+  `sanitize_file_name`/dotfile/nome reservado do Windows, `random_suffix`
+  duplicado, `sanitize_file_name` pública, `URL.createObjectURL` sem revogar)
+  não foram tocados — continuam fora deste ticket.
