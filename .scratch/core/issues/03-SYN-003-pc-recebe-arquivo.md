@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
