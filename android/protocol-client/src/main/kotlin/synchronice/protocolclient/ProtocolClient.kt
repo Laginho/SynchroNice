@@ -45,6 +45,12 @@ class ProtocolClient(
      * drena o Pendente antes, nunca fura, e uma falha no envio (o PC ficar
      * indisponível a qualquer momento da transferência) deixa o arquivo
      * Pendente em vez de perder o Item.
+     *
+     * Uma exceção, e só ela: se o arquivo original já tiver sumido quando a
+     * cópia interna for feita, não há o que guardar e o Item é descartado em
+     * silêncio (ver [PendingQueueStore.enqueue]). Qualquer outra falha ao
+     * guardar a cópia — disco cheio, permissão negada — sobe para quem
+     * chamou, em vez de virar perda silenciosa.
      */
     fun sendFile(file: File, onProgress: (Int) -> Unit = {}) {
         send(

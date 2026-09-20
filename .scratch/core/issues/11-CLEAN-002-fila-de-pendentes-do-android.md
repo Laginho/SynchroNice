@@ -1,5 +1,5 @@
 # CLEAN-002: Fila de Pendentes do Android — limpeza e política de recusa
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -34,7 +34,7 @@ os critérios 1 a 4 e deixa o 5.
    `writeText` direto no arquivo final: arquivo temporário + rename, para um
    crash no meio não truncar a fila que existe justamente para sobreviver ao
    app ser fechado.
-4. ❌ `FilePendingQueueStore.enqueue` não propaga `IOException` quando o arquivo
+4. `FilePendingQueueStore.enqueue` não propaga `IOException` quando o arquivo
    original sumiu entre o envio e o enfileiramento (hoje o `copyTo` estoura
    para fora de `sendFile`), e uma cópia em `<fila>.payloads/` não fica órfã
    quando o processo morre entre `copyTo` e `persist()` — varrer o que a fila

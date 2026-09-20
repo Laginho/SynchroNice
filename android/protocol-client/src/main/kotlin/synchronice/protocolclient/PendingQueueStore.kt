@@ -1,6 +1,7 @@
 package synchronice.protocolclient
 
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
@@ -68,14 +69,25 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
         persist()
     }
 
-    /** `null` se o arquivo original já tiver sumido — o Item é descartado em vez de estourar para quem chamou. */
+    /**
+     * `null` se o arquivo original já tiver sumido — o Item é descartado em
+     * vez de estourar para quem chamou. Só esse caso é engolido: disco cheio
+     * ou permissão negada sobem, senão o Item se perderia em silêncio e
+     * `sendFile` voltaria como se tivesse dado certo. Quem decide é a
+     * pergunta "o original ainda está lá?", não o tipo da exceção: [copyTo]
+     * dá `kotlin.io.NoSuchFileException` quando o arquivo já sumiu na
+     * checagem inicial e `java.io.FileNotFoundException` quando ele some
+     * entre essa checagem e a abertura do stream, e os dois são o mesmo caso.
+     */
     private fun copyIntoPayloadDir(item: PendingItem.File): PendingItem.File? {
         payloadDir.mkdirs()
+        val original = File(item.path)
         val copy = File(payloadDir, "${UUID.randomUUID()}-${item.name}")
         return try {
-            File(item.path).copyTo(copy, overwrite = true)
+            original.copyTo(copy, overwrite = true)
             item.copy(path = copy.absolutePath)
-        } catch (_: NoSuchFileException) {
+        } catch (e: IOException) {
+            if (original.exists()) throw e
             null
         }
     }
