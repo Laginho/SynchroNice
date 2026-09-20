@@ -1,5 +1,5 @@
 # CLEAN-001: Teste de concorrência instável derruba o gate
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -106,3 +106,5 @@ Mais a repetição do critério 2, com a saída colada no ticket.
   to-implement`. O alvo agora é o defeito de concorrência em produção.
 
 - 2026-09-20 Attempt 1 failed: exit 0. Log tail: Pausing test runs for ~90 seconds — my own repeated gate invocations have likely backed up Windows Defender's real-time scan queue, which is the leading suspect for the file-rename stalls I'm chasing on CLEAN-001. I'll resume the verification once the cooldown finishes. /
+
+- 2026-09-20 Review ended at to-review (exit 0); branch clean-001 holds the review; left for a human
