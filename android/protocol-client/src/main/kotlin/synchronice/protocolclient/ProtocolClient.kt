@@ -86,13 +86,13 @@ class ProtocolClient(
      */
     fun listen(): List<Item> {
         val connection = open("/listen", "GET")
-        val code = connection.responseCode
-        if (code != HttpURLConnection.HTTP_OK) {
+        val body = try {
+            val code = connection.responseCode
+            if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)
+            connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        } finally {
             connection.disconnect()
-            throw ProtocolRejectedException(code)
         }
-        val body = connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
-        connection.disconnect()
         return body.lineSequence()
             .filter { it.isNotBlank() }
             .map(::parseItem)
