@@ -1,6 +1,8 @@
 package synchronice.protocolclient
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 /** Onde a fila de Pendentes vive entre chamadas — e, na implementação de disco, entre reinícios do app. */
@@ -41,7 +43,7 @@ class InMemoryPendingQueueStore : PendingQueueStore {
 class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     private val payloadDir = File(file.parentFile ?: File("."), "${file.name}.payloads")
     private val items: MutableList<PendingItem> =
-        if (file.exists()) file.readLines().filter { it.isNotEmpty() }.mapNotNull(::decodeLineOrNull).toMutableList()
+        if (file.exists()) decodeLines(file.readText()).toMutableList()
         else mutableListOf()
 
     override fun load(): List<PendingItem> = items.toList()
@@ -67,14 +69,33 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
         return item.copy(path = copy.absolutePath)
     }
 
+    /**
+     * Escreve num arquivo temporário e troca pelo arquivo final com um
+     * rename atômico, para um crash no meio da escrita nunca deixar a fila
+     * (que existe justamente para sobreviver a isso) truncada.
+     */
     private fun persist() {
         file.parentFile?.mkdirs()
-        file.writeText(items.joinToString("") { encodeLine(it) + "\n" })
+        val tempFile = File(file.parentFile ?: File("."), "${file.name}.tmp")
+        tempFile.writeText(items.joinToString("") { encodeLine(it) + "\n" })
+        Files.move(tempFile.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
     }
 
     private fun encodeLine(item: PendingItem): String = when (item) {
         is PendingItem.Text -> "T\t${escape(item.text)}"
         is PendingItem.File -> "F\t${escape(item.path)}\t${escape(item.name)}"
+    }
+
+    /**
+     * A última linha só é confiável se o arquivo termina em quebra de linha
+     * — do contrário ela é a ponta de uma escrita interrompida (o `persist`
+     * antigo, sem arquivo temporário, podia deixar exatamente isso) e um
+     * fragmento truncado pode decodificar como um Item válido só que errado.
+     * Descartá-la mantém "Itens íntegros" em vez de aceitar dado corrompido.
+     */
+    private fun decodeLines(raw: String): List<PendingItem> {
+        val complete = if (raw.endsWith("\n")) raw else raw.substringBeforeLast("\n", "")
+        return complete.split("\n").filter { it.isNotEmpty() }.mapNotNull(::decodeLineOrNull)
     }
 
     private fun decodeLineOrNull(line: String): PendingItem? {
