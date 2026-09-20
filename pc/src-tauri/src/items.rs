@@ -13,9 +13,13 @@ pub enum ItemBody {
     File {
         name: String,
         size: u64,
-        /// Bytes já gravados. Cresce a cada pedaço recebido; chega a `size`
-        /// quando o arquivo terminou de chegar.
+        /// Bytes já gravados. Cresce a cada pedaço recebido. Não é o sinal de
+        /// fim: com `size` desconhecido (0) nunca alcançaria `size`, e um
+        /// arquivo de 0 byte já nasceria "completo" antes de sequer existir.
         received: u64,
+        /// Termina quando o servidor renomeia para o nome final — não quando
+        /// `received` alcança `size`, que nem sempre é conhecido de antemão.
+        done: bool,
     },
 }
 
@@ -87,6 +91,7 @@ impl Items {
                 name,
                 size,
                 received: 0,
+                done: false,
             },
         };
         inner.items.push(item.clone());
@@ -104,6 +109,21 @@ impl Items {
         };
         if let ItemBody::File { received: r, .. } = &mut slot.body {
             *r = received;
+        }
+        let item = slot.clone();
+        inner.notify(&item);
+    }
+
+    /// Marca um Item de arquivo como terminado e avisa quem escuta. Chamado
+    /// só depois do arquivo já estar no nome final na Pasta — nunca antes,
+    /// para a UI não tentar ler um arquivo que ainda está com nome temporário.
+    pub fn file_done(&self, id: u64) {
+        let mut inner = self.inner.lock().expect("lista de Itens sem panic");
+        let Some(slot) = inner.items.iter_mut().find(|i| i.id == id) else {
+            return;
+        };
+        if let ItemBody::File { done, .. } = &mut slot.body {
+            *done = true;
         }
         let item = slot.clone();
         inner.notify(&item);

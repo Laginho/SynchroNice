@@ -9,7 +9,13 @@
 //!   POST /items/file        corpo: os bytes do arquivo, em stream
 //!   Authorization: Bearer <token>
 //!   X-File-Name: <nome>
-//!   X-File-Size: <tamanho em bytes>    (opcional; usado só para o progresso)
+//!   X-File-Size: <tamanho em bytes>    (só quando o corpo vier chunked, sem
+//!                                       Content-Length; um POST comum de
+//!                                       corpo cru — o `curl` do bloco
+//!                                       Verification deste ticket, ou o que
+//!                                       o Android vai mandar — não precisa
+//!                                       deste cabeçalho, o tamanho vem do
+//!                                       Content-Length)
 //!   201 sem corpo ao gravar o arquivo; 401 sem token ou com token errado;
 //!   503 se a Pasta ainda não foi escolhida.
 //!
@@ -23,10 +29,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::Router;
 use futures_util::StreamExt;
+use std::collections::HashSet;
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 
 /// Porta fixa na rede local. O celular a conhece pelo QR (SYN-005).
@@ -38,6 +45,10 @@ struct AppState {
     items: Items,
     /// `None` até o usuário escolher a Pasta na primeira abertura do app.
     pasta: Option<PathBuf>,
+    /// Nomes finais já reservados por um envio em andamento, mas ainda não
+    /// gravados na Pasta — sem isso, dois envios concorrentes do mesmo nome
+    /// podem ver `exists()` igualmente falso e resolver para o mesmo destino.
+    leases: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 /// Servidor no ar. Vive numa thread própria com seu runtime; some com o processo.
@@ -82,6 +93,7 @@ pub fn spawn(
                     token,
                     items,
                     pasta,
+                    leases: Arc::new(Mutex::new(HashSet::new())),
                 });
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
@@ -133,14 +145,28 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     else {
         return StatusCode::BAD_REQUEST;
     };
+    // Content-Length primeiro: é o tamanho real que o corpo vai entregar.
+    // X-File-Size só entra para um corpo chunked, sem Content-Length (ex.:
+    // um provider do Android que não sabe o tamanho de antemão).
     let size: u64 = request
         .headers()
-        .get("x-file-size")
+        .get("content-length")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
+        .or_else(|| {
+            request
+                .headers()
+                .get("x-file-size")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse().ok())
+        })
         .unwrap_or(0);
 
-    let final_path = dedup_path(&pasta, &sanitize_file_name(&raw_name));
+    let final_path = reserve_path(&pasta, &sanitize_file_name(&raw_name), &state.leases);
+    let _lease = LeaseGuard {
+        leases: state.leases.clone(),
+        path: final_path.clone(),
+    };
     let final_name = final_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -165,7 +191,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
             Ok(bytes) => bytes,
             Err(_) => {
                 // Conexão interrompida no meio: o arquivo fica só com o nome
-                // temporário, nunca é renomeado para o nome final.
+                // temporário, nunca é renomeado para o nome final, e a bolha
+                // nunca recebe o sinal de fim.
                 return StatusCode::BAD_REQUEST;
             }
         };
@@ -182,6 +209,10 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         eprintln!("falha ao renomear {temp_path:?} para {final_path:?}: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+
+    // Só agora o arquivo existe com o nome final: o sinal de fim não pode vir
+    // antes disso, ou a UI tentaria ler um caminho que ainda não existe.
+    state.items.file_done(item.id);
 
     StatusCode::CREATED
 }
@@ -217,24 +248,48 @@ fn split_stem_ext(name: &str) -> (&str, Option<&str>) {
 }
 
 /// Caminho final dentro de `dir` para `name`, acrescentando ` (1)`, ` (2)`...
-/// se já existir um arquivo com esse nome.
-fn dedup_path(dir: &Path, name: &str) -> PathBuf {
-    let candidate = dir.join(name);
-    if !candidate.exists() {
-        return candidate;
-    }
+/// se já existir um arquivo com esse nome ou já estar reservado por outro
+/// envio em andamento. Reserva o caminho escolhido em `leases` antes de
+/// devolver — sob o mesmo lock que checa `exists()`, para dois envios
+/// concorrentes do mesmo nome nunca escolherem o mesmo destino: sem isso,
+/// nenhum dos dois vê o outro em `exists()` até o `rename()` do fim, que só
+/// acontece depois de todos os bytes chegarem.
+fn reserve_path(dir: &Path, name: &str, leases: &Mutex<HashSet<PathBuf>>) -> PathBuf {
+    let mut leased = leases.lock().expect("leases sem panic");
     let (stem, ext) = split_stem_ext(name);
-    let mut n = 1u32;
+    let mut n = 0u32;
     loop {
-        let attempt = match ext {
-            Some(ext) => format!("{stem} ({n}).{ext}"),
-            None => format!("{stem} ({n})"),
+        let candidate = if n == 0 {
+            dir.join(name)
+        } else {
+            let attempt = match ext {
+                Some(ext) => format!("{stem} ({n}).{ext}"),
+                None => format!("{stem} ({n})"),
+            };
+            dir.join(&attempt)
         };
-        let path = dir.join(&attempt);
-        if !path.exists() {
-            return path;
+        if !candidate.exists() && !leased.contains(&candidate) {
+            leased.insert(candidate.clone());
+            return candidate;
         }
         n += 1;
+    }
+}
+
+/// Libera, ao sair de escopo, o nome que `reserve_path` reservou — em todo
+/// retorno de `post_file`, sucesso ou erro, para um envio cortado não deixar
+/// o nome preso para sempre.
+struct LeaseGuard {
+    leases: Arc<Mutex<HashSet<PathBuf>>>,
+    path: PathBuf,
+}
+
+impl Drop for LeaseGuard {
+    fn drop(&mut self) {
+        self.leases
+            .lock()
+            .expect("leases sem panic")
+            .remove(&self.path);
     }
 }
 

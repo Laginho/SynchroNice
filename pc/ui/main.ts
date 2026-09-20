@@ -17,6 +17,7 @@ interface FileItem {
   name: string;
   size: number;
   received: number;
+  done: boolean;
 }
 
 type Item = TextItem | FileItem;
@@ -104,7 +105,7 @@ function carregarMiniatura(nome: string, thumb: HTMLElement): void {
 }
 
 function atualizarProgresso(bubble: HTMLElement, item: FileItem): void {
-  const completo = item.size > 0 && item.received >= item.size;
+  const completo = item.done;
   bubble.classList.toggle("enviando", !completo);
 
   const meta = bubble.querySelector<HTMLElement>(".file-meta")!;
