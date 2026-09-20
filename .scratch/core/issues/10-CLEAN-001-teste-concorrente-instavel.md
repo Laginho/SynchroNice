@@ -1,5 +1,5 @@
 # CLEAN-001: Teste de concorrência instável derruba o gate
-Stage: to-review
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
