@@ -1,5 +1,5 @@
 # CLEAN-002: Fila de Pendentes do Android — limpeza e política de recusa
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -68,6 +68,9 @@ os critérios 1 a 4 e deixa o 5.
 
 ## Comments
 
+- 2026-09-20 (stage 2): critérios 1 a 4 implementados e com gate verde.
+  Critério 5 continua fora de escopo desta passada — precisa de stage 1
+  para decidir a política de recusa, como o próprio ticket já previa.
 - 2026-09-20 (revisão de SYN-008): aberto pela revisão. Os critérios 1 a 3
   são os itens de Standards que a revisão anterior de SYN-008 listou como
   "não bloqueiam a volta"; o 4 saiu da leitura do código desta rodada; o 5 é
