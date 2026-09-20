@@ -1,6 +1,6 @@
 //! Costura do PC: o protocolo HTTP. Os testes agem como o celular.
 
-use pc_lib::items::Items;
+use pc_lib::items::{ItemBody, Items};
 use pc_lib::outbox::{OutBody, OutItem, Outbox};
 use pc_lib::par::Par;
 use pc_lib::server;
@@ -288,9 +288,19 @@ fn post_arquivo_vazio_completa_com_arquivo_de_0_byte() {
 
 #[test]
 fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
-    let (base, _items, _outbox, raiz) = sobe();
+    let (base, items, _outbox, raiz) = sobe();
     let pasta = raiz.path().join("pasta");
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    // Sinal de fim é o evento `file_done` (dispara só depois do rename para
+    // o nome final, ver items.rs), não o relógio: sob carga, um envio pode
+    // legitimamente terminar depois de um tempo fixo qualquer.
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    items.on_new(move |item| {
+        if let ItemBody::File { done: true, .. } = &item.body {
+            let _ = tx.send(());
+        }
+    });
 
     fn cabecalho(addr: &str, tamanho: usize) -> String {
         format!(
@@ -331,7 +341,10 @@ fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
     drop(fluxo_a);
     drop(fluxo_b);
 
-    std::thread::sleep(Duration::from_millis(300));
+    for _ in 0..2 {
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("os dois envios devem terminar (evento file_done) dentro do prazo");
+    }
 
     let gravado_1 = std::fs::read(pasta.join("foto.jpg")).expect("primeiro arquivo");
     let gravado_2 = std::fs::read(pasta.join("foto (1).jpg")).expect("segundo arquivo, com sufixo");

@@ -1,5 +1,5 @@
 # CLEAN-001: Teste de concorrência instável derruba o gate
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -110,3 +110,47 @@ Mais a repetição do critério 2, com a saída colada no ticket.
 - 2026-09-20 Review ended at to-review (exit 0); branch clean-001 holds the review; left for a human
 
 - 2026-09-20 Foreman: o review anterior terminou sem veredito (exit 0 logo apos "Gate re-running after the fixes"), nao por recusa. A branch `clean-001` tem os dois commits na ordem certa (teste vermelho, depois a correcao em `server.rs`). Devolvido a `to-review` para o stage 3 rodar de novo sobre a mesma branch.
+
+- 2026-09-20 (stage 2, retry): **causa raiz confirmada e corrigida.** Trocar o
+  `std::thread::sleep(300ms)` do teste por uma espera no evento `file_done`
+  (commit anterior, critério 3) trocou o sintoma de "arquivo não existe" por
+  "evento nunca chega" — com os outros 18 testes de `tests/server.rs` rodando
+  em paralelo (o mesmo tipo de carga do gate normal), o segundo evento não
+  chegava em ~13% das rodadas mesmo com os **dois arquivos já gravados e
+  íntegros no disco** (confirmado por instrumentação temporária, removida
+  antes deste commit) — a causa raiz não é o `rename` em si, que sempre
+  completa.
+
+  Causa (uma linha): `post_file` faz `tokio::fs::rename(...).await` e só
+  depois chama `state.items.file_done` na mesma future da requisição; se a
+  conexão cai logo após o último byte do corpo — o teste de concorrência faz
+  isso de propósito, e um cliente real que feche o socket cedo (rede
+  instável, app do Android encerrando o envio) faria o mesmo — o runtime
+  cancela essa future no meio, o rename (já disparado no thread-pool de
+  bloqueio) termina sozinho sem ninguém observar, mas o `file_done` seguinte
+  nunca roda: o arquivo fica correto no disco, só o aviso de fim se perde.
+
+  Corrigido isolando rename + `file_done` (e a liberação do lease) numa
+  `tokio::spawn` própria: uma tarefa spawnada não é abortada quando a future
+  que a criou é cancelada, então o aviso de fim sempre roda depois de um
+  rename bem-sucedido, mesmo com a conexão já morta. `post_file` aguarda essa
+  tarefa antes de responder, então o contrato para um cliente que continua
+  conectado não muda.
+
+  Critério 2, sequencial (sem paralelismo artificial, a mesma condição do
+  gate normal):
+
+      [1..20] exit=0 : test result: ok. 19 passed; 0 failed — 20/20 (binário
+      tests\server.rs inteiro)
+      [1..20] exit=0 : test result: ok. 1 passed; 0 failed — 20/20 (só
+      dois_envios_concorrentes_do_mesmo_nome_preservam_ambos, --exact)
+
+  `powershell -ExecutionPolicy Bypass -File .\gate.ps1` (fmt+clippy+test+tsc+
+  gradle) passou limpo. Sob carga artificial mais pesada que o gate real (4
+  cópias do binário inteiro em paralelo, ~4x mais threads brigando por CPU
+  que qualquer cenário de CI ou do gate local), ainda restam falhas raras
+  (2/120) do mesmo tipo — parecem esgotamento de recursos do SO sob essa
+  carga extrema e não reproduzem em carga sequencial ou 2x paralela (100/100
+  e 150/150 verdes); registro aqui para quem revisar julgar se isso é sinal
+  de outra causa raiz ainda por achar ou só o teste sendo empurrado além do
+  que qualquer execução real do gate faria.

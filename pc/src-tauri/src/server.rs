@@ -346,16 +346,43 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     }
     drop(file);
 
-    if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
-        eprintln!("falha ao renomear {temp_path:?} para {final_path:?}: {e}");
-        return StatusCode::INTERNAL_SERVER_ERROR;
+    // Rename e aviso de fim rodam numa tarefa própria a partir daqui: se a
+    // conexão cair logo depois do último byte do corpo (o celular não
+    // precisa ficar esperando a resposta), a future desta requisição é
+    // cancelada, mas uma tarefa spawnada não é abortada por isso — sem essa
+    // separação o rename já tinha acontecido e o aviso de fim nunca saía.
+    let items = state.items.clone();
+    let final_path_bg = final_path.clone();
+    let temp_path_bg = temp_path.clone();
+    let concluido = tokio::spawn(async move {
+        // Move a reserva do nome para dentro da tarefa: ela só é liberada
+        // depois do rename, nunca enquanto ele ainda está em voo.
+        let _lease = _lease;
+        match tokio::fs::rename(&temp_path_bg, &final_path_bg).await {
+            Ok(()) => {
+                // Só agora o arquivo existe com o nome final: o sinal de fim
+                // não pode vir antes disso, ou a UI tentaria ler um caminho
+                // que ainda não existe.
+                items.file_done(item.id);
+                true
+            }
+            Err(e) => {
+                eprintln!("falha ao renomear {temp_path_bg:?} para {final_path_bg:?}: {e}");
+                false
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("tarefa de conclusão de {final_path:?} não terminou: {e}");
+        false
+    });
+
+    if concluido {
+        StatusCode::CREATED
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
     }
-
-    // Só agora o arquivo existe com o nome final: o sinal de fim não pode vir
-    // antes disso, ou a UI tentaria ler um caminho que ainda não existe.
-    state.items.file_done(item.id);
-
-    StatusCode::CREATED
 }
 
 /// Bloqueia até a fila de saída ter ao menos um Pendente, devolve todos os
@@ -480,7 +507,9 @@ fn reserve_path(dir: &Path, name: &str, leases: &Mutex<HashSet<PathBuf>>) -> Pat
 
 /// Libera, ao sair de escopo, o nome que `reserve_path` reservou — em todo
 /// retorno de `post_file`, sucesso ou erro, para um envio cortado não deixar
-/// o nome preso para sempre.
+/// o nome preso para sempre. Depois que o corpo chega inteiro o guarda passa
+/// para a tarefa que faz o rename, então a reserva só cai quando o arquivo já
+/// está no nome final (ou o rename falhou).
 struct LeaseGuard {
     leases: Arc<Mutex<HashSet<PathBuf>>>,
     path: PathBuf,
