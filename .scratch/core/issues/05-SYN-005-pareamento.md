@@ -39,3 +39,16 @@ Critérios 1, 2 e 3 (parte visual): manual.
 - `pc/src-tauri/tests/server.rs`: criar Par gera token e nome de instância e os grava; recriar a partir da configuração devolve os mesmos; rotacionar troca o token e o servidor recusa o antigo e aceita o novo. Vermelho porque o módulo de Par não existe.
 
 ## Comments
+
+- 2026-09-20 (revisão de SYN-002): **o servidor pode não subir e a janela não
+  conta.** `start_server` (`pc/src-tauri/src/lib.rs`) só faz `eprintln!` e
+  volta quando o token falha ou quando o bind em `0.0.0.0:47820` falha; o app
+  abre normal, o chat fica bonito e vazio, e nada do celular jamais chega.
+  Como a porta é fixa, o X só esconde a janela (`on_window_event`) e o
+  autostart está ligado, abrir o atalho com o app já na bandeja é o caminho
+  provável para isso: a segunda instância perde o bind e vira uma janela
+  morta. Este ticket é quem ganha uma tela de estado do Par (o QR), então é
+  onde cabe dizer também "o serviço não está no ar" — e, junto, um guard de
+  instância única (`tauri-plugin-single-instance`) que foca a janela existente
+  em vez de abrir a segunda. Sem isso, o critério 1 de SYN-002 falha sem
+  nenhum sinal para o usuário.

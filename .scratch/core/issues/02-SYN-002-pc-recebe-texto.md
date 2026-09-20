@@ -1,5 +1,5 @@
 # SYN-002: PC recebe texto pela rede
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-001
 Review: agent
@@ -56,7 +56,9 @@ Critérios 1, 4 e 6: manual.
     `90a7b58`, sem tocar em `tests/`. Verde: 8 testes (4 em `config.rs`,
     4 em `server.rs`), gate `passou`.
   - **Protocolo.** `POST /items/text`, corpo UTF-8, `Authorization: Bearer
-    <token>`; 201 com `{"id": n}`; 401 sem token ou token errado. Porta fixa
+    <token>`; ~~201 com `{"id": n}`~~ **201 sem corpo** (corrigido em
+    `6918d3a`, no mesmo branch, depois que esta linha foi escrita — ver a
+    revisão de 2026-09-20); 401 sem token ou token errado. Porta fixa
     `47820` (`server::PORT`), bind em `0.0.0.0`. O Windows pode pedir
     liberação no firewall na primeira subida.
   - **Token.** Gerado uma vez (16 bytes aleatórios em hex) e gravado em
@@ -162,4 +164,105 @@ Critérios 1, 4 e 6: manual.
   - Débito humano: critério 1 — ninguém viu a bolha aparecer em < 1 s com `npx tauri dev` + `curl`; sem Rust nesta máquina, e rodar o app registraria `target/debug` no autostart do Windows e abriria o diálogo da Pasta sem aviso.
   - Débito humano: critério 4 — ninguém clicou num link recebido e viu o navegador padrão abrir; permissão e handler conferidos por inspeção, o salto `openUrl` → shell só é observável com o app rodando.
   - Débito humano: critério 6 — ninguém saiu pela bandeja e reabriu; "token permanece" tem teste, "chat vazio" é por construção (Sessão só em memória).
-  - Débito humano: gate completo (`cargo fmt --check`, `cargo clippy`, `cargo test`) não rodou nesta máquina (sem toolchain Rust); só `tsc --noEmit` e `vite build`, ambos verdes. Último gate verde de verdade: stage 2 em `c5d2c07`, em outra máquina. Instalar Rust aqui é decisão do autor.
+  - ~~Débito humano: gate completo (`cargo fmt --check`, `cargo clippy`,
+    `cargo test`) não rodou nesta máquina (sem toolchain Rust); só
+    `tsc --noEmit` e `vite build`, ambos verdes.~~ **Errado, e resolvido no
+    stage 3 de 2026-09-20:** existe toolchain Rust nesta máquina
+    (`C:\Users\Lage\.cargo\bin\cargo.exe`). O gate completo rodou aqui e
+    passou — saída no Resolution abaixo. Não é mais débito.
+
+#### Resolution (2026-09-20)
+
+Verdict: Approve
+
+Revisão de `aa15254..6918d3a` (já na `main` pelo merge `5d247eb`), nos dois
+eixos do `code-review`: Standards (contra `CONTEXT.md`, `docs/adr/0001`,
+`docs/adr/0002`, `AGENTS.md`, `docs/DECISIONS.md` e a linha de base de smells
+de Fowler) e Spec (contra este ticket e `.scratch/core/spec.md`). Nenhum
+critério é contrariado pelo código.
+
+**Gate.** Rodou completo nesta máquina, `exit 0`:
+
+    ==> cargo fmt --check (pc)
+    ==> cargo clippy (pc)      Finished dev profile in 19.42s
+    ==> cargo test (pc)        tests\config.rs: 4 passed; 0 failed
+                               tests\server.rs: 4 passed; 0 failed
+                               (lib/main/doc-tests: 0 testes)
+    ==> tsc --noEmit (pc/ui)
+    gate: passou
+
+8 testes, todos verdes. Isto corrige o débito registrado em 2026-09-20 de que
+não haveria Rust aqui: há.
+
+**Separação teste/código (a regra que sustenta o loop).** `aa15254` toca só
+`tests/` e o ticket; `d51dce7` é rustfmt do arquivo de teste; `90a7b58` não
+toca `tests/`; `6918d3a` muda `server.rs` e não invalida nenhum teste (nenhum
+lia o corpo da resposta). O vermelho inicial está registrado em
+`## Comments`: `E0432` para `pc_lib::items`/`pc_lib::server`, `E0425` para
+`load_or_create_token`.
+
+**Critérios.**
+
+1. ✅ por construção, meia parte automatizada. `post_com_token_cria_item_de_texto`
+   prova HTTP → lista. A cadeia até a bolha é síncrona e sem fila:
+   `post_text` → `push_text` chama os listeners ainda dentro do handler, antes
+   do 201 (`items.rs:36-51`) → `handle.emit("item", …)` (`lib.rs:60-64`) →
+   `listen("item")` registrado **antes** de `invoke("list_items")`
+   (`main.ts:68-69`), com `seen` desduplicando. O "< 1 s" em si ninguém
+   cronometrou — débito humano abaixo.
+2. ✅ por teste. `post_sem_token_e_recusado_e_nada_entra` e
+   `post_com_token_errado_e_recusado_e_nada_entra` sobem `server::spawn` real
+   em porta 0, batem por HTTP e conferem 401 + lista vazia. O `emit` só é
+   alcançável por `push_text`, que a recusa não atinge.
+3. ✅ por construção. `grep -rnE 'innerHTML|insertAdjacentHTML|outerHTML|srcdoc'
+   pc/ui pc/index.html` não acha nada; texto entra por `textContent`
+   (`main.ts:47,54`) e `href` só recebe URL que `new URL()` aceitou com
+   protocolo `http:`/`https:` (`main.ts:17-26`), então nem `javascript:` passa.
+4. ✅ por construção, na letra do critério ("um texto que é URL").
+   `preventDefault()` + `openUrl(url)` (`main.ts:44-52`); `opener:default` em
+   `capabilities/default.json` cobre `allow-open-url`; plugin registrado em
+   `lib.rs:99`. O salto para o navegador ninguém viu — débito humano abaixo.
+5. ✅ por teste. `dois_posts_preservam_ordem_de_chegada` por HTTP real; os
+   listeners rodam dentro do mesmo `Mutex` (`items.rs:37-49`), então a ordem
+   dos `emit` é a dos `push`, e `snapshot()` devolve em ordem.
+6. ✅ token por teste em disco (`token_e_gerado_uma_vez_e_persiste`;
+   `load_or_create_token` só gera quando não há, `config.rs:42-51`). Sessão
+   vazia por construção: `Items` é `Arc<Mutex<Vec>>` sem persistência, "Sair"
+   é `app.exit(0)` (`lib.rs:88`), o X só esconde (`lib.rs:120-123`). Sair e
+   reabrir ninguém fez — débito humano abaixo.
+
+**Achados que saíram deste ticket.** Nenhum é pequeno o bastante para o stage
+3 consertar (os dois precisam de critério e teste novos), e nenhum reprova um
+critério de SYN-002, então foram para o `## Comments` do ticket dono:
+
+- **SYN-004** — o id de Item ainda é cunhado pelo destinatário
+  (`items.rs`, `len()+1`), contra "Cada Item leva um id gerado pelo remetente"
+  da spec; confirmação e deduplicação por id não existem, e são pré-requisito
+  da fila de Pendentes.
+- **SYN-005** — `start_server` só faz `eprintln!` quando o bind em
+  `0.0.0.0:47820` ou o token falha: com porta fixa, autostart ligado e X que
+  só esconde, a segunda instância vira janela morta e silenciosa. Pede sinal
+  na tela e guard de instância única.
+
+**Corrigido aqui (fix pequeno, só no registro).** A linha de protocolo em
+`## Comments` ainda dizia `201 com {"id": n}`, que `6918d3a` desfez no mesmo
+branch; marcada e corrigida para "201 sem corpo", que é o que `server.rs`
+documenta.
+
+**Anotado, não mexido.** Fora do que o ticket pede e sem defeito concreto:
+`authorized` compara `t.trim() == token`, tolerando espaço após o valor do
+Bearer (mexer em autenticação sem teste novo é justamente o que o stage 3 não
+faz); `Items` tem registro de múltiplos listeners para um único assinante;
+`Running` guarda só um `SocketAddr` e não permite parar o servidor; o token
+viaja como `String` nua; `push_text` chama os listeners segurando o `Mutex`,
+então um listener que toque `Items` trava. Nada disso vira `CLEAN-*` agora:
+SYN-004 e SYN-005 reescrevem esses mesmos pontos.
+
+**Arquivos.** `pc/src-tauri/src/{config.rs,items.rs,lib.rs,server.rs}`,
+`pc/src-tauri/tests/{config.rs,server.rs}`, `pc/src-tauri/Cargo.{toml,lock}`,
+`pc/ui/{main.ts,styles.css}`, `pc/index.html` (a linha `<script>` que carrega
+`pc/ui/**`, único toque fora dos Primary files, previsto no comentário de
+2026-09-17).
+
+Débito humano que sobrevive ao merge (critérios 1, 4 e 6): ver as linhas
+`Débito humano:` acima — ninguém rodou o app.

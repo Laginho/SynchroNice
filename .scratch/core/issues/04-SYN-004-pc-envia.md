@@ -48,3 +48,18 @@ Critérios 3, 4, 5, 6 e 8: manual.
 - `pc/src-tauri/tests/server.rs`: enfileirar texto sem cliente deixa o Item Pendente; abrir a escuta entrega os Pendentes em ordem e eles ficam Entregues; enfileirar arquivo e baixar pela rota devolve bytes idênticos; fila gravada em disco sobrevive a recriar o servidor a partir do mesmo diretório. Vermelho porque fila, escuta e download não existem.
 
 ## Comments
+
+- 2026-09-20 (revisão de SYN-002): **o id de Item ainda é do destinatário, e
+  este ticket é quem precisa consertar isso.** A spec diz, em "Protocolo de
+  Itens": "Cada Item leva um id gerado pelo remetente; o destinatário responde
+  confirmando o id e ignora id já recebido. Só a confirmação remove o Item da
+  fila de Pendentes, então reenvio nunca duplica bolha nem arquivo." Hoje
+  `Items::push_text` (`pc/src-tauri/src/items.rs`) cunha `inner.items.len() + 1`
+  e `POST /items/text` responde 201 sem corpo, de propósito — o cabeçalho de
+  `pc/src-tauri/src/server.rs` explica que nenhum cliente deve nascer
+  dependendo de um id do PC. Consequência para este ticket: o `Item.id` de
+  hoje é chave de render local, não id de protocolo; a confirmação e a
+  deduplicação por id não existem em lugar nenhum e são pré-requisito da fila
+  de Pendentes do critério 1. Ao implementar, o id do remetente entra na
+  requisição (e no anúncio da rota de escuta) e o campo local ganha outro
+  nome, para os dois não se confundirem.
