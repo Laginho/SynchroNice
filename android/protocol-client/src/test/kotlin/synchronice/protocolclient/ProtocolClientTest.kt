@@ -41,7 +41,7 @@ class ProtocolClientTest {
         try {
             client(port).sendText("oi")
 
-            assertEquals(listOf("Bearer $TOKEN" to "oi"), requests)
+            assertEquals(listOf<Pair<String?, String>>("Bearer $TOKEN" to "oi"), requests)
         } finally {
             server.stop(0)
         }
@@ -114,7 +114,7 @@ class ProtocolClientTest {
 
             client.sendText("oi")
 
-            assertEquals(listOf("Bearer $TOKEN"), requests)
+            assertEquals(listOf<String?>("Bearer $TOKEN"), requests)
             assertFalse(client.hasPending())
         } finally {
             server.stop(0)
