@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -21,12 +21,12 @@ final.
 
 #### Acceptance criteria
 
-1. Enviar uma imagem via `curl` grava o arquivo na Pasta e mostra miniatura na bolha à esquerda.
-2. Enviar um PDF grava o arquivo e mostra nome, `PDF` e tamanho legível na bolha.
-3. Enviar `foto.jpg` duas vezes resulta em `foto.jpg` e `foto (1).jpg` na Pasta, ambos íntegros.
-4. Durante um envio de mais de 100 MB, a bolha mostra progresso crescendo e uma animação visível.
-5. Um envio interrompido no meio não deixa arquivo com nome final na Pasta.
-6. Um nome de arquivo com caminho (`../x.txt`) ou caracteres inválidos no Windows é saneado e o arquivo fica dentro da Pasta.
+1. ❌ Enviar uma imagem via `curl` grava o arquivo na Pasta e mostra miniatura na bolha à esquerda. — grava, mas a miniatura nunca aparece com o `curl` do bloco Verification (review 2026-09-20, achado 1).
+2. ❌ Enviar um PDF grava o arquivo e mostra nome, `PDF` e tamanho legível na bolha. — grava, mas a bolha fica presa no estado "enviando", sem o tipo nem o tamanho (mesmo achado 1).
+3. ⚠️ Enviar `foto.jpg` duas vezes resulta em `foto.jpg` e `foto (1).jpg` na Pasta, ambos íntegros. — vale em sequência (teste verde); dois envios simultâneos do mesmo nome perdem um dos arquivos (achado 2).
+4. ❌ Durante um envio de mais de 100 MB, a bolha mostra progresso crescendo e uma animação visível. — a barra fica em 0% sem `X-File-Size` (mesmo achado 1).
+5. ✅ Um envio interrompido no meio não deixa arquivo com nome final na Pasta.
+6. ✅ Um nome de arquivo com caminho (`../x.txt`) ou caracteres inválidos no Windows é saneado e o arquivo fica dentro da Pasta.
 
 #### Verification
 
@@ -113,3 +113,77 @@ Critérios 1, 2 e 4: manual.
   manuais (curl não testa UI); os 4 testes automatizados (conteúdo íntegro,
   sufixo `(1)`, `../` contido na Pasta, envio cortado sem nome final) estão
   verdes no gate completo.
+
+- Débito humano: critérios 1, 2 e 4 (miniatura, nome/tipo/tamanho, barra
+  animada) não foram vistos numa tela — a review os avaliou traçando o caminho
+  do dado do servidor até o DOM, não abrindo o app. Foi o bastante para
+  reprová-los (achado 1), mas a aprovação deles, quando o stage 2 corrigir,
+  ainda quer um olho humano.
+
+#### Review (2026-09-20) — reaberto
+
+Verdict: Needs your call: os critérios 1, 2 e 4 não passam com o próprio `curl`
+do bloco Verification, e a correção mexe no protocolo (o servidor passa a ler
+o tamanho do `Content-Length`) — vale uma olhada humana no contrato antes de o
+stage 2 refazer.
+
+Higiene do fluxo, em ordem: separação teste/código limpa — `3f10528` toca só
+`tests/server.rs` e o ticket, `c713b12` não toca nenhum arquivo de teste.
+Vermelho confirmado: em `3f10528` os testes usam `pc_lib::items::ItemBody` e
+chamam `server::spawn` com 4 argumentos, e nenhum dos dois existia no código
+daquele commit — os 4 testes novos não compilavam. Gate completo verde agora
+nesta máquina: fmt, clippy, 12 testes (4 em `config.rs`, 8 em `server.rs`),
+`tsc --noEmit`.
+
+**Achado 1 (bloqueia 1, 2 e 4).** `post_file` tira o tamanho só do cabeçalho
+`X-File-Size`, com `.unwrap_or(0)`, e ignora o `Content-Length`. O `curl` do
+bloco Verification deste ticket não manda `X-File-Size` — manda
+`Content-Length`. Com `size: 0`, `atualizarProgresso` em `pc/ui/main.ts` calcula
+`completo = item.size > 0 && item.received >= item.size`, que nunca fica
+verdadeiro: a miniatura (que só carrega dentro do `if (completo)`) não aparece,
+o texto `PDF · 1,2 MB` nunca substitui a contagem de bytes, e
+`barra.style.width` (também sob `item.size > 0`) fica em `0%`, então a animação
+listrada roda numa barra de largura zero. Um arquivo de 0 byte cai no mesmo
+buraco, mesmo com `X-File-Size` correto. O fim do recebimento precisa de um
+sinal próprio, não pode ser inferido de `received >= size`.
+
+**Achado 2 (enfraquece 3).** `dedup_path` decide o nome final por `exists()` e
+nada reserva esse nome até o `rename` do fim. Dois envios de `foto.jpg` que se
+sobrepõem no tempo resolvem os dois para `foto.jpg` (só o `.part-<hex>` é
+único) e o segundo `rename` sobrescreve o primeiro em silêncio. O teste
+`segundo_post_do_mesmo_nome_ganha_sufixo` é sequencial, por isso passa.
+
+O que falta, para o stage 2 continuar nesta mesma branch:
+
+1. O servidor usa `Content-Length` quando `X-File-Size` não vier, e a UI marca
+   o arquivo como completo por um sinal explícito do fim do stream — não por
+   `received >= size`. Critérios 1, 2 e 4 voltam a valer com o `curl` do bloco
+   Verification, sem cabeçalho extra, e um arquivo de 0 byte também termina.
+2. Reservar o nome final antes de começar a gravar (criar o destino vazio e
+   gravar por cima, ou algum aluguel equivalente), para dois envios simultâneos
+   do mesmo nome darem `foto.jpg` e `foto (1).jpg` — critério 3 com "ambos
+   íntegros" valendo também fora da sequência.
+
+Testes novos que isso pede (por isso é reabertura e não conserto na review):
+POST sem `X-File-Size` cria o Item com o tamanho do `Content-Length`; dois POSTs
+concorrentes do mesmo nome deixam os dois arquivos íntegros na Pasta.
+
+Achados menores, fora do que bloqueia — não mexer neles aqui:
+
+- Todo envio interrompido deixa um `<nome>.part-<hex>` na Pasta para sempre; o
+  caminho de erro de `post_file` não apaga o temporário. Critério 5 continua
+  valendo (o nome final não aparece), mas o lixo acumula num diretório do
+  usuário. Vira `CLEAN-*` ou critério novo no stage 1.
+- `read_file_bytes` lê o arquivo inteiro na memória e o manda pelo IPC do Tauri
+  como array JSON de números (~4x os bytes) a cada miniatura. Decisão já
+  registrada pelo stage 2; cara para os 100 MB que o critério 4 cita.
+- `sanitize_file_name`: `trim_matches('.')` renomeia dotfile legítimo
+  (`.gitignore` → `gitignore`), e nome reservado do Windows (`COM1`, `nul.txt`)
+  chega no `File::create` e vira 500. Critério 6 fala de caracteres, então
+  passa; ainda assim é superfície para o stage 1 decidir.
+- `random_suffix` em `server.rs` repete o final de `config.rs::new_token`
+  (`getrandom::fill` + hex). Um `hex(&[u8])` compartilhado resolve. `CLEAN-*`.
+- `sanitize_file_name` virou `pub(crate)` só para `lib.rs::read_file_bytes`
+  refazer `pasta.join(sanitize(...))`: a invariante "não sai da Pasta" agora
+  mora em dois lugares. Um `caminho_na_pasta(pasta, name)` a guardaria uma vez.
+- `URL.createObjectURL` em `carregarMiniatura` nunca é revogado.
