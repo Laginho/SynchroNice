@@ -1,5 +1,5 @@
 # SYN-009: Android recebe arquivos do PC
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-004
 Review: agent
@@ -51,7 +51,7 @@ Critérios adiados:
 
 #### Acceptance criteria
 
-7. `gate.ps1` roda os testes JVM do módulo cliente para o download de Item de arquivo (anúncio recebido pelo `/listen` baixa pela rota de download com progresso crescente até 100 e entrega bytes idênticos; download interrompido não marca o Item como completo nem envia o `ack`), e falha se eles falharem.
+7. ❌ (revisão de 2026-09-20) `gate.ps1` roda os testes JVM do módulo cliente para o download de Item de arquivo (anúncio recebido pelo `/listen` baixa pela rota de download com progresso crescente até 100 e entrega bytes idênticos; download interrompido não marca o Item como completo nem envia o `ack`), e falha se eles falharem. — **Caiu por duas metades:** nenhum teste parte de um anúncio do `/listen` (os dois novos constroem `Item.FileMeta` à mão), e um `ack` recusado pelo PC é tratado como sucesso, então "confirma o recebimento" não é entregue de fato. Ver o bloco de revisão no fim do arquivo.
 
 #### Verification
 
@@ -61,7 +61,9 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
 
 ## Tests stage 2 writes (own commit, red)
 
-- `android/.../test/ProtocolClientTest.kt`: ao receber anúncio de Item de arquivo, o cliente baixa pela rota de download com progresso crescente e entrega bytes idênticos; download interrompido não marca o Item como completo. Vermelho porque o download não existe.
+- `android/.../test/ProtocolClientTest.kt`: ao receber anúncio de Item de arquivo, o cliente baixa pela rota de download com progresso crescente e entrega bytes idênticos; download interrompido não marca o Item como completo. Vermelho porque o download não existe. ✅ feito em `15350e5`/`d3bcbef`, mas só a partir de um `Item.FileMeta` construído à mão — ver os dois de baixo.
+- (reaberto 2026-09-20) `android/.../test/ProtocolClientTest.kt`: o anúncio vem do `/listen` de verdade — servidor falso serve a linha NDJSON do Item de arquivo **e** `/outbox/{id}/file`, o teste chama `listen()` e passa o `Item.FileMeta` que voltou para `downloadFile`. Vermelho hoje? Não: passa, e é justamente por isso que falta — nada prova que a costura anúncio→download existe. Escreva-o mesmo assim, no commit de teste, e diga no commit que ele nasce verde por ser cobertura de uma costura já implementada.
+- (reaberto 2026-09-20) `android/.../test/ProtocolClientTest.kt`: `ack` recusado pelo PC (servidor falso responde 401 em `/outbox/{id}/ack`) faz `downloadFile` lançar `ProtocolRejectedException`, em vez de retornar como se tivesse confirmado. Vermelho porque `ack()` hoje lê `responseCode` e joga fora.
 
 ## Comments
 
@@ -160,3 +162,69 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
   ticket.
 
   Nada tocado fora de `android/protocol-client/` e deste ticket.
+
+#### Revisão (2026-09-20) — reaberto
+
+Verdict: Reopen — critério 7 caiu, `Stage: to-implement`, segue na branch `syn-009`.
+
+Não é "Needs your call": as duas coisas que faltam são testáveis e cabem nos
+Primary files, e nenhuma depende de decisão humana. O que já está na branch é
+bom e fica — `15350e5`+`d3bcbef` (teste) e `68ed222` (código), separação
+`diff --stat` limpa, teste primeiro, código sem tocar em teste. O vermelho está
+provado sem depender da palavra do stage 2: em `d3bcbef` o teste chama
+`client.downloadFile(...)` e `git grep -l downloadFile d3bcbef -- src/main` não
+acha nada, então `compileTestKotlin` não tinha como compilar. Gate completo
+verde nesta branch: `cargo fmt --check`, `cargo clippy`, `cargo test` 18/18 +
+doc-tests, `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL,
+`protocol-client` 16/16. Protocolo conferido contra `pc/src-tauri/src/server.rs`:
+rotas, método, `Authorization: Bearer`, 200 e 204 batem, e o `item.size` do
+anúncio é o `bytes.len()` de quem enfileirou (`outbox.rs`), então a checagem
+`received != item.size` não pode dar falso positivo. Zero vazamento de escopo:
+só `android/protocol-client/**` e este arquivo.
+
+**❌ O que falta (volta para o stage 2):**
+
+1. **A metade `/listen` do critério 7 não é exercida.** O critério diz "anúncio
+   recebido pelo `/listen` baixa pela rota de download", e "Tests stage 2
+   writes" nomeia a mesma costura. Os dois testes novos constroem
+   `Item.FileMeta(42, 100, "foto.png", …)` à mão: nenhum chama `listen()`, nenhum
+   servidor falso serve `/listen`. O parse do anúncio de arquivo tem teste
+   próprio (`listen entrega Itens em ordem`) e o download tem o dele, mas a junta
+   entre os dois — que é a única costura que o escopo reduzido nomeia — não tem
+   nada. Custa poucas linhas: servidor falso com `/listen` e `/outbox/{id}/file`,
+   `listen()`, e o `Item.FileMeta` que voltou alimenta `downloadFile`.
+
+2. **`ack()` engole a recusa do PC.** `ProtocolClient.kt:198-205` avalia
+   `connection.responseCode` e descarta o valor. Um 401 (token trocado) volta
+   normalmente, então `downloadFile` retorna como se tivesse confirmado enquanto
+   o Item continua Pendente no PC — e o resto do arquivo faz o oposto: `listen` e
+   o próprio `downloadFile` lançam `ProtocolRejectedException` em não-2xx,
+   `trySendText`/`trySendFile` mapeiam para `SendOutcome.Rejected`. A nota do
+   stage 2 ("o `ack` fica de fora do `try`... não é engolida silenciosamente")
+   trata do lugar do `disconnect`, não disso: o que é engolido é o status. Sem
+   isso, "confirma o recebimento" no critério 7 não é entregue de fato.
+
+Os dois precisam de teste novo, então nenhum é conserto pequeno de stage 3 —
+por isso reabre em vez de eu corrigir aqui.
+
+**Observações que não seguram o ticket** (o stage 2 decide; nada é critério):
+
+- `trySendFile` e `downloadFile` agora têm o mesmo laço de streaming com
+  progresso (buffer de 8 KB, acumulador, `if (total > 0) … else 100`). Um
+  `private fun pump(input, output, total, onProgress): Long` serviria aos dois e
+  daria uma casa só para a conferência de tamanho. Se não for junto com o
+  conserto acima, vira `CLEAN-*` — não é para refatorar fora do que o ticket toca.
+- Download interrompido deixa os bytes parciais em `destination` e ninguém apaga.
+  Hoje é inofensivo (a próxima tentativa trunca), mas o arquivo parece completo
+  para quem olhar.
+- 404 em `/outbox/{id}/file` é "id inexistente **ou já confirmado**" no
+  `server.rs`; hoje vira `ProtocolRejectedException`, isto é, o caso benigno de
+  id já recebido aparece como recusa. É a mesma questão do dedupe que o stage 2
+  deixou para a casca do app — fica registrado, não é deste escopo.
+- A KDoc de `downloadFile` explica o servidor de teste ("o servidor de teste
+  fecha a conexão sem erro nenhum..."). A justificativa é ótima e já está no
+  ticket e daria um bom comentário no teste; na KDoc de produção destoa do resto
+  do arquivo, que documenta só política de domínio.
+- No teste de interrupção, `val ackedIds = mutableListOf<String>()` recebe
+  `"chamado"` — não guarda id nenhum. `ackCalls`, ou um booleano com
+  `assertFalse(acked)`, seria honesto.
