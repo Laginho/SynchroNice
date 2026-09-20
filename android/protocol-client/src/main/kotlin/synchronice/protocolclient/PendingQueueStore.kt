@@ -1,7 +1,6 @@
 package synchronice.protocolclient
 
 import java.io.File
-import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
@@ -76,7 +75,7 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
         return try {
             File(item.path).copyTo(copy, overwrite = true)
             item.copy(path = copy.absolutePath)
-        } catch (_: IOException) {
+        } catch (_: NoSuchFileException) {
             null
         }
     }
