@@ -1,5 +1,5 @@
 # SYN-009: Android recebe arquivos do PC
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-004
 Review: agent
@@ -51,7 +51,7 @@ Critérios adiados:
 
 #### Acceptance criteria
 
-7. `gate.ps1` roda os testes JVM do módulo cliente para o download de Item de arquivo (anúncio recebido pelo `/listen` baixa pela rota de download com progresso crescente até 100 e entrega bytes idênticos; download interrompido não marca o Item como completo nem envia o `ack`), e falha se eles falharem.
+7. ✅ `gate.ps1` roda os testes JVM do módulo cliente para o download de Item de arquivo (anúncio recebido pelo `/listen` baixa pela rota de download com progresso crescente até 100 e entrega bytes idênticos; download interrompido não marca o Item como completo nem envia o `ack`), e falha se eles falharem.
 
 #### Verification
 
@@ -256,3 +256,61 @@ por isso reabre em vez de eu corrigir aqui.
   `android/protocol-client/` e deste ticket. Gate completo verde:
   `cargo fmt --check`, `cargo clippy`, `cargo test` 24/24 + doc-tests,
   `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL.
+
+#### Resolution (2026-09-20)
+
+Verdict: Approve.
+
+Os dois ❌ da revisão anterior fecharam, cada um com teste, e nenhum abriu
+buraco novo. Merge `--no-ff` na branch de sessão `sweatshop/2026-09-19-2324`.
+
+**Critério 7 — cada cláusula tem teste, em `ProtocolClientTest.kt`:**
+
+| Cláusula do critério | Teste |
+|---|---|
+| anúncio recebido pelo `/listen` baixa pela rota de download | `anuncio de arquivo vindo do listen e baixado pela mesma costura` |
+| progresso crescente até 100 + bytes idênticos | `baixa Item de arquivo com progresso crescente, bytes identicos, e confirma o recebimento` |
+| download interrompido não marca completo nem manda `ack` | `download interrompido nao marca o Item como completo e nao envia o ack` |
+| `ack` recusado não passa por confirmado | `ack recusado pelo PC nao confirma o download` |
+
+**Arquivos.** `android/protocol-client/src/main/kotlin/.../ProtocolClient.kt`
+(+51 no total do ticket; a rodada do reopen mexeu em 1 linha, `ack()`),
+`android/protocol-client/src/test/kotlin/.../ProtocolClientTest.kt` (+118),
+e este ticket. Zero vazamento: nada fora de `android/protocol-client/**` e
+deste arquivo, em nenhum dos oito commits.
+
+**Red-green, sem depender da palavra do stage 2.** Separação `diff --stat`
+limpa nas duas rodadas: `46ab988` é 1 arquivo, só teste (+57); `546d832` é 1
+arquivo, só produção (+2/-1). O vermelho de `ack recusado pelo PC nao
+confirma o download` é derivável do código em `46ab988`: `ack()` era
+`connection.responseCode` com o valor descartado, nenhum `throw` em lugar
+nenhum do caminho, e o download em si devolve 200 com os 3 bytes que o
+`item.size` declara — logo `assertFailsWith<ProtocolRejectedException>`
+não tinha como passar. O outro teste novo nasceu verde e o stage 2 disse
+isso em vez de esconder: era o que o próprio reopen previa (a costura
+existia, faltava a cobertura), então é lacuna de cobertura fechada, não
+regra quebrada.
+
+**O fix confere com o servidor.** `post_outbox_ack` em
+`pc/src-tauri/src/server.rs:406-415` devolve `401` ou `204`, nada mais — nem
+`404` para id que já saiu da fila, por design ("204 sempre, para reenvio da
+confirmação ser inofensivo", doc do módulo, linhas 39-42). Então
+`if (code != HTTP_NO_CONTENT) throw` é exatamente o contrato: não pode dar
+falso positivo num reenvio de `ack`, e alinha `ack()` com o resto do arquivo
+(`listen`, `downloadFile`, `trySendText`, `trySendFile` já lançavam ou
+mapeavam não-2xx). `ack` é o único caminho novo que pode lançar, e o único
+chamador é `downloadFile`.
+
+**Gate completo verde nesta branch:** `cargo fmt --check`, `cargo clippy`,
+`cargo test` 24/24 (18 de `server.rs`, 4 de `config.rs`, 2 de `drag.rs`) +
+doc-tests, `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL,
+`protocol-client` 18/18 (`tests="18" skipped="0" failures="0" errors="0"`
+no XML de resultado).
+
+**O que não foi feito e tem dono:** as cinco observações não-bloqueantes das
+duas revisões (laço de streaming duplicado entre `trySendFile` e
+`downloadFile`, bytes parciais deixados em `destination`, `404` de id já
+confirmado indistinguível de recusa, KDoc de `downloadFile` explicando o
+servidor de teste, `ackedIds` que guarda `"chamado"`) viraram **CLEAN-003**,
+como a revisão do reopen tinha mandado. Critérios 1–6 seguem no bloco
+"Adiado — precisa do Android SDK" e no `Débito humano:` acima.
