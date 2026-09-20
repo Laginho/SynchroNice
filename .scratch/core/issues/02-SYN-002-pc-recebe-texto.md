@@ -1,5 +1,5 @@
 # SYN-002: PC recebe texto pela rede
-Stage: to-review
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-001
 Review: agent
@@ -89,3 +89,5 @@ Critérios 1, 4 e 6: manual.
      nenhum, e o `reopened` que o driver registrou no run-log é leitura de
      branch obsoleta, não um veredito.
   Critérios 1, 4 e 6 são manuais e continuam sem observação.
+
+- 2026-09-19 Review ended at to-review (exit 0); branch syn-002 holds the review; left for a human
