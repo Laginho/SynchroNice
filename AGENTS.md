@@ -28,6 +28,30 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
   - Time 1 (padrão): sonnet xhigh / opus high
   - Time 2: fable medium / fable max
 
+## Humano simulado (somente neste repo — experimento)
+
+Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
+"Hands off" do `foreman` e a regra "a question is a `blocked`" do
+`ticket-flow` **apenas aqui**:
+
+- Tudo que o fluxo devolveria ao humano antes do PR de sessão — `blocked` com
+  pergunta, `Needs your call`, `Review: human`, passo de verificação manual
+  (abrir o app, olhar a tela, testar no celular) — vai para um subagente
+  **fable high**, spawnado por quem estiver rodando o `/foreman`. Ele faz o
+  papel do humano: lê o ticket e a `spec.md`, decide, e responde do jeito que
+  o `ticket-flow` já espera (resposta dobrada no corpo do ticket, `Stage:
+  to-implement`, commit na branch de sessão). Depois o foreman relança o driver.
+- O que um agente não consegue fazer de fato (abrir o app à mão, ver a tela),
+  o fable high contorna — teste automatizado, script, inspeção do binário — e
+  registra a revisão humana como débito: uma linha `Débito humano: <o que
+  ficou sem verificar à mão>` em `## Comments` do ticket, committed. Nunca
+  bloqueia por isso.
+- O foreman não para o run por `blocked` esperando humano: spawna o fable high
+  e segue. Para só quando não há ticket rodável nem `blocked` respondível.
+- O que continua humano: o merge do PR de sessão. O resumo final do foreman
+  lista, além dos blocos normais, todos os `Débito humano:` do run
+  (`grep -rh 'Débito humano:' .scratch/`), para a revisão ser feita de uma vez.
+
 ## Layout
 
 - `pc/` — app Tauri (`pc/src-tauri/` Rust, `pc/ui/` HTML/TS sem framework)
