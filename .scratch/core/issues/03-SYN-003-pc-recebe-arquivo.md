@@ -187,3 +187,41 @@ Achados menores, fora do que bloqueia — não mexer neles aqui:
   refazer `pasta.join(sanitize(...))`: a invariante "não sai da Pasta" agora
   mora em dois lugares. Um `caminho_na_pasta(pasta, name)` a guardaria uma vez.
 - `URL.createObjectURL` em `carregarMiniatura` nunca é revogado.
+
+- 2026-09-20 (resposta do humano à review): **direção aprovada, com dois
+  ajustes.** O `curl` do bloco Verification é o cliente de referência — a spec
+  manda ("PC primeiro, testável com `curl` antes de existir Kotlin") e é contra
+  o bloco de protocolo no topo de `pc/src-tauri/src/server.rs` que SYN-008
+  (bloqueado por este ticket) vai escrever o cliente Kotlin. Ele não ganha
+  cabeçalho novo. A spec pede "nome, tamanho e bytes em stream" sem dizer onde
+  o tamanho viaja; num POST de corpo cru o `Content-Length` *é* o tamanho.
+  Ajuste 1: **`Content-Length` primeiro, `X-File-Size` só quando o corpo vier
+  chunked** (sem `Content-Length`) — não o inverso. Se os dois vierem e
+  divergirem, o corpo entrega exatamente `Content-Length` bytes; um `size`
+  diferente vira barra que passa de 100% ou nunca chega. Sem nenhum dos dois
+  (Android com provider que não informa tamanho), aceita com `size: 0`: a bolha
+  conta bytes e termina pelo sinal de fim, não é 400. Atualizar o bloco de
+  protocolo do `server.rs` de acordo. **Fim explícito**, como a review pediu:
+  `Items::file_done(id)` pelo mesmo `on_new`, emitido *depois* do `rename` —
+  hoje `file_progress` com `received == size` dispara antes do rename
+  (`server.rs:177` vs `:181`) e a UI chamaria `read_file_bytes` num nome final
+  que ainda não existe; o sinal separado resolve isso e o arquivo de 0 byte de
+  uma vez. `atualizarProgresso` (`pc/ui/main.ts:107`) passa a olhar esse campo.
+  Envio cortado não emite o sinal e a bolha fica em "enviando": aceito, vai
+  junto com o `.part` órfão que a review já mandou para `CLEAN-*`. Ajuste 2:
+  **reserva do nome por aluguel em memória, não arquivo vazio.** Só este
+  processo grava na Pasta, então um conjunto de nomes alugados no `AppState`,
+  consultado em `dedup_path` sob o mesmo lock que o `exists()`, basta; o "criar
+  o destino vazio" deixaria um `foto.jpg` de 0 byte visível na Pasta durante o
+  envio e pediria limpeza em cada caminho de erro. Liberar o aluguel em *todo*
+  retorno de `post_file` — senão um envio cortado de `foto.jpg` faz o próximo
+  virar `foto (1).jpg` sem `foto.jpg` no disco. Por que não deixar como está:
+  história 24 da spec diz "nunca sobrescrever", e SYN-008 critério 3 manda 3
+  fotos de uma vez — colisão concorrente de nome é caminho normal, não canto
+  obscuro. Testes (vermelhos antes, `gate.ps1 -TestsOnly`): POST sem
+  `X-File-Size` cria o Item com `size == Content-Length` e termina; POST de 0
+  byte termina com arquivo final de 0 byte na Pasta; dois POSTs concorrentes de
+  `foto.jpg` (corpo lento, os dois abertos ao mesmo tempo) deixam `foto.jpg` e
+  `foto (1).jpg` íntegros. Achados menores ficam fora deste ticket, como a
+  review pôs. `Stage: to-implement` já está certo; stage 2 segue nesta branch,
+  em cima de `6203341`.
