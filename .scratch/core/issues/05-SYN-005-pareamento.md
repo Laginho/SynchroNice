@@ -1,5 +1,5 @@
 # SYN-005: Pareamento por QR e anúncio na rede
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -52,3 +52,5 @@ Critérios 1, 2 e 3 (parte visual): manual.
   instância única (`tauri-plugin-single-instance`) que foca a janela existente
   em vez de abrir a segunda. Sem isso, o critério 1 de SYN-002 falha sem
   nenhum sinal para o usuário.
+
+- 2026-09-20 Attempt 1 stopped to ask: Same hard blocker confirmed: `cargo --version` still returns "This command requires approval" and is denied, exactly as SYN-003 and SYN-004 hit. SYN-005's Primary files are all Rust (`pc/src-tauri/src/**`, `Cargo.toml`) and the gate runs `cargo fmt/clippy/test` — stage 2's red-before-green proof and gate check are impossible without cargo execution. /  / Per the loop's rules, this isn't a "Humano simulado" case (no fable-high substitute for a real compiler run), so I'm stopping before creating a branch or touching the ticket, same as the last two sessions. /  / I need one of: / 1. You approve `cargo` execution in this session (Bash or PowerShell) — this is environment-wide, so worth checking whether it's a fixable permission setting. / 2. You run `cargo`/`.\gate.ps1` on your end at checkpoints I flag and relay output back. /  / Which do you want? /
