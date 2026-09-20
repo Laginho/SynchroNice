@@ -1,26 +1,31 @@
 //! Costura do PC: o protocolo HTTP. Os testes agem como o celular.
 
 use pc_lib::items::Items;
+use pc_lib::outbox::{OutBody, OutItem, Outbox};
 use pc_lib::server;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
 const TOKEN: &str = "segredo-de-teste";
 
-/// Sobe o servidor em porta aleatória com token conhecido e uma Pasta
-/// temporária, que morre com o teste.
-fn sobe() -> (String, Items, tempfile::TempDir) {
-    let pasta = tempfile::tempdir().expect("tempdir");
+/// Sobe o servidor em porta aleatória com token conhecido, uma Pasta e uma
+/// fila de saída temporárias, que morrem com o teste.
+fn sobe() -> (String, Items, Outbox, tempfile::TempDir) {
+    let raiz = tempfile::tempdir().expect("tempdir");
+    let pasta = raiz.path().join("pasta");
+    std::fs::create_dir_all(&pasta).expect("cria Pasta");
     let items = Items::new();
+    let outbox = Outbox::new(raiz.path().join("outbox")).expect("cria fila de saída");
     let running = server::spawn(
         "127.0.0.1:0".parse().unwrap(),
         TOKEN.to_string(),
         items.clone(),
-        Some(pasta.path().to_path_buf()),
+        outbox.clone(),
+        Some(pasta.clone()),
     )
     .expect("servidor sobe em porta aleatória");
-    (format!("http://{}", running.addr), items, pasta)
+    (format!("http://{}", running.addr), items, outbox, raiz)
 }
 
 fn agent() -> ureq::Agent {
@@ -72,6 +77,39 @@ fn post_arquivo_sem_x_file_size(base: &str, nome: &str, bytes: &[u8]) -> u16 {
         .as_u16()
 }
 
+/// Requisição HTTP crua via socket: manda `metodo path` com o token (se
+/// houver), sem corpo, e lê a resposta até a conexão fechar (`Connection:
+/// close`, honrado pelo servidor). Evita depender da leitura de corpo em
+/// stream do cliente HTTP de teste, que este arquivo não usa em nenhum outro
+/// lugar — cobre tanto o corpo simples de `/listen` quanto os bytes crus de
+/// `/outbox/{id}/file`.
+fn requisicao_crua(base: &str, metodo: &str, path: &str, token: Option<&str>) -> (u16, Vec<u8>) {
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    let auth = token
+        .map(|t| format!("Authorization: Bearer {t}\r\n"))
+        .unwrap_or_default();
+    let pedido = format!(
+        "{metodo} {path} HTTP/1.1\r\nHost: {addr}\r\n{auth}Content-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(pedido.as_bytes()).expect("escreve pedido");
+
+    let mut bruto = Vec::new();
+    stream.read_to_end(&mut bruto).expect("lê resposta");
+
+    let fim_cabecalho = bruto
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("resposta tem cabeçalho");
+    let status = String::from_utf8_lossy(&bruto[..fim_cabecalho])
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse().ok())
+        .expect("linha de status");
+    (status, bruto[fim_cabecalho + 4..].to_vec())
+}
+
 fn textos(items: &Items) -> Vec<String> {
     items
         .snapshot()
@@ -102,7 +140,7 @@ fn arquivos(items: &Items) -> Vec<(String, u64, u64, bool)> {
 
 #[test]
 fn post_com_token_cria_item_de_texto() {
-    let (base, items, _pasta) = sobe();
+    let (base, items, _outbox, _raiz) = sobe();
 
     let status = post_texto(&base, Some(TOKEN), "olá");
 
@@ -112,7 +150,7 @@ fn post_com_token_cria_item_de_texto() {
 
 #[test]
 fn post_sem_token_e_recusado_e_nada_entra() {
-    let (base, items, _pasta) = sobe();
+    let (base, items, _outbox, _raiz) = sobe();
 
     let status = post_texto(&base, None, "olá");
 
@@ -122,7 +160,7 @@ fn post_sem_token_e_recusado_e_nada_entra() {
 
 #[test]
 fn post_com_token_errado_e_recusado_e_nada_entra() {
-    let (base, items, _pasta) = sobe();
+    let (base, items, _outbox, _raiz) = sobe();
 
     let status = post_texto(&base, Some("outro-token"), "olá");
 
@@ -132,7 +170,7 @@ fn post_com_token_errado_e_recusado_e_nada_entra() {
 
 #[test]
 fn dois_posts_preservam_ordem_de_chegada() {
-    let (base, items, _pasta) = sobe();
+    let (base, items, _outbox, _raiz) = sobe();
 
     post_texto(&base, Some(TOKEN), "primeiro");
     post_texto(&base, Some(TOKEN), "segundo");
@@ -142,58 +180,56 @@ fn dois_posts_preservam_ordem_de_chegada() {
 
 #[test]
 fn post_arquivo_grava_na_pasta_com_conteudo_identico() {
-    let (base, _items, pasta) = sobe();
+    let (base, _items, _outbox, raiz) = sobe();
     let bytes = b"conteudo do arquivo de teste";
 
     let status = post_arquivo(&base, Some(TOKEN), "foto.jpg", bytes);
 
     assert_eq!(status, 201);
-    let gravado = std::fs::read(pasta.path().join("foto.jpg")).expect("arquivo gravado na Pasta");
+    let gravado = std::fs::read(raiz.path().join("pasta").join("foto.jpg"))
+        .expect("arquivo gravado na Pasta");
     assert_eq!(gravado, bytes);
 }
 
 #[test]
 fn segundo_post_do_mesmo_nome_ganha_sufixo() {
-    let (base, _items, pasta) = sobe();
+    let (base, _items, _outbox, raiz) = sobe();
+    let pasta = raiz.path().join("pasta");
 
     post_arquivo(&base, Some(TOKEN), "foto.jpg", b"primeiro");
     post_arquivo(&base, Some(TOKEN), "foto.jpg", b"segundo");
 
     assert_eq!(
-        std::fs::read(pasta.path().join("foto.jpg")).expect("primeiro arquivo"),
+        std::fs::read(pasta.join("foto.jpg")).expect("primeiro arquivo"),
         b"primeiro"
     );
     assert_eq!(
-        std::fs::read(pasta.path().join("foto (1).jpg")).expect("segundo arquivo, com sufixo"),
+        std::fs::read(pasta.join("foto (1).jpg")).expect("segundo arquivo, com sufixo"),
         b"segundo"
     );
 }
 
 #[test]
 fn nome_com_caminho_fica_dentro_da_pasta() {
-    let (base, _items, pasta) = sobe();
+    let (base, _items, _outbox, raiz) = sobe();
+    let pasta = raiz.path().join("pasta");
 
     let status = post_arquivo(&base, Some(TOKEN), "../x.txt", b"conteudo");
 
     assert_eq!(status, 201);
     assert_eq!(
-        std::fs::read(pasta.path().join("x.txt")).expect("arquivo dentro da Pasta"),
+        std::fs::read(pasta.join("x.txt")).expect("arquivo dentro da Pasta"),
         b"conteudo"
     );
     assert!(
-        !pasta
-            .path()
-            .parent()
-            .expect("Pasta tem diretório pai (é um tempdir)")
-            .join("x.txt")
-            .exists(),
+        !raiz.path().join("x.txt").exists(),
         "\"../x.txt\" não pode escapar da Pasta"
     );
 }
 
 #[test]
 fn post_sem_x_file_size_usa_content_length_e_completa() {
-    let (base, items, _pasta) = sobe();
+    let (base, items, _outbox, _raiz) = sobe();
     let bytes = b"conteudo sem cabecalho de tamanho, so Content-Length";
 
     let status = post_arquivo_sem_x_file_size(&base, "sem-tamanho.bin", bytes);
@@ -213,12 +249,13 @@ fn post_sem_x_file_size_usa_content_length_e_completa() {
 
 #[test]
 fn post_arquivo_vazio_completa_com_arquivo_de_0_byte() {
-    let (base, items, pasta) = sobe();
+    let (base, items, _outbox, raiz) = sobe();
 
     let status = post_arquivo(&base, Some(TOKEN), "vazio.bin", b"");
 
     assert_eq!(status, 201);
-    let gravado = std::fs::read(pasta.path().join("vazio.bin")).expect("arquivo de 0 byte gravado");
+    let gravado = std::fs::read(raiz.path().join("pasta").join("vazio.bin"))
+        .expect("arquivo de 0 byte gravado");
     assert!(gravado.is_empty());
     let arquivos = arquivos(&items);
     let (_, _, _, done) = arquivos
@@ -230,7 +267,8 @@ fn post_arquivo_vazio_completa_com_arquivo_de_0_byte() {
 
 #[test]
 fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
-    let (base, _items, pasta) = sobe();
+    let (base, _items, _outbox, raiz) = sobe();
+    let pasta = raiz.path().join("pasta");
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
 
     fn cabecalho(addr: &str, tamanho: usize) -> String {
@@ -274,9 +312,8 @@ fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
 
     std::thread::sleep(Duration::from_millis(300));
 
-    let gravado_1 = std::fs::read(pasta.path().join("foto.jpg")).expect("primeiro arquivo");
-    let gravado_2 =
-        std::fs::read(pasta.path().join("foto (1).jpg")).expect("segundo arquivo, com sufixo");
+    let gravado_1 = std::fs::read(pasta.join("foto.jpg")).expect("primeiro arquivo");
+    let gravado_2 = std::fs::read(pasta.join("foto (1).jpg")).expect("segundo arquivo, com sufixo");
 
     let mut gravados = vec![gravado_1, gravado_2];
     gravados.sort();
@@ -290,7 +327,8 @@ fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
 
 #[test]
 fn envio_interrompido_nao_deixa_arquivo_com_nome_final() {
-    let (base, _items, pasta) = sobe();
+    let (base, _items, _outbox, raiz) = sobe();
+    let pasta = raiz.path().join("pasta");
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
 
     // Requisição crua: promete 1_000_000 bytes via Content-Length, manda só
@@ -320,7 +358,128 @@ fn envio_interrompido_nao_deixa_arquivo_com_nome_final() {
     std::thread::sleep(Duration::from_millis(200));
 
     assert!(
-        !pasta.path().join("grande.bin").exists(),
+        !pasta.join("grande.bin").exists(),
         "envio incompleto não pode deixar arquivo com o nome final"
+    );
+}
+
+// SYN-004: direção PC -> celular. O PC é o remetente e gera o id do Item
+// (spec, "Protocolo de Itens"); só a confirmação do celular remove o Item da
+// fila de Pendentes.
+
+#[test]
+fn texto_enfileirado_sem_cliente_fica_pendente() {
+    let (_base, _items, outbox, _raiz) = sobe();
+
+    outbox
+        .enqueue_text("olá celular".to_string())
+        .expect("enfileira texto");
+
+    let pendentes = outbox.pending();
+    assert_eq!(pendentes.len(), 1);
+    assert_eq!(
+        pendentes[0].body,
+        OutBody::Text {
+            text: "olá celular".to_string()
+        }
+    );
+}
+
+#[test]
+fn escuta_entrega_pendentes_em_ordem_e_confirmacao_os_remove_da_fila() {
+    let (base, _items, outbox, _raiz) = sobe();
+    outbox
+        .enqueue_text("primeiro".to_string())
+        .expect("enfileira texto");
+    outbox
+        .enqueue_text("segundo".to_string())
+        .expect("enfileira texto");
+
+    let (status, corpo) = requisicao_crua(&base, "GET", "/listen", Some(TOKEN));
+    assert_eq!(status, 200);
+
+    let entregues: Vec<OutItem> = String::from_utf8(corpo)
+        .expect("corpo é UTF-8")
+        .lines()
+        .map(|linha| serde_json::from_str(linha).expect("linha é um Item"))
+        .collect();
+    let textos: Vec<String> = entregues
+        .iter()
+        .map(|item| match &item.body {
+            OutBody::Text { text } => text.clone(),
+            OutBody::File { .. } => panic!("esperava texto"),
+        })
+        .collect();
+    assert_eq!(
+        textos,
+        vec!["primeiro", "segundo"],
+        "a escuta entrega os Pendentes em ordem de chegada"
+    );
+
+    for item in &entregues {
+        let (status, _) = requisicao_crua(
+            &base,
+            "POST",
+            &format!("/outbox/{}/ack", item.id),
+            Some(TOKEN),
+        );
+        assert_eq!(status, 204);
+    }
+
+    assert!(
+        outbox.pending().is_empty(),
+        "confirmados saem da fila de Pendentes — ficam Entregues"
+    );
+}
+
+#[test]
+fn arquivo_enfileirado_e_baixado_pela_rota_devolve_bytes_identicos() {
+    let (base, _items, outbox, _raiz) = sobe();
+    let bytes = b"bytes do arquivo para o celular baixar";
+
+    let item = outbox
+        .enqueue_file("foto.jpg".to_string(), bytes)
+        .expect("enfileira arquivo");
+
+    let (status, corpo) = requisicao_crua(
+        &base,
+        "GET",
+        &format!("/outbox/{}/file", item.id),
+        Some(TOKEN),
+    );
+
+    assert_eq!(status, 200);
+    assert_eq!(corpo, bytes);
+}
+
+#[test]
+fn fila_de_saida_sobrevive_a_recriar_o_servidor_do_mesmo_diretorio() {
+    let raiz = tempfile::tempdir().expect("tempdir");
+    let dir = raiz.path().join("outbox");
+
+    let original = Outbox::new(dir.clone()).expect("cria fila de saída");
+    original
+        .enqueue_text("antes de reiniciar".to_string())
+        .expect("enfileira texto");
+    original
+        .enqueue_file("arquivo.bin".to_string(), b"conteudo persistido")
+        .expect("enfileira arquivo");
+
+    let recriada = Outbox::new(dir).expect("recria fila de saída do mesmo diretório");
+
+    assert_eq!(
+        recriada.pending(),
+        original.pending(),
+        "a fila recriada do mesmo diretório vê os mesmos Pendentes, na mesma ordem"
+    );
+    let item_arquivo = recriada
+        .pending()
+        .into_iter()
+        .find(|i| matches!(i.body, OutBody::File { .. }))
+        .expect("item de arquivo entre os recarregados");
+    assert_eq!(
+        recriada.file_bytes(item_arquivo.id),
+        Some(b"conteudo persistido".to_vec()),
+        "bytes do arquivo sobrevivem à recriação, não só os metadados"
     );
 }

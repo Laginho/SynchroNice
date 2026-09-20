@@ -19,14 +19,35 @@
 //!   201 sem corpo ao gravar o arquivo; 401 sem token ou com token errado;
 //!   503 se a Pasta ainda não foi escolhida.
 //!
-//! O id de um Item é do remetente (spec, "Protocolo de Itens"); como ele viaja
-//! na requisição fica para o ticket que enfileira reenvios. Até lá o PC não
-//! devolve id nenhum, para nenhum cliente nascer dependendo de um id do PC.
+//! Protocolo (SYN-004): direção PC -> celular. O PC é o remetente e gera o
+//! id do Item (spec, "Protocolo de Itens"); só a confirmação do celular
+//! remove o Item da fila de Pendentes, para reenvio nunca duplicar bolha nem
+//! arquivo do outro lado.
+//!
+//!   GET  /listen                 bloqueia até haver ao menos um Pendente,
+//!                                 devolve os Pendentes de agora, um por
+//!                                 linha (NDJSON), e fecha; o celular reabre
+//!                                 para continuar escutando. A conexão viva
+//!                                 é o sinal de presença.
+//!   Authorization: Bearer <token>
+//!
+//!   GET  /outbox/{id}/file       bytes de um Item de arquivo ainda
+//!                                 Pendente; 404 se o id não existir ou já
+//!                                 ter sido confirmado.
+//!   Authorization: Bearer <token>
+//!
+//!   POST /outbox/{id}/ack        confirma o recebimento do Item `id` — só
+//!                                 isso o remove da fila de Pendentes; 204
+//!                                 sempre (mesmo se o id já não existir mais,
+//!                                 para reenvio da confirmação ser inofensivo).
+//!   Authorization: Bearer <token>
 
 use crate::items::Items;
-use axum::extract::{Request, State};
+use crate::outbox::{OutItem, Outbox};
+use axum::extract::{Path as AxPath, Request, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::post;
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
 use axum::Router;
 use futures_util::StreamExt;
 use std::collections::HashSet;
@@ -43,6 +64,8 @@ pub const PORT: u16 = 47820;
 struct AppState {
     token: String,
     items: Items,
+    outbox: Outbox,
+    presence: Presence,
     /// `None` até o usuário escolher a Pasta na primeira abertura do app.
     pasta: Option<PathBuf>,
     /// Nomes finais já reservados por um envio em andamento, mas ainda não
@@ -51,9 +74,78 @@ struct AppState {
     leases: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
+/// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
+/// lado está na rede". Um contador, não um booleano: uma segunda conexão
+/// enquanto a primeira ainda não fechou não pode fazer a desconexão dela
+/// apagar a presença por engano.
+#[derive(Clone, Default)]
+pub struct Presence {
+    inner: Arc<Mutex<PresenceInner>>,
+}
+
+#[derive(Default)]
+struct PresenceInner {
+    count: u32,
+    listeners: Vec<Box<dyn Fn(bool) + Send + Sync>>,
+}
+
+impl Presence {
+    pub fn get(&self) -> bool {
+        self.inner.lock().expect("presença sem panic").count > 0
+    }
+
+    /// Chamado a cada vez que a presença muda (de ausente para presente ou
+    /// vice-versa), na thread que fechou ou abriu a conexão `/listen`.
+    pub fn on_change(&self, listener: impl Fn(bool) + Send + Sync + 'static) {
+        self.inner
+            .lock()
+            .expect("presença sem panic")
+            .listeners
+            .push(Box::new(listener));
+    }
+
+    /// Marca uma conexão `/listen` como viva; solta a presença sozinha
+    /// quando o guarda sair de escopo (a conexão fechar).
+    fn enter(&self) -> PresenceGuard {
+        let mut inner = self.inner.lock().expect("presença sem panic");
+        inner.count += 1;
+        if inner.count == 1 {
+            for listener in &inner.listeners {
+                listener(true);
+            }
+        }
+        PresenceGuard {
+            presence: self.clone(),
+        }
+    }
+
+    fn leave(&self) {
+        let mut inner = self.inner.lock().expect("presença sem panic");
+        inner.count -= 1;
+        if inner.count == 0 {
+            for listener in &inner.listeners {
+                listener(false);
+            }
+        }
+    }
+}
+
+struct PresenceGuard {
+    presence: Presence,
+}
+
+impl Drop for PresenceGuard {
+    fn drop(&mut self) {
+        self.presence.leave();
+    }
+}
+
 /// Servidor no ar. Vive numa thread própria com seu runtime; some com o processo.
 pub struct Running {
     pub addr: SocketAddr,
+    /// Alça para o sinal de presença — quem sobe o servidor usa
+    /// `on_change` para avisar a janela quando o celular conecta ou some.
+    pub presence: Presence,
 }
 
 /// Sobe o servidor em `addr` (porta 0 escolhe uma livre) e devolve o endereço
@@ -62,9 +154,12 @@ pub fn spawn(
     addr: SocketAddr,
     token: String,
     items: Items,
+    outbox: Outbox,
     pasta: Option<PathBuf>,
 ) -> io::Result<Running> {
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
+    let presence = Presence::default();
+    let presence_da_thread = presence.clone();
 
     std::thread::Builder::new()
         .name("synchronice-http".into())
@@ -92,6 +187,8 @@ pub fn spawn(
                 let app = router(AppState {
                     token,
                     items,
+                    outbox,
+                    presence: presence_da_thread,
                     pasta,
                     leases: Arc::new(Mutex::new(HashSet::new())),
                 });
@@ -104,13 +201,16 @@ pub fn spawn(
     let addr = rx
         .recv()
         .map_err(|_| io::Error::other("thread do servidor morreu antes de escutar"))??;
-    Ok(Running { addr })
+    Ok(Running { addr, presence })
 }
 
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/items/text", post(post_text))
         .route("/items/file", post(post_file))
+        .route("/listen", get(get_listen))
+        .route("/outbox/{id}/file", get(get_outbox_file))
+        .route("/outbox/{id}/ack", post(post_outbox_ack))
         .with_state(state)
 }
 
@@ -215,6 +315,63 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     state.items.file_done(item.id);
 
     StatusCode::CREATED
+}
+
+/// Bloqueia até a fila de saída ter ao menos um Pendente, devolve todos os
+/// que houver então (um por linha) e fecha — long-poll clássico: o celular
+/// reabre para continuar escutando. A conexão viva, do início ao fim desta
+/// função, é o sinal de presença.
+async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let _presenca = state.presence.enter();
+    let (pendentes, mut novos) = state.outbox.subscribe();
+    let itens: Vec<OutItem> = if !pendentes.is_empty() {
+        pendentes
+    } else {
+        match novos.recv().await {
+            Some(item) => vec![item],
+            None => Vec::new(),
+        }
+    };
+
+    let corpo = itens
+        .iter()
+        .map(|item| serde_json::to_string(item).expect("OutItem serializa"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (StatusCode::OK, corpo).into_response()
+}
+
+/// Bytes de um Item de arquivo ainda Pendente na fila de saída.
+async fn get_outbox_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<u64>,
+) -> impl IntoResponse {
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.outbox.file_bytes(id) {
+        Some(bytes) => (StatusCode::OK, bytes).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Confirma o recebimento do Item `id`: só isso o remove da fila de
+/// Pendentes. 204 mesmo se o id já não existir mais — reenviar a confirmação
+/// depois de uma resposta perdida na rede tem que ser inofensivo.
+async fn post_outbox_ack(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxPath(id): AxPath<u64>,
+) -> StatusCode {
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    state.outbox.confirm(id);
+    StatusCode::NO_CONTENT
 }
 
 /// Reduz um nome de arquivo vindo da rede ao seu nome-base, sem caminho, e

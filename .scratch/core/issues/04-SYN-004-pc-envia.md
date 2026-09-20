@@ -1,5 +1,5 @@
 # SYN-004: PC envia texto e arquivos
-Stage: to-implement
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -99,3 +99,50 @@ Critérios 3, 4, 5, 6 e 8: manual.
   obrigatório antes de `Stage: to-review`; `-TestsOnly` é só para a prova
   red-before-green. `AGENTS.md` ("Bindings do fluxo") já diz isso. Nada
   pendente das tentativas anteriores: driver reverteu tudo, sem branch órfã.
+
+- 2026-09-20 (stage 2, notas para o revisor): **id do remetente e
+  confirmação implementados**, resolvendo o achado da revisão de SYN-002 no
+  topo destes Comments — o PC (remetente aqui) gera o id em
+  `Outbox::enqueue_*`, o anúncio de `/listen` carrega esse id, e só
+  `POST /outbox/{id}/ack` remove o Item da fila de Pendentes.
+
+  Rotas novas (`pc/src-tauri/src/server.rs`), nenhuma delas ditada pelo
+  ticket além de `/listen` (está no bloco de Verification): `GET /listen`
+  bloqueia até haver ao menos um Pendente, devolve os de agora (um por
+  linha) e fecha — long-poll clássico, não um stream mantido aberto; o
+  celular reabre para continuar escutando. Isso simplificou bastante o lado
+  servidor e o teste (resposta comum com Content-Length, sem parser de
+  chunked encoding). `GET /outbox/{id}/file` baixa os bytes; `POST
+  /outbox/{id}/ack` confirma. Presença (`server::Presence`) é um contador de
+  conexões `/listen` vivas, não um booleano, para uma segunda conexão não
+  apagar a presença que a primeira ainda segura.
+
+  `pc_lib::outbox` é módulo novo, fila separada da `Items` (Sessão em
+  memória de recebidos) — persistida em `manifest.json` + um arquivo por
+  Item de arquivo, no diretório de config do app. `next_id` também persiste,
+  nunca reaproveitado mesmo depois de confirmações removerem Itens.
+
+  Os 4 testes do "Tests stage 2 writes" viraram 4 funções em
+  `tests/server.rs`; os dois primeiros (texto Pendente sem cliente, fila
+  sobrevive a recriar do mesmo diretório) testam `Outbox` direto — sem rota
+  HTTP correspondente, enfileirar é ação local da janela, não algo que o
+  celular manda pela rede. Precisei reescrever `sobe()` (Pasta passou a
+  subdiretório de uma raiz temporária só, para caber a fila de saída do
+  lado); as 11 funções antigas já verdes só tiveram a desestruturação e os
+  caminhos ajustados, nenhuma asserção mudou — fmt disso foi commit `style`
+  à parte, mesmo padrão do SYN-003.
+
+  UI (`pc/ui/main.ts`, `pc/index.html`, `styles.css`): composer, drop
+  (`getCurrentWebview().onDragDropEvent`), Ctrl+V de imagem (Clipboard API
+  do WebView2, sem depender de Rust) e de arquivo (`read_clipboard_file_list`
+  via `clipboard-win`, formato `CF_HDROP` que a Clipboard API não expõe) e o
+  indicador de presença — tudo implementado, mas **critérios 3, 4, 5, 6 e 8
+  são só verificação manual** (o próprio ticket já marca isso no bloco de
+  Verification); não tenho como abrir o app Windows e testar drag/drop,
+  colar ou o indicador piscando nesta sessão. Gate completo verde (fmt,
+  clippy, 15/15 testes, tsc) é a garantia que dá para dar de dentro daqui.
+
+  Sem thumbnail para imagem enviada (ao contrário de recebida): não é
+  critério de aceite deste ticket, e os bytes do arquivo enviado vivem na
+  fila interna, não na Pasta que `read_file_bytes` lê — ficaria para um
+  ticket que pedisse isso.
