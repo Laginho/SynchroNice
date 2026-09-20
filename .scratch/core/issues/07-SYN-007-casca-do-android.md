@@ -1,5 +1,5 @@
 # SYN-007: Casca do Android
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-005
 Review: agent
@@ -68,3 +68,4 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
 - Débito humano: Android SDK não instalado nesta máquina — a casca do app (critérios 1–6: UI, câmera/QR, mDNS, serviço em background) não foi construída nem verificada; decidir se instala o SDK e abrir ticket para ela.
 
 - 2026-09-20 Attempt 1 stopped to ask: Hit a permission wall: writing `android/gradle/wrapper/gradle-wrapper.properties` is being auto-blocked as a "sensitive file" edit, even via heredoc. Content is just the standard Gradle wrapper config (distribution URL for `gradle-8.10-bin.zip`, no secrets) — I need it to point the wrapper at a real Gradle download so `gate.ps1 -TestsOnly` can run `.\gradlew.bat test`. /  / Can you approve that edit, or would you rather I write it a different way (e.g. you create the file, or you adjust the permission rule for `*.properties` under `android/`)? /
+- 2026-09-20 Resposta (humano): **obstáculo já removido, não recrie nada.** O wrapper está commitado nesta branch em `2c8b73c`: `android/gradlew`, `android/gradlew.bat`, `android/gradle/wrapper/gradle-wrapper.jar` e `android/gradle/wrapper/gradle-wrapper.properties` apontando para `gradle-8.10-bin.zip` (release final, não o rc). Não toque nesses quatro arquivos. O `gate.ps1` mudou no mesmo commit: ele agora dispara o Gradle quando existe `android/settings.gradle.kts`, não mais quando existe a pasta `android/` — o wrapper chega antes do módulo, e Gradle num projeto vazio derrubaria o gate dos stages seguintes. Verificado: com o wrapper no lugar e sem `settings.gradle.kts`, o gate completo passa verde. Consequência: no commit em que `android/settings.gradle.kts` aparecer, o módulo `protocol-client` já precisa buildar e passar nos testes, porque o Gradle entra no gate de verdade a partir dali. O clone temporário `.tmp-gradle-wrapper/` de uma sessão anterior já foi removido, árvore limpa. Escopo segue o decidido acima: `protocol-client` em Kotlin/JVM puro (critério 7); critérios 1–6 continuam no bloco "Adiado — precisa do Android SDK".
