@@ -8,4 +8,5 @@ Thumbs.db
 # Android (build/, .gradle/ live inside android/ once it exists)
 android/build/
 android/.gradle/
+android/.kotlin/
 android/*/build/
