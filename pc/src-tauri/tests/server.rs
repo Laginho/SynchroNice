@@ -205,7 +205,10 @@ fn post_sem_x_file_size_usa_content_length_e_completa() {
     assert_eq!(nome, "sem-tamanho.bin");
     assert_eq!(*size, bytes.len() as u64, "size vem do Content-Length");
     assert_eq!(*received, bytes.len() as u64);
-    assert!(*done, "sem X-File-Size o arquivo ainda deve terminar (done)");
+    assert!(
+        *done,
+        "sem X-File-Size o arquivo ainda deve terminar (done)"
+    );
 }
 
 #[test]
@@ -215,8 +218,7 @@ fn post_arquivo_vazio_completa_com_arquivo_de_0_byte() {
     let status = post_arquivo(&base, Some(TOKEN), "vazio.bin", b"");
 
     assert_eq!(status, 201);
-    let gravado =
-        std::fs::read(pasta.path().join("vazio.bin")).expect("arquivo de 0 byte gravado");
+    let gravado = std::fs::read(pasta.path().join("vazio.bin")).expect("arquivo de 0 byte gravado");
     assert!(gravado.is_empty());
     let arquivos = arquivos(&items);
     let (_, _, _, done) = arquivos
@@ -273,7 +275,8 @@ fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
     std::thread::sleep(Duration::from_millis(300));
 
     let gravado_1 = std::fs::read(pasta.path().join("foto.jpg")).expect("primeiro arquivo");
-    let gravado_2 = std::fs::read(pasta.path().join("foto (1).jpg")).expect("segundo arquivo, com sufixo");
+    let gravado_2 =
+        std::fs::read(pasta.path().join("foto (1).jpg")).expect("segundo arquivo, com sufixo");
 
     let mut gravados = vec![gravado_1, gravado_2];
     gravados.sort();
