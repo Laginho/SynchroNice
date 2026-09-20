@@ -38,7 +38,10 @@ if ((Test-Path "$root/pc/ui") -and (-not $TestsOnly)) {
     Run-Step "tsc --noEmit (pc/ui)" "$root/pc" { npx tsc --noEmit }
 }
 
-if (Test-Path "$root/android") {
+# Ancorado no settings, nao na pasta: o wrapper do Gradle entra antes do modulo,
+# e uma pasta android/ so com wrapper nao tem o que testar -- gradle falharia e
+# levaria o gate junto.
+if (Test-Path "$root/android/settings.gradle.kts") {
     if ($TestsOnly) {
         Run-Step "gradle test (android)" "$root/android" { .\gradlew.bat test }
     } else {
