@@ -1,5 +1,5 @@
 # SYN-009: Android recebe arquivos do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-007, SYN-004
 Review: agent
@@ -117,3 +117,46 @@ Critérios 1 a 6: adiados (bloco acima), sem verificação manual nesta entrega.
   SDK, pelo motivo já registrado em SYN-008; nada fora de
   `android/protocol-client/` e deste ticket.
 - Débito humano: recepção de arquivo no app Android (critérios 1–6: bolha de arquivo à esquerda com progresso animado, miniatura de imagem do cache do app sem ir para a galeria, nome/extensão/tamanho para outros tipos, toque que salva na galeria ou em Downloads e indica "salvo", toque em link abrindo o navegador, bolhas descartadas ao fechar o app) não foi construída nem verificada à mão — depende do Android SDK numa máquina de build; decidir se instala e abrir ticket para ela, junto com a casca de SYN-007 e o Compartilhar de SYN-008.
+
+- 2026-09-20 (stage 2, notas para o revisor): branch `syn-009`, três commits.
+  `15350e5` (teste, vermelho — erro de compilação porque `downloadFile` não
+  existia) + `d3bcbef` (teste, ajuste de tipo: `assertEquals<T>` não infere
+  `T` entre `List<String>` e `MutableList<String?>` do header
+  `Authorization`, mesmo ajuste que o teste de `sendText` já fazia) e
+  `68ed222` (código). `ProtocolClient.downloadFile(item, destination,
+  onProgress)` baixa `GET /outbox/{id}/file` em stream (sem bufferizar o
+  arquivo inteiro), progresso 0–100 a cada chunk de 8 KB contra
+  `Item.FileMeta.size`, e só manda `POST /outbox/{id}/ack` depois de conferir
+  que os bytes recebidos batem com `size`.
+
+  Uma descoberta no meio do ciclo: minha primeira tentativa de simular
+  interrupção (servidor de teste declara `Content-Length: 10`, escreve só 3
+  bytes e fecha) **não** faz o `HttpURLConnection` lançar nada — o teste
+  vermelho por essa premissa passou "com sucesso" (`received` parava em 3
+  sem exceção nenhuma), então rodei o `-TestsOnly` antes do código pra
+  confirmar que o vermelho era pelo motivo certo (erro de compilação) e não
+  por essa suposição errada, e ela mesma quebrou depois que `downloadFile`
+  passou a existir mas antes da checagem de tamanho — 15/16 verde, só o teste
+  de interrupção falhando com `AssertionFailedError` (nenhuma exceção
+  lançada). Corrigi comparando `received != item.size` explicitamente e
+  lançando `IOException` — não dá pra contar com o JDK detectar sozinho um
+  corpo mais curto que o `Content-Length` quando quem fecha a conexão é
+  `com.sun.net.httpserver` no mesmo processo. `ack` fica de fora do `try`
+  que teria o `disconnect` do download, então uma falha aí não é engolida
+  silenciosamente.
+
+  Vermelho confirmado antes do código: `-TestsOnly` falha em
+  `compileTestKotlin` (referência não resolvida) com `d3bcbef` em cima de
+  `15350e5`; com `68ed222`, `protocol-client` 16/16. Gate completo verde
+  nesta branch: `cargo fmt --check`, `cargo clippy`, `cargo test` 24/24 +
+  doc-tests, `tsc --noEmit` limpo, `gradle check` BUILD SUCCESSFUL.
+
+  Não toquei nos dois comentários de revisão de SYN-004 (cadência de
+  `/listen` e ack idempotente) nem no dedupe de id já recebido que o segundo
+  deles pede — nenhum dos dois está em "Tests stage 2 writes" nem nos
+  Primary files reduzidos, e o dedupe em particular só faz sentido quando
+  existir o laço que chama `listen()` + `downloadFile()` repetidamente, que
+  é casca do app (adiada). Fica registrado aqui para quem escrever esse
+  ticket.
+
+  Nada tocado fora de `android/protocol-client/` e deste ticket.
