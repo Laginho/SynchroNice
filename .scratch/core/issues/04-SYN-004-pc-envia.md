@@ -1,5 +1,5 @@
 # SYN-004: PC envia texto e arquivos
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -63,3 +63,5 @@ Critérios 3, 4, 5, 6 e 8: manual.
   de Pendentes do critério 1. Ao implementar, o id do remetente entra na
   requisição (e no anúncio da rota de escuta) e o campo local ganha outro
   nome, para os dois não se confundirem.
+
+- 2026-09-20 Attempt 1 stopped to ask: Same hard blocker as SYN-003: `cargo` is denied in this session (Bash and PowerShell, with sandbox override too — not a one-off prompt, every invocation is auto-denied). Nothing about SYN-004 itself is blocked — this is environment-wide, so it'll hit every future ticket the same way. /  / This isn't a "Humano simulado" case (no fable-high subagent can substitute a real compiler run for red/green proof), so I'm stopping before touching the ticket or creating a branch, same as the SYN-003 session did. /  / I need one of: / 1. You approve `cargo` execution in this session (Bash or PowerShell), so I can run tests myself, or / 2. You run `cargo test` / `.\gate.ps1` on your end at checkpoints I flag and relay output back. /  / Which do you want — and does #1 look fixable on your side (e.g. a permission setting), or is #2 the way forward for this session? /
