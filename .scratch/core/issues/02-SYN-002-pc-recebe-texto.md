@@ -1,5 +1,5 @@
 # SYN-002: PC recebe texto pela rede
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-001
 Review: agent

@@ -3,14 +3,17 @@
 //! Protocolo (SYN-002):
 //!   POST /items/text        corpo: o texto, UTF-8
 //!   Authorization: Bearer <token>
-//!   201 + `{"id": n}` ao criar o Item; 401 sem token ou com token errado.
+//!   201 sem corpo ao criar o Item; 401 sem token ou com token errado.
+//!
+//! O id de um Item é do remetente (spec, "Protocolo de Itens"); como ele viaja
+//! na requisição fica para o ticket que enfileira reenvios. Até lá o PC não
+//! devolve id nenhum, para nenhum cliente nascer dependendo de um id do PC.
 
 use crate::items::Items;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
-use axum::{Json, Router};
-use serde::Serialize;
+use axum::Router;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::mpsc;
@@ -22,11 +25,6 @@ pub const PORT: u16 = 47820;
 struct AppState {
     token: String,
     items: Items,
-}
-
-#[derive(Serialize)]
-struct Created {
-    id: u64,
 }
 
 /// Servidor no ar. Vive numa thread própria com seu runtime; some com o processo.
@@ -89,14 +87,10 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
         .is_some_and(|t| t.trim() == token)
 }
 
-async fn post_text(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: String,
-) -> Result<(StatusCode, Json<Created>), StatusCode> {
+async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: String) -> StatusCode {
     if !authorized(&headers, &state.token) {
-        return Err(StatusCode::UNAUTHORIZED);
+        return StatusCode::UNAUTHORIZED;
     }
-    let item = state.items.push_text(body);
-    Ok((StatusCode::CREATED, Json(Created { id: item.id })))
+    state.items.push_text(body);
+    StatusCode::CREATED
 }
