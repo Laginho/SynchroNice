@@ -1,5 +1,5 @@
 # SYN-002: PC recebe texto pela rede
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-001
 Review: agent
@@ -91,3 +91,75 @@ Critérios 1, 4 e 6: manual.
   Critérios 1, 4 e 6 são manuais e continuam sem observação.
 
 - 2026-09-19 Review ended at to-review (exit 0); branch syn-002 holds the review; left for a human
+
+- 2026-09-20 (humano simulado): fiz o papel da pessoa que os critérios 1, 4 e
+  6 esperavam. Julguei código e testes de `aa15254..6918d3a` (já na `main`)
+  critério por critério; o veredito e o Resolution ficam para o stage 3.
+  - **Ambiente.** Este checkout é um clone de hoje (`da8ef16 clone:`) em
+    outra máquina (`DESKTOP-J8HB7V5`, perfil `Lage`; SYN-001 foi construído
+    em `C:\Users\bruno`). **Não há toolchain Rust aqui**: nenhum `cargo.exe`
+    ou `rustc.exe` em C: ou D:, sem `.cargo`/`.rustup`, sem WSL. Do gate, só
+    `tsc --noEmit` roda (verde, exit 0). `npx vite build` também verde
+    (9 módulos, `index-*.js` 2,75 kB, 245 ms) — o bundle resolve
+    `@tauri-apps/plugin-opener` 2.5.5 e `@tauri-apps/api`. Por isso **não
+    acrescentei teste**: um teste Rust que não posso compilar não prova nada
+    e arrisca deixar o gate vermelho para o stage 3. O teste que faria, se
+    houvesse cargo: em `tests/server.rs`, registrar `Items::on_new` com um
+    canal, dar o POST e `try_recv()` o Item logo após o 201 — prova que a
+    janela é avisada antes da resposta, a metade automatizável do critério 1.
+  - **Critério 1 (curl → bolha em < 1 s).** Cadeia lida ponta a ponta:
+    `server::post_text` → `Items::push_text` (`items.rs:36-51`), que chama
+    os listeners de forma síncrona, ainda dentro do handler, antes do 201 →
+    listener em `lib.rs:60-64` faz `handle.emit("item", item)` →
+    `ui/main.ts:68` faz `listen("item")` **antes** de `invoke("list_items")`
+    (`main.ts:69`), com `seen` desduplicando (`main.ts:33`) → `render` cria a
+    bolha `.item` (à esquerda por `align-self: flex-start`,
+    `styles.css:91`) com `<time>` da hora (`main.ts:57-58`). Não há polling
+    nem fila: a latência é a do `emit`. Metade HTTP → lista tem teste
+    (`post_com_token_cria_item_de_texto`). Sem observação humana.
+  - **Critério 2 (sem token / token errado → recusa, nada no chat).** ✅.
+    `post_sem_token_e_recusado_e_nada_entra` e
+    `post_com_token_errado_e_recusado_e_nada_entra` sobem o servidor real
+    (`server::spawn` em porta 0), batem via `ureq` e conferem 401 e lista
+    vazia — produção, não cópia. O `emit` só acontece dentro de `push_text`,
+    que a recusa não alcança (`server.rs:91-94`).
+  - **Critério 3 (HTML vira texto literal).** ✅ por construção.
+    `grep -rnE 'innerHTML|insertAdjacentHTML|outerHTML|srcdoc' pc/ui
+    pc/index.html` → só o comentário em `main.ts:40`. Texto entra por
+    `textContent` (`main.ts:47`, `main.ts:54`); no ramo de link, `href` só
+    recebe URL que `new URL()` aceitou com protocolo `http:`/`https:`
+    (`main.ts:17-26`), então nem `javascript:` passa.
+  - **Critério 4 (URL vira link que abre no navegador padrão).** Handler:
+    `asUrl` exige o texto inteiro ser uma URL http(s) sem espaço; o `<a>`
+    recebe `click` → `preventDefault()` + `openUrl(url)` (`main.ts:44-52`),
+    então a WebView não navega. Permissão: `capabilities/default.json` tem
+    `opener:default`; o `permissions/default.toml` do `tauri-plugin-opener`
+    2.5.5 (versão do `Cargo.lock`, lido no upstream porque o crate não está
+    em disco aqui) = `allow-open-url` + `allow-reveal-item-in-dir` +
+    `allow-default-urls`, descrito como "opening `mailto:`, `tel:`,
+    `https://` and `http://` urls using their default application". Plugin
+    registrado em `lib.rs:99`. Sem observação humana do clique.
+  - **Critério 5 (ordem de chegada).** ✅. `dois_posts_preservam_ordem_de_chegada`
+    via HTTP real. Na UI, os listeners rodam dentro do mesmo `Mutex`
+    (`items.rs:37-49`), então os `emit` saem na ordem dos `push`, e
+    `list_items` devolve `snapshot()` em ordem.
+  - **Critério 6 (sair pela bandeja → chat vazio; token igual).** Token: ✅
+    por teste real em disco, `token_e_gerado_uma_vez_e_persiste`
+    (`tests/config.rs:20`); `load_or_create_token` só gera quando não há
+    (`config.rs:42-51`). Sessão: por construção — `Items` é `Arc<Mutex<Vec>>`
+    sem persistência (`items.rs`), o único acesso a disco em `src/` é
+    `config.rs:17,24,26`, e "Sair" é `app.exit(0)` (`lib.rs:88`). Reabrir
+    chama `list_items` → vazio → `.empty` continua visível. Fechar no X só
+    esconde (`lib.rs:120-123`), coerente com o glossário. Sem observação
+    humana.
+  - **Separação teste/código.** `aa15254` só toca `tests/` + ticket;
+    `90a7b58` não toca `tests/`; `6918d3a` (201 sem corpo) muda `server.rs`
+    e os testes já não liam corpo, então continuam válidos.
+  - **Decisão.** Nenhum defeito concreto que reprove critério. Volta para
+    `to-review` para o stage 3 escrever o veredito. Aviso ao stage 3: **o
+    gate não roda nesta máquina** — se precisar commitar um fix, não terá
+    como provar verde aqui; `tsc` é o único passo disponível.
+  - Débito humano: critério 1 — ninguém viu a bolha aparecer em < 1 s com `npx tauri dev` + `curl`; sem Rust nesta máquina, e rodar o app registraria `target/debug` no autostart do Windows e abriria o diálogo da Pasta sem aviso.
+  - Débito humano: critério 4 — ninguém clicou num link recebido e viu o navegador padrão abrir; permissão e handler conferidos por inspeção, o salto `openUrl` → shell só é observável com o app rodando.
+  - Débito humano: critério 6 — ninguém saiu pela bandeja e reabriu; "token permanece" tem teste, "chat vazio" é por construção (Sessão só em memória).
+  - Débito humano: gate completo (`cargo fmt --check`, `cargo clippy`, `cargo test`) não rodou nesta máquina (sem toolchain Rust); só `tsc --noEmit` e `vite build`, ambos verdes. Último gate verde de verdade: stage 2 em `c5d2c07`, em outra máquina. Instalar Rust aqui é decisão do autor.
