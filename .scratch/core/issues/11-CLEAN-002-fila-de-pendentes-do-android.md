@@ -1,5 +1,5 @@
 # CLEAN-002: Fila de Pendentes do Android — limpeza e política de recusa
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent

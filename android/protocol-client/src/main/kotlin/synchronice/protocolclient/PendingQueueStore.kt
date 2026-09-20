@@ -96,13 +96,21 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     /**
      * Escreve num arquivo temporário e troca pelo arquivo final com um
      * rename atômico, para um crash no meio da escrita nunca deixar a fila
-     * (que existe justamente para sobreviver a isso) truncada.
+     * (que existe justamente para sobreviver a isso) truncada. [Files.move]
+     * sem `ATOMIC_MOVE` pode cair para copiar-e-apagar, que reabre exatamente
+     * essa janela — o temporário fica na mesma pasta do arquivo final
+     * justamente para o rename atômico ser sempre possível.
      */
     private fun persist() {
         file.parentFile?.mkdirs()
         val tempFile = File(file.parentFile ?: File("."), "${file.name}.tmp")
         tempFile.writeText(items.joinToString("") { encodeLine(it) + "\n" })
-        Files.move(tempFile.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        Files.move(
+            tempFile.toPath(),
+            file.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+        )
     }
 
     private fun encodeLine(item: PendingItem): String = when (item) {
