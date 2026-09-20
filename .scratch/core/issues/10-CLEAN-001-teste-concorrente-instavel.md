@@ -1,11 +1,12 @@
 # CLEAN-001: Teste de concorrência instável derruba o gate
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
 
 - Primary files:
   - pc/src-tauri/tests/server.rs (só o teste instável e o que ele precisa para ser determinístico)
+  - pc/src-tauri/src/server.rs (só o caminho de conclusão do envio de arquivo — `post_file`, `reserve_path`/leases, `temp_path_for` e o `rename` final — e o runtime tokio montado em `spawn`, se o defeito estiver nele)
 
 #### What to build
 
@@ -37,6 +38,11 @@ ele cobre é de SYN-003 e continua valendo.
 3. O teste continua cobrindo o mesmo comportamento de SYN-003 (dois envios
    concorrentes do mesmo nome preservam os dois arquivos) — nada de
    `#[ignore]` nem de afrouxar a asserção.
+4. A conclusão de um envio concorrente não se perde mais: a causa raiz em
+   `pc/src-tauri/src/server.rs` está descrita em uma linha no corpo deste
+   ticket e corrigida no código de produção. O teste do critério 3, já com
+   espera por evento em vez de relógio, é o que prende a correção — o 20/20
+   do critério 2 só conta com a espera por evento no lugar.
 
 #### Verification
 
@@ -82,3 +88,19 @@ Mais a repetição do critério 2, com a saída colada no ticket.
   conclusão de um dos envios se perde de verdade.
 
 - 2026-09-20 Attempt 1 stopped to ask: ...g. This reproduced on a plain sequential run, no artificial load needed. /  / This means: the ticket's own theory ("just a race between reserving the name and the file appearing — wait for the event instead of the clock") is only half right. The event-based wait is strictly correct and worth keeping, but it can't make criterion 2 (20/20 green) pass on its own, because there's a real intermittent bug in production code where a concurrent upload's completion is sometimes lost outright — and CLEAN-001's Primary files scope me to the test file only. /  / Options: / 1. **Expand this ticket's Primary files** to include `pc/src-tauri/src/server.rs` (and possibly the tokio runtime setup) so I can chase down and fix the actual concurrency defect. / 2. **Split it**: keep CLEAN-001 as the test-measurement fix (already done, and a real improvement) and open a new ticket for the production race, going back to stage 1 to scope it. /  / I'd lean toward (2) — this is a different class of bug (production correctness, possibly affecting real concurrent uploads from multiple devices) and deserves its own investigation rather than being folded into a "make the test deterministic" ticket. Which way do you want to go? /
+
+- 2026-09-20 (humano): **opção 1 — ampliar o escopo.** O CLEAN-001 existe
+  para o gate parar de falhar sozinho; só a correção da medição não entrega
+  isso, porque o 20/20 do critério 2 continua impossível enquanto a conclusão
+  do envio se perder. Dividir fecharia este ticket com o gate ainda instável,
+  que é o problema que ele nasceu para resolver. A causa raiz está na
+  produção, não no teste, e consertar onde todos os caminhos passam
+  (`post_file` → `reserve_path` → `rename`, tudo em `server.rs`) é um diff
+  menor do que remendar o teste e voltar ao mesmo lugar por outro ticket.
+  Stage 1 é manual neste repo: abrir ticket novo empurraria a especificação
+  para fora do run. A espera por evento já feita **fica** — é correta e é o
+  que torna o critério 2 mensurável de verdade. `Primary files` ampliados
+  para `pc/src-tauri/src/server.rs` (restrito ao caminho de conclusão do
+  envio e ao runtime em `spawn`; `lib.rs` só chama `server::spawn` e
+  `outbox.rs` não participa), critério 4 acrescentado, `Stage:
+  to-implement`. O alvo agora é o defeito de concorrência em produção.
