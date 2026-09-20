@@ -1,5 +1,5 @@
 # SYN-006: Arrastar arquivo da bolha para outro programa
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-003
 Review: agent

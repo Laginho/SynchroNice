@@ -51,6 +51,9 @@ interface EstadoParInicial {
 }
 
 const IMAGEM = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp"]);
+/** Quanto o mouse precisa andar, com o botão apertado, para virar drag e não
+ * clique (SYN-006). 4px é o mesmo `SM_CXDRAG` que o Windows usa. */
+const LIMIAR_DRAG = 4;
 
 const scroll = document.querySelector<HTMLElement>(".scroll")!;
 const empty = scroll.querySelector<HTMLElement>(".empty")!;
@@ -161,11 +164,22 @@ function atualizarProgresso(bubble: HTMLElement, item: FileItem): void {
   }
 }
 
-/** A bolha some do jeito que está: o nome permanece, só a legenda muda. */
+/** A bolha some do jeito que está: o nome permanece, só a legenda muda. A
+ * legenda anterior fica guardada, porque o arquivo pode voltar. */
 function marcarArquivoSumido(bubble: HTMLElement): void {
-  bubble.classList.add("sumiu");
   const meta = bubble.querySelector<HTMLElement>(".file-meta");
+  if (meta && !bubble.classList.contains("sumiu")) meta.dataset.antes = meta.textContent ?? "";
+  bubble.classList.add("sumiu");
   if (meta) meta.textContent = "o arquivo não está mais na Pasta";
+}
+
+/** O arquivo está na Pasta de novo (voltou, ou nunca faltou): a bolha volta
+ * como estava, senão ela arrastaria dizendo que o arquivo sumiu. */
+function desmarcarArquivoSumido(bubble: HTMLElement): void {
+  if (!bubble.classList.contains("sumiu")) return;
+  bubble.classList.remove("sumiu");
+  const meta = bubble.querySelector<HTMLElement>(".file-meta");
+  if (meta?.dataset.antes !== undefined) meta.textContent = meta.dataset.antes;
 }
 
 /** Arrasta o arquivo de uma bolha recebida para fora da janela, como o
@@ -173,21 +187,35 @@ function marcarArquivoSumido(bubble: HTMLElement): void {
  * confere que o arquivo ainda existe; só então o plugin de drag assume o
  * rastreio nativo do mouse, no lugar da Drag and Drop API da web (que só
  * entrega o arquivo dentro da própria janela). */
-function iniciarDrag(nome: string, bubble: HTMLElement): void {
-  invoke<string>("caminho_para_arrastar", { name: nome })
-    .then((caminho) => {
-      const onEvent = new Channel<{ result: "dropped" | "cancel" }>();
-      return invoke("plugin:drag|start_drag", {
-        item: [caminho],
-        image: caminho,
-        options: { mode: "copy" },
-        onEvent,
-      });
-    })
-    .catch((e) => {
-      marcarArquivoSumido(bubble);
-      console.error(`não foi possível arrastar ${nome}: ${e}`);
+async function iniciarDrag(nome: string, bubble: HTMLElement): Promise<void> {
+  let caminho: string;
+  try {
+    caminho = await invoke<string>("caminho_para_arrastar", { name: nome });
+  } catch (e) {
+    // Só a resolução do caminho fala sobre a Pasta: falhar aqui é o arquivo
+    // não estar mais lá (a outra causa, Pasta não escolhida, não deixaria
+    // esta bolha existir — arquivo recebido é arquivo gravado na Pasta).
+    marcarArquivoSumido(bubble);
+    console.error(`não foi possível arrastar ${nome}: ${e}`);
+    return;
+  }
+  desmarcarArquivoSumido(bubble);
+
+  // O plugin exige o canal mesmo sem ninguém escutando: o resultado do drop
+  // acontece fora da janela e a UI não tem o que fazer com ele.
+  const onEvent = new Channel<{ result: "Dropped" | "Cancel"; cursorPos: { x: number; y: number } }>();
+  try {
+    await invoke("plugin:drag|start_drag", {
+      item: [caminho],
+      image: caminho,
+      options: { mode: "copy" },
+      onEvent,
     });
+  } catch (e) {
+    // Um drag que não começou não diz nada sobre o arquivo: a bolha fica como
+    // está, em vez de mentir que ele sumiu.
+    console.error(`o drag de ${nome} não começou: ${e}`);
+  }
 }
 
 function renderArquivo(item: FileItem): HTMLElement {
@@ -196,10 +224,34 @@ function renderArquivo(item: FileItem): HTMLElement {
   // Só uma bolha terminada arrasta: em progresso, `.enviando` ainda está
   // presente (ver `atualizarProgresso`), e não há arquivo com nome final
   // na Pasta para arrastar ainda.
+  //
+  // O drag nativo só começa depois que o mouse anda `LIMIAR_DRAG` com o botão
+  // apertado, nunca no `mousedown` cru: uma vez começado, quem solta o botão
+  // solta um arquivo, e soltar em cima da própria janela é um drop que o
+  // `ligarDrop` mandaria de volta para o celular. Clicar na bolha tem que
+  // continuar sendo clicar.
   bubble.addEventListener("mousedown", (event) => {
-    if (event.button === 0 && !bubble.classList.contains("enviando")) {
-      iniciarDrag(item.name, bubble);
-    }
+    if (event.button !== 0 || bubble.classList.contains("enviando")) return;
+    const x0 = event.clientX;
+    const y0 = event.clientY;
+
+    const andou = (movimento: MouseEvent): void => {
+      if (
+        Math.abs(movimento.clientX - x0) < LIMIAR_DRAG &&
+        Math.abs(movimento.clientY - y0) < LIMIAR_DRAG
+      ) {
+        return;
+      }
+      soltou();
+      void iniciarDrag(item.name, bubble);
+    };
+    const soltou = (): void => {
+      window.removeEventListener("mousemove", andou);
+      window.removeEventListener("mouseup", soltou);
+    };
+
+    window.addEventListener("mousemove", andou);
+    window.addEventListener("mouseup", soltou);
   });
 
   const ehImagem = IMAGEM.has(extensao(item.name));
