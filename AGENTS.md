@@ -21,7 +21,7 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
 
 - Gate: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` (criado por SYN-001; roda typecheck, lint e testes de tudo que existir em `pc/` e `android/`)
 - Base branch: `main`
-- Models: stage 2 fable medium, stage 3 fable max
+- Models: stage 2 sonnet xhigh, stage 3 opus high
 - Times (stage 1 é sempre manual, sweatshop nunca roda). Trocar de time é
   reescrever a linha `Models:` acima — o driver lê a primeira que casar, então o
   menu abaixo não repete a string que ele procura:

@@ -1,5 +1,5 @@
 # SYN-002: PC recebe texto pela rede
-Stage: reviewing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-001
 Review: agent
@@ -78,3 +78,14 @@ Critérios 1, 4 e 6: manual.
   - **Sem mudança de capability:** abrir link usa `openUrl` do
     `tauri-plugin-opener`, cujo `opener:default` já libera `http`/`https`.
   - `npx vite build` empacota `main.ts` (3 chunks, 207 ms).
+
+- 2026-09-19 (foreman, limpeza de crash): o stage 3 anterior (fable max) morreu
+  na cota do Fable no meio do review, depois de já ter aberto e mergeado o PR #2
+  (`syn-002` -> `main`). Duas consequências para quem revisar agora:
+  1. **O código já está na `main`** (merge `5d247eb`). Não há o que mergear; o
+     que falta é o veredito. Os commits a revisar são `aa15254..6918d3a`.
+  2. **Nenhum critério foi julgado.** O `6918d3a` (201 sem corpo) é a única
+     marca que aquele review deixou. Ele nunca escreveu ❌ nem ✅ em lugar
+     nenhum, e o `reopened` que o driver registrou no run-log é leitura de
+     branch obsoleta, não um veredito.
+  Critérios 1, 4 e 6 são manuais e continuam sem observação.
