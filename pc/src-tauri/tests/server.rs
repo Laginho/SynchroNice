@@ -543,10 +543,7 @@ fn rotacionar_troca_o_token_e_o_servidor_recusa_o_antigo_e_aceita_o_novo() {
     let antigo = par.token();
     let (base, _raiz) = sobe_com_par(par.clone());
 
-    assert_eq!(
-        post_texto(&base, Some(&antigo), "antes de rotacionar"),
-        201
-    );
+    assert_eq!(post_texto(&base, Some(&antigo), "antes de rotacionar"), 201);
 
     let novo = par.rotate().expect("rotaciona o token");
 
