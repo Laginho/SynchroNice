@@ -338,6 +338,55 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `sendFile nao lanca quando o arquivo sumiu antes do enfileiramento, e o Item e descartado`() {
+        val port = freePort()
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        try {
+            val client = client(port, FilePendingQueueStore(queueFile))
+            client.sendText("primeiro")
+            assertTrue(client.hasPending())
+
+            val vanished = tempFile(byteArrayOf(1, 2, 3))
+            assertTrue(vanished.delete())
+
+            client.sendFile(vanished)
+
+            val requests = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                client.retryPending()
+
+                assertEquals(listOf("primeiro"), requests)
+                assertFalse(client.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            queueFile.delete()
+        }
+    }
+
+    @Test
+    fun `copia orfa em payloads e removida ao reconstruir o store`() {
+        val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
+        val payloadDir = File(queueFile.parentFile, "${queueFile.name}.payloads")
+        payloadDir.mkdirs()
+        val orphan = File(payloadDir, "orfa-nao-referenciada.bin").apply { writeBytes(byteArrayOf(1)) }
+        try {
+            FilePendingQueueStore(queueFile)
+
+            assertFalse(orphan.exists())
+        } finally {
+            queueFile.delete()
+            payloadDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `fila em disco escapa e recupera barra, TAB, quebra de linha e retorno de carro`() {
         val port = freePort()
         val queueFile = File.createTempFile("synchronice-pendentes", ".txt").apply { deleteOnExit() }
