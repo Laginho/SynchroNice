@@ -184,7 +184,7 @@ class ProtocolClientTest {
         try {
             val items = client(port).listen()
 
-            assertEquals(listOf(Item.Text(1, 100, "linha\bfim")), items)
+            assertEquals(listOf(Item.Text(1, 100, "linha\bfim")), items)
         } finally {
             server.stop(0)
         }
