@@ -1,5 +1,5 @@
 # CLEAN-004: Restos do download — o `.part` sem teste, e o 404 que engole erro de disco
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
