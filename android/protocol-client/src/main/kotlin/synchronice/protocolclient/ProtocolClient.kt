@@ -2,11 +2,22 @@ package synchronice.protocolclient
 
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URI
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /** O PC recusou a requisição (ex.: token errado) — não é indisponibilidade. */
 class ProtocolRejectedException(val code: Int) : Exception("PC recusou a requisição: HTTP $code")
+
+/**
+ * O Item não está mais na fila do PC: o id nunca existiu, ou o `ack` de uma
+ * entrega anterior já o confirmou e o PC reentregou por outro motivo
+ * (`server.rs`). Não é recusa — não há nada para baixar.
+ */
+class ItemGoneException(val id: Long) : Exception("Item $id não está mais na fila do PC")
 
 private sealed class SendOutcome {
     object Success : SendOutcome()
@@ -138,17 +149,7 @@ class ProtocolClient(
             val total = file.length()
             connection.setFixedLengthStreamingMode(total)
             file.inputStream().use { input ->
-                connection.outputStream.use { output ->
-                    val buffer = ByteArray(8192)
-                    var sent = 0L
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read == -1) break
-                        output.write(buffer, 0, read)
-                        sent += read
-                        onProgress(if (total > 0) ((sent * 100) / total).toInt() else 100)
-                    }
-                }
+                connection.outputStream.use { output -> pump(input, output, total, onProgress) }
             }
             val code = connection.responseCode
             if (code == HttpURLConnection.HTTP_CREATED) {
@@ -167,42 +168,57 @@ class ProtocolClient(
     /**
      * Baixa um Item de arquivo ainda Pendente na fila de saída do PC (`GET
      * /outbox/{id}/file`) para [destination] em stream, chamando [onProgress]
-     * com o percentual (0 a 100) recebido. Confirma o recebimento (`POST
-     * /outbox/{id}/ack`) só depois de gravar o arquivo inteiro — só o `ack`
-     * tira o Item da fila do PC, então uma interrupção no meio do download
-     * propaga a exceção sem chamar o `ack`, e o PC reentrega no próximo
-     * `/listen`. Um download que fecha antes de entregar [Item.FileMeta.size]
-     * bytes lança [IOException] em vez de aceitar bytes de menos como
-     * completo — o servidor de teste fecha a conexão sem erro nenhum do lado
-     * do cliente, então a checagem de tamanho é a única forma confiável de
-     * detectar a interrupção.
+     * com o percentual (0 a 100) recebido. Grava num arquivo temporário ao
+     * lado de [destination] e só move para o destino final depois de conferir
+     * o tamanho — uma interrupção no meio do download não deixa bytes
+     * parciais parecendo um arquivo completo em [destination]. Confirma o
+     * recebimento (`POST /outbox/{id}/ack`) só depois disso — só o `ack` tira
+     * o Item da fila do PC, então uma interrupção propaga a exceção sem
+     * chamar o `ack`, e o PC reentrega no próximo `/listen`. Um download que
+     * fecha antes de entregar [Item.FileMeta.size] bytes lança [IOException]
+     * em vez de aceitar bytes de menos como completo. Um `404` (`server.rs`:
+     * id não existe ou já foi confirmado) lança [ItemGoneException] em vez de
+     * [ProtocolRejectedException] — não é recusa, é o Item que o PC já dá por
+     * resolvido.
      */
     fun downloadFile(item: Item.FileMeta, destination: File, onProgress: (Int) -> Unit = {}) {
         val connection = open("/outbox/${item.id}/file", "GET")
+        val partial = File(destination.absoluteFile.parentFile, "${destination.name}.part")
         try {
-            val code = connection.responseCode
-            if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)
-            var received = 0L
-            connection.inputStream.use { input ->
-                destination.outputStream().use { output ->
-                    val buffer = ByteArray(8192)
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read == -1) break
-                        output.write(buffer, 0, read)
-                        received += read
-                        onProgress(if (item.size > 0) ((received * 100) / item.size).toInt() else 100)
-                    }
+            try {
+                val code = connection.responseCode
+                if (code == HttpURLConnection.HTTP_NOT_FOUND) throw ItemGoneException(item.id)
+                if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)
+                val received = connection.inputStream.use { input ->
+                    partial.outputStream().use { output -> pump(input, output, item.size, onProgress) }
                 }
+                if (received != item.size) {
+                    throw IOException("download incompleto: esperado ${item.size} bytes, recebido $received")
+                }
+            } finally {
+                connection.disconnect()
             }
-            if (received != item.size) {
-                throw IOException("download incompleto: esperado ${item.size} bytes, recebido $received")
-            }
+            Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
             onProgress(100)
-        } finally {
-            connection.disconnect()
+        } catch (e: Exception) {
+            partial.delete()
+            throw e
         }
         ack(item.id)
+    }
+
+    /** Copia [input] para [output] em blocos de 8 KB, reportando o percentual de [total] a [onProgress]. */
+    private fun pump(input: InputStream, output: OutputStream, total: Long, onProgress: (Int) -> Unit): Long {
+        val buffer = ByteArray(8192)
+        var transferred = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read == -1) break
+            output.write(buffer, 0, read)
+            transferred += read
+            onProgress(if (total > 0) ((transferred * 100) / total).toInt() else 100)
+        }
+        return transferred
     }
 
     private fun ack(id: Long) {
