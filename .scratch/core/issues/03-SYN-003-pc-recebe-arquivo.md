@@ -1,5 +1,5 @@
 # SYN-003: PC recebe arquivo pela rede
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-002
 Review: agent
@@ -21,12 +21,12 @@ final.
 
 #### Acceptance criteria
 
-1. Enviar uma imagem via `curl` grava o arquivo na Pasta e mostra miniatura na bolha à esquerda.
-2. Enviar um PDF grava o arquivo e mostra nome, `PDF` e tamanho legível na bolha.
-3. Enviar `foto.jpg` duas vezes resulta em `foto.jpg` e `foto (1).jpg` na Pasta, ambos íntegros.
-4. Durante um envio de mais de 100 MB, a bolha mostra progresso crescendo e uma animação visível.
-5. Um envio interrompido no meio não deixa arquivo com nome final na Pasta.
-6. Um nome de arquivo com caminho (`../x.txt`) ou caracteres inválidos no Windows é saneado e o arquivo fica dentro da Pasta.
+1. ❌ Enviar uma imagem via `curl` grava o arquivo na Pasta e mostra miniatura na bolha à esquerda. — grava, mas a miniatura nunca aparece com o `curl` do bloco Verification (review 2026-09-20, achado 1).
+2. ❌ Enviar um PDF grava o arquivo e mostra nome, `PDF` e tamanho legível na bolha. — grava, mas a bolha fica presa no estado "enviando", sem o tipo nem o tamanho (mesmo achado 1).
+3. ⚠️ Enviar `foto.jpg` duas vezes resulta em `foto.jpg` e `foto (1).jpg` na Pasta, ambos íntegros. — vale em sequência (teste verde); dois envios simultâneos do mesmo nome perdem um dos arquivos (achado 2).
+4. ❌ Durante um envio de mais de 100 MB, a bolha mostra progresso crescendo e uma animação visível. — a barra fica em 0% sem `X-File-Size` (mesmo achado 1).
+5. ✅ Um envio interrompido no meio não deixa arquivo com nome final na Pasta.
+6. ✅ Um nome de arquivo com caminho (`../x.txt`) ou caracteres inválidos no Windows é saneado e o arquivo fica dentro da Pasta.
 
 #### Verification
 
@@ -90,3 +90,164 @@ Critérios 1, 2 e 4: manual.
   obrigatório antes de `Stage: to-review`; `-TestsOnly` é só para a prova
   red-before-green. `AGENTS.md` ("Bindings do fluxo") já diz isso. Nada
   pendente das tentativas anteriores: driver reverteu tudo, sem branch órfã.
+
+- 2026-09-20 Stage 2, decisões de implementação (não são blockers, registro
+  para a review): **Item ganhou um `body` (enum `ItemBody::Text|File`)** em
+  vez de manter `text` solto — o Item de arquivo precisa de `name`, `size` e
+  `received` (bytes já gravados) para a barra de progresso; texto e arquivo
+  não cabiam mais no mesmo shape plano. `Items::start_file` cria o Item com
+  `received: 0` assim que o upload começa (a bolha nasce antes dos bytes
+  chegarem) e `file_progress` atualiza e reemite pelo mesmo canal (`on_new`)
+  — o front end distingue criação de atualização pelo id já visto. /  /
+  **Pasta não escolhida ainda:** `server::spawn` recebe `Option<PathBuf>`;
+  sem Pasta, `/items/file` devolve 503 em vez de travar o servidor (texto
+  continua funcionando). É capturado uma vez no boot (`start_server`); se o
+  usuário escolher a Pasta depois do primeiro diálogo, o servidor só vê isso
+  num restart — não implementei atualização ao vivo, fora do que os critérios
+  de aceite pedem. /  / **Miniatura de imagem:** não usei o asset-protocol do
+  Tauri (escopo dinâmico por Pasta arbitrária, API que eu não conseguiria
+  verificar sem rodar o build). Em vez disso, um comando novo,
+  `read_file_bytes`, devolve os bytes do arquivo já gravado (mesma
+  sanitização do nome) e o front monta um `Blob`/`ObjectURL` — só chamado
+  depois que o arquivo termina de chegar. Critérios 1, 2 e 4 continuam
+  manuais (curl não testa UI); os 4 testes automatizados (conteúdo íntegro,
+  sufixo `(1)`, `../` contido na Pasta, envio cortado sem nome final) estão
+  verdes no gate completo.
+
+- Débito humano: critérios 1, 2 e 4 (miniatura, nome/tipo/tamanho, barra
+  animada) não foram vistos numa tela — a review os avaliou traçando o caminho
+  do dado do servidor até o DOM, não abrindo o app. Foi o bastante para
+  reprová-los (achado 1), mas a aprovação deles, quando o stage 2 corrigir,
+  ainda quer um olho humano.
+
+#### Review (2026-09-20) — reaberto
+
+Verdict: Needs your call: os critérios 1, 2 e 4 não passam com o próprio `curl`
+do bloco Verification, e a correção mexe no protocolo (o servidor passa a ler
+o tamanho do `Content-Length`) — vale uma olhada humana no contrato antes de o
+stage 2 refazer.
+
+Higiene do fluxo, em ordem: separação teste/código limpa — `3f10528` toca só
+`tests/server.rs` e o ticket, `c713b12` não toca nenhum arquivo de teste.
+Vermelho confirmado: em `3f10528` os testes usam `pc_lib::items::ItemBody` e
+chamam `server::spawn` com 4 argumentos, e nenhum dos dois existia no código
+daquele commit — os 4 testes novos não compilavam. Gate completo verde agora
+nesta máquina: fmt, clippy, 12 testes (4 em `config.rs`, 8 em `server.rs`),
+`tsc --noEmit`.
+
+**Achado 1 (bloqueia 1, 2 e 4).** `post_file` tira o tamanho só do cabeçalho
+`X-File-Size`, com `.unwrap_or(0)`, e ignora o `Content-Length`. O `curl` do
+bloco Verification deste ticket não manda `X-File-Size` — manda
+`Content-Length`. Com `size: 0`, `atualizarProgresso` em `pc/ui/main.ts` calcula
+`completo = item.size > 0 && item.received >= item.size`, que nunca fica
+verdadeiro: a miniatura (que só carrega dentro do `if (completo)`) não aparece,
+o texto `PDF · 1,2 MB` nunca substitui a contagem de bytes, e
+`barra.style.width` (também sob `item.size > 0`) fica em `0%`, então a animação
+listrada roda numa barra de largura zero. Um arquivo de 0 byte cai no mesmo
+buraco, mesmo com `X-File-Size` correto. O fim do recebimento precisa de um
+sinal próprio, não pode ser inferido de `received >= size`.
+
+**Achado 2 (enfraquece 3).** `dedup_path` decide o nome final por `exists()` e
+nada reserva esse nome até o `rename` do fim. Dois envios de `foto.jpg` que se
+sobrepõem no tempo resolvem os dois para `foto.jpg` (só o `.part-<hex>` é
+único) e o segundo `rename` sobrescreve o primeiro em silêncio. O teste
+`segundo_post_do_mesmo_nome_ganha_sufixo` é sequencial, por isso passa.
+
+O que falta, para o stage 2 continuar nesta mesma branch:
+
+1. O servidor usa `Content-Length` quando `X-File-Size` não vier, e a UI marca
+   o arquivo como completo por um sinal explícito do fim do stream — não por
+   `received >= size`. Critérios 1, 2 e 4 voltam a valer com o `curl` do bloco
+   Verification, sem cabeçalho extra, e um arquivo de 0 byte também termina.
+2. Reservar o nome final antes de começar a gravar (criar o destino vazio e
+   gravar por cima, ou algum aluguel equivalente), para dois envios simultâneos
+   do mesmo nome darem `foto.jpg` e `foto (1).jpg` — critério 3 com "ambos
+   íntegros" valendo também fora da sequência.
+
+Testes novos que isso pede (por isso é reabertura e não conserto na review):
+POST sem `X-File-Size` cria o Item com o tamanho do `Content-Length`; dois POSTs
+concorrentes do mesmo nome deixam os dois arquivos íntegros na Pasta.
+
+Achados menores, fora do que bloqueia — não mexer neles aqui:
+
+- Todo envio interrompido deixa um `<nome>.part-<hex>` na Pasta para sempre; o
+  caminho de erro de `post_file` não apaga o temporário. Critério 5 continua
+  valendo (o nome final não aparece), mas o lixo acumula num diretório do
+  usuário. Vira `CLEAN-*` ou critério novo no stage 1.
+- `read_file_bytes` lê o arquivo inteiro na memória e o manda pelo IPC do Tauri
+  como array JSON de números (~4x os bytes) a cada miniatura. Decisão já
+  registrada pelo stage 2; cara para os 100 MB que o critério 4 cita.
+- `sanitize_file_name`: `trim_matches('.')` renomeia dotfile legítimo
+  (`.gitignore` → `gitignore`), e nome reservado do Windows (`COM1`, `nul.txt`)
+  chega no `File::create` e vira 500. Critério 6 fala de caracteres, então
+  passa; ainda assim é superfície para o stage 1 decidir.
+- `random_suffix` em `server.rs` repete o final de `config.rs::new_token`
+  (`getrandom::fill` + hex). Um `hex(&[u8])` compartilhado resolve. `CLEAN-*`.
+- `sanitize_file_name` virou `pub(crate)` só para `lib.rs::read_file_bytes`
+  refazer `pasta.join(sanitize(...))`: a invariante "não sai da Pasta" agora
+  mora em dois lugares. Um `caminho_na_pasta(pasta, name)` a guardaria uma vez.
+- `URL.createObjectURL` em `carregarMiniatura` nunca é revogado.
+
+- 2026-09-20 (resposta do humano à review): **direção aprovada, com dois
+  ajustes.** O `curl` do bloco Verification é o cliente de referência — a spec
+  manda ("PC primeiro, testável com `curl` antes de existir Kotlin") e é contra
+  o bloco de protocolo no topo de `pc/src-tauri/src/server.rs` que SYN-008
+  (bloqueado por este ticket) vai escrever o cliente Kotlin. Ele não ganha
+  cabeçalho novo. A spec pede "nome, tamanho e bytes em stream" sem dizer onde
+  o tamanho viaja; num POST de corpo cru o `Content-Length` *é* o tamanho.
+  Ajuste 1: **`Content-Length` primeiro, `X-File-Size` só quando o corpo vier
+  chunked** (sem `Content-Length`) — não o inverso. Se os dois vierem e
+  divergirem, o corpo entrega exatamente `Content-Length` bytes; um `size`
+  diferente vira barra que passa de 100% ou nunca chega. Sem nenhum dos dois
+  (Android com provider que não informa tamanho), aceita com `size: 0`: a bolha
+  conta bytes e termina pelo sinal de fim, não é 400. Atualizar o bloco de
+  protocolo do `server.rs` de acordo. **Fim explícito**, como a review pediu:
+  `Items::file_done(id)` pelo mesmo `on_new`, emitido *depois* do `rename` —
+  hoje `file_progress` com `received == size` dispara antes do rename
+  (`server.rs:177` vs `:181`) e a UI chamaria `read_file_bytes` num nome final
+  que ainda não existe; o sinal separado resolve isso e o arquivo de 0 byte de
+  uma vez. `atualizarProgresso` (`pc/ui/main.ts:107`) passa a olhar esse campo.
+  Envio cortado não emite o sinal e a bolha fica em "enviando": aceito, vai
+  junto com o `.part` órfão que a review já mandou para `CLEAN-*`. Ajuste 2:
+  **reserva do nome por aluguel em memória, não arquivo vazio.** Só este
+  processo grava na Pasta, então um conjunto de nomes alugados no `AppState`,
+  consultado em `dedup_path` sob o mesmo lock que o `exists()`, basta; o "criar
+  o destino vazio" deixaria um `foto.jpg` de 0 byte visível na Pasta durante o
+  envio e pediria limpeza em cada caminho de erro. Liberar o aluguel em *todo*
+  retorno de `post_file` — senão um envio cortado de `foto.jpg` faz o próximo
+  virar `foto (1).jpg` sem `foto.jpg` no disco. Por que não deixar como está:
+  história 24 da spec diz "nunca sobrescrever", e SYN-008 critério 3 manda 3
+  fotos de uma vez — colisão concorrente de nome é caminho normal, não canto
+  obscuro. Testes (vermelhos antes, `gate.ps1 -TestsOnly`): POST sem
+  `X-File-Size` cria o Item com `size == Content-Length` e termina; POST de 0
+  byte termina com arquivo final de 0 byte na Pasta; dois POSTs concorrentes de
+  `foto.jpg` (corpo lento, os dois abertos ao mesmo tempo) deixam `foto.jpg` e
+  `foto (1).jpg` íntegros. Achados menores ficam fora deste ticket, como a
+  review pôs. `Stage: to-implement` já está certo; stage 2 segue nesta branch,
+  em cima de `6203341`.
+
+- 2026-09-20 Stage 2, retomada (achados 1 e 2): três testes vermelhos novos
+  (`bc5a0c4`, só `tests/server.rs`) — POST sem `X-File-Size` completa com
+  `size` do `Content-Length`; POST de 0 byte completa com arquivo final de 0
+  byte; dois POSTs concorrentes de `foto.jpg` (cabeçalhos primeiro, corpos
+  intercalados em pedaços de 256 bytes numa conexão TCP crua, para os dois
+  ficarem em voo ao mesmo tempo no servidor de thread única) terminam os dois
+  íntegros. Vermelho confirmado: `ItemBody::File` ainda não tinha o campo
+  `done` que os testes já esperavam — não compilava. Implementação em
+  `9ea4049` (só `src/`, mais `pc/ui/main.ts`), gate completo verde: fmt,
+  clippy, 15 testes (4 `config.rs`, 11 `server.rs`), `tsc --noEmit`. Achado 1:
+  `post_file` lê `Content-Length` primeiro, `X-File-Size` só quando o corpo
+  vier chunked sem `Content-Length` — exatamente o ajuste 1 da resposta do
+  humano. `ItemBody::File` ganhou `done: bool`; `Items::file_done` o liga
+  depois do `rename` para o nome final (nunca antes — ajuste 1 também cobria
+  isso). `atualizarProgresso` em `main.ts` olha `item.done` em vez de
+  recalcular `received >= size`. Achado 2: `dedup_path` virou `reserve_path`,
+  que reserva o caminho escolhido num `HashSet<PathBuf>` em `AppState`
+  (`leases`), sob o mesmo lock que checa `exists()`; um `LeaseGuard` libera o
+  nome no `Drop`, cobrindo todo retorno de `post_file` — exatamente o ajuste 2
+  (aluguel em memória, não arquivo vazio). Rodei o teste concorrente 3 vezes
+  em sequência antes de confiar nele: sem flake nas três. Achados menores que
+  a review já tinha separado (`.part` órfão, `read_file_bytes` em memória,
+  `sanitize_file_name`/dotfile/nome reservado do Windows, `random_suffix`
+  duplicado, `sanitize_file_name` pública, `URL.createObjectURL` sem revogar)
+  não foram tocados — continuam fora deste ticket.
