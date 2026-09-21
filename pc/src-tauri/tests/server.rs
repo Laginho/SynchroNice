@@ -284,7 +284,11 @@ fn post_arquivo_vazio_completa_com_arquivo_de_0_byte() {
         .iter()
         .find(|(nome, ..)| nome == "vazio.bin")
         .expect("item do arquivo vazio");
-    assert_eq!(*status, FileStatus::Done, "arquivo de 0 byte deve terminar (done)");
+    assert_eq!(
+        *status,
+        FileStatus::Done,
+        "arquivo de 0 byte deve terminar (done)"
+    );
 }
 
 #[test]
@@ -298,7 +302,11 @@ fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
     // legitimamente terminar depois de um tempo fixo qualquer.
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     items.on_new(move |item| {
-        if let ItemBody::File { status: FileStatus::Done, .. } = &item.body {
+        if let ItemBody::File {
+            status: FileStatus::Done,
+            ..
+        } = &item.body
+        {
             let _ = tx.send(());
         }
     });
