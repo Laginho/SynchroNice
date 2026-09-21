@@ -20,7 +20,7 @@ interface FileItem {
   name: string;
   size: number;
   received: number;
-  done: boolean;
+  status: "receiving" | "done" | "failed";
 }
 
 type Item = TextItem | FileItem;
@@ -142,25 +142,30 @@ function carregarMiniatura(nome: string, thumb: HTMLElement): void {
 }
 
 function atualizarProgresso(bubble: HTMLElement, item: FileItem): void {
-  const completo = item.done;
-  bubble.classList.toggle("enviando", !completo);
+  const completo = item.status === "done";
+  const falhou = item.status === "failed";
+  bubble.classList.toggle("enviando", item.status === "receiving");
+  bubble.classList.toggle("falhou", falhou);
 
   const meta = bubble.querySelector<HTMLElement>(".file-meta")!;
   meta.textContent = completo
     ? `${extensao(item.name).toUpperCase() || "ARQUIVO"} · ${tamanhoLegivel(item.size)}`
-    : `${tamanhoLegivel(item.received)}${item.size > 0 ? ` de ${tamanhoLegivel(item.size)}` : ""}`;
+    : falhou
+      ? "o envio não chegou ao fim"
+      : `${tamanhoLegivel(item.received)}${item.size > 0 ? ` de ${tamanhoLegivel(item.size)}` : ""}`;
 
-  const barra = bubble.querySelector<HTMLElement>(".progress .bar");
-  if (barra && item.size > 0) {
-    barra.style.width = `${Math.min(100, (item.received / item.size) * 100)}%`;
+  if (item.status === "receiving") {
+    const barra = bubble.querySelector<HTMLElement>(".progress .bar");
+    if (barra && item.size > 0) {
+      barra.style.width = `${Math.min(100, (item.received / item.size) * 100)}%`;
+    }
+    return;
   }
 
-  if (completo) {
-    bubble.querySelector(".progress")?.remove();
-    if (IMAGEM.has(extensao(item.name))) {
-      const thumb = bubble.querySelector<HTMLElement>(".file-thumb");
-      if (thumb) carregarMiniatura(item.name, thumb);
-    }
+  bubble.querySelector(".progress")?.remove();
+  if (completo && IMAGEM.has(extensao(item.name))) {
+    const thumb = bubble.querySelector<HTMLElement>(".file-thumb");
+    if (thumb) carregarMiniatura(item.name, thumb);
   }
 }
 
@@ -236,7 +241,8 @@ function renderArquivo(item: FileItem): HTMLElement {
   bubble.className = "item file";
   // Só uma bolha terminada arrasta: em progresso, `.enviando` ainda está
   // presente (ver `atualizarProgresso`), e não há arquivo com nome final
-  // na Pasta para arrastar ainda.
+  // na Pasta para arrastar ainda; `.falhou` nunca chega a ter um arquivo
+  // final também.
   //
   // O drag nativo só começa depois que o mouse anda `LIMIAR_DRAG` com o botão
   // apertado, nunca no `mousedown` cru: uma vez começado, quem solta o botão
@@ -244,7 +250,13 @@ function renderArquivo(item: FileItem): HTMLElement {
   // `ligarDrop` mandaria de volta para o celular. Clicar na bolha tem que
   // continuar sendo clicar.
   bubble.addEventListener("mousedown", (event) => {
-    if (event.button !== 0 || bubble.classList.contains("enviando")) return;
+    if (
+      event.button !== 0 ||
+      bubble.classList.contains("enviando") ||
+      bubble.classList.contains("falhou")
+    ) {
+      return;
+    }
     const x0 = event.clientX;
     const y0 = event.clientY;
 

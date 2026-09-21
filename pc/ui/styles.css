@@ -265,10 +265,11 @@ body {
 /* Arrastar para fora da janela (SYN-006) — só a bolha recebida e terminada:
  * a enviada (`.mine`) não tem arquivo na Pasta para arrastar, e não ganha o
  * `mousedown` de drag. */
-.item.file:not(.mine):not(.enviando) {
+.item.file:not(.mine):not(.enviando):not(.falhou) {
   cursor: grab;
 }
-.item.file.sumiu {
+.item.file.sumiu,
+.item.file.falhou {
   opacity: 0.5;
   cursor: not-allowed;
 }

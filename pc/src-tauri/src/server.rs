@@ -315,15 +315,29 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         .to_string();
     let temp_path = temp_path_for(&final_path);
 
+    // O guarda é declarado antes do handle de propósito: a ordem de destruição
+    // é a inversa da declaração, então o `file` fecha primeiro e o
+    // `remove_file` do guarda encontra o `.part` sem nenhum handle aberto.
+    // Ao contrário, o unlink dependeria de o handle ter sido aberto com
+    // compartilhamento de exclusão e de o sistema de arquivos aceitar apagar
+    // um arquivo aberto — a Pasta é escolhida pelo usuário e pode estar em
+    // exFAT ou num share de rede.
+    let item = state.items.start_file(final_name, size);
+    let fail_guard = FailGuard {
+        items: state.items.clone(),
+        item_id: item.id,
+        temp_path: temp_path.clone(),
+    };
+
     let mut file = match tokio::fs::File::create(&temp_path).await {
         Ok(f) => f,
         Err(e) => {
             eprintln!("não foi possível criar arquivo temporário {temp_path:?}: {e}");
+            // fail_guard marca o Item como failed ao sair de escopo: um envio
+            // que morre antes do primeiro byte também não fica "em andamento".
             return StatusCode::INTERNAL_SERVER_ERROR;
         }
     };
-
-    let item = state.items.start_file(final_name, size);
 
     let mut stream = request.into_body().into_data_stream();
     let mut received: u64 = 0;
@@ -331,9 +345,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         let bytes = match chunk {
             Ok(bytes) => bytes,
             Err(_) => {
-                // Conexão interrompida no meio: o arquivo fica só com o nome
-                // temporário, nunca é renomeado para o nome final, e a bolha
-                // nunca recebe o sinal de fim.
+                // Conexão interrompida no meio: fail_guard marca o Item como
+                // failed e apaga o .part ao sair de escopo.
                 return StatusCode::BAD_REQUEST;
             }
         };
@@ -343,21 +356,49 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         }
         received += bytes.len() as u64;
         state.items.file_progress(item.id, received);
+        if size > 0 && received >= size {
+            // Todos os bytes prometidos (X-File-Size ou Content-Length) já
+            // chegaram: não esperamos mais nada da stream. Com Content-Length
+            // isso é exatamente onde o laço já parava sozinho (o próximo
+            // stream.next() devolve None sem ir à rede); num corpo chunked,
+            // esse próximo stream.next() precisaria ler o chunk terminador,
+            // um await que de fato suspende — se a conexão cair logo depois
+            // do último byte, é aí que a future seria cancelada antes de
+            // chegarmos ao spawn abaixo. Sair do laço aqui evita esse await.
+            break;
+        }
     }
-    drop(file);
 
-    // Rename e aviso de fim rodam numa tarefa própria a partir daqui: se a
-    // conexão cair logo depois do último byte do corpo (o celular não
-    // precisa ficar esperando a resposta), a future desta requisição é
-    // cancelada, mas uma tarefa spawnada não é abortada por isso — sem essa
-    // separação o rename já tinha acontecido e o aviso de fim nunca saía.
+    // Flush, rename e aviso de fim rodam numa tarefa própria a partir daqui,
+    // sem nenhum await entre o fim do corpo e o spawn: se a conexão cair
+    // bem neste instante (o celular não precisa ficar esperando a resposta),
+    // a future desta requisição pode ser cancelada, mas uma tarefa spawnada
+    // não é abortada por isso — sem essa separação flush/rename/file_done
+    // já podiam ter acontecido pela metade e o aviso de fim nunca sair.
     let items = state.items.clone();
     let final_path_bg = final_path.clone();
     let temp_path_bg = temp_path.clone();
     let concluido = tokio::spawn(async move {
-        // Move a reserva do nome para dentro da tarefa: ela só é liberada
-        // depois do rename, nunca enquanto ele ainda está em voo.
+        // Move a reserva do nome e o guarda de falha para dentro da tarefa:
+        // eles só saem de cena depois do rename, nunca enquanto ele ainda
+        // está em voo.
         let _lease = _lease;
+        let _fail_guard = fail_guard;
+        // Rebind depois do guarda pela mesma razão de lá em cima: se o flush
+        // falhar e sairmos sem chegar ao `drop(file)`, o handle ainda fecha
+        // antes de o guarda apagar o `.part`.
+        let mut file = file;
+
+        // tokio::fs::File bufferiza a escrita; write_all().await devolve
+        // antes de os bytes necessariamente chegarem ao disco, e o `drop`
+        // seguinte não é ponto de sincronização — sem o flush, o rename
+        // podia disparar sem o último pedaço gravado.
+        if let Err(e) = file.flush().await {
+            eprintln!("falha ao sincronizar {temp_path_bg:?}: {e}");
+            return false; // _fail_guard limpa ao sair de escopo
+        }
+        drop(file);
+
         match tokio::fs::rename(&temp_path_bg, &final_path_bg).await {
             Ok(()) => {
                 // Só agora o arquivo existe com o nome final: o sinal de fim
@@ -368,7 +409,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
             }
             Err(e) => {
                 eprintln!("falha ao renomear {temp_path_bg:?} para {final_path_bg:?}: {e}");
-                false
+                false // _fail_guard limpa ao sair de escopo
             }
         }
     })
@@ -521,6 +562,27 @@ impl Drop for LeaseGuard {
             .lock()
             .expect("leases sem panic")
             .remove(&self.path);
+    }
+}
+
+/// Ao sair de escopo, marca o Item como `failed` e apaga o `.part` — a não
+/// ser que o envio já tenha chegado a um estado terminal. As duas chamadas
+/// são idempotentes por conta própria (`file_failed` só age sobre um Item
+/// ainda `Receiving`; apagar um arquivo que já foi renomeado para o nome
+/// final simplesmente não encontra nada), então isso cobre numa tacada só:
+/// erro no meio do corpo, escrita ou rename que falha, e a própria future de
+/// `post_file` sendo cancelada pela conexão caindo — o único caso em que
+/// nenhuma outra linha deste arquivo roda, só o `Drop`.
+struct FailGuard {
+    items: Items,
+    item_id: u64,
+    temp_path: PathBuf,
+}
+
+impl Drop for FailGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.temp_path);
+        self.items.file_failed(self.item_id);
     }
 }
 

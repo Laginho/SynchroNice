@@ -1,6 +1,6 @@
 //! Costura do PC: o protocolo HTTP. Os testes agem como o celular.
 
-use pc_lib::items::{ItemBody, Items};
+use pc_lib::items::{FileStatus, ItemBody, Items};
 use pc_lib::outbox::{OutBody, OutItem, Outbox};
 use pc_lib::par::Par;
 use pc_lib::server;
@@ -142,8 +142,8 @@ fn textos(items: &Items) -> Vec<String> {
         .collect()
 }
 
-/// `(nome, size, received, done)` de cada Item de arquivo, em ordem de chegada.
-fn arquivos(items: &Items) -> Vec<(String, u64, u64, bool)> {
+/// `(nome, size, received, status)` de cada Item de arquivo, em ordem de chegada.
+fn arquivos(items: &Items) -> Vec<(String, u64, u64, FileStatus)> {
     items
         .snapshot()
         .into_iter()
@@ -152,8 +152,8 @@ fn arquivos(items: &Items) -> Vec<(String, u64, u64, bool)> {
                 name,
                 size,
                 received,
-                done,
-            } => Some((name, size, received, done)),
+                status,
+            } => Some((name, size, received, status)),
             _ => None,
         })
         .collect()
@@ -258,12 +258,13 @@ fn post_sem_x_file_size_usa_content_length_e_completa() {
     assert_eq!(status, 201);
     let arquivos = arquivos(&items);
     assert_eq!(arquivos.len(), 1);
-    let (nome, size, received, done) = &arquivos[0];
+    let (nome, size, received, status) = &arquivos[0];
     assert_eq!(nome, "sem-tamanho.bin");
     assert_eq!(*size, bytes.len() as u64, "size vem do Content-Length");
     assert_eq!(*received, bytes.len() as u64);
-    assert!(
-        *done,
+    assert_eq!(
+        *status,
+        FileStatus::Done,
         "sem X-File-Size o arquivo ainda deve terminar (done)"
     );
 }
@@ -279,11 +280,15 @@ fn post_arquivo_vazio_completa_com_arquivo_de_0_byte() {
         .expect("arquivo de 0 byte gravado");
     assert!(gravado.is_empty());
     let arquivos = arquivos(&items);
-    let (_, _, _, done) = arquivos
+    let (_, _, _, status) = arquivos
         .iter()
         .find(|(nome, ..)| nome == "vazio.bin")
         .expect("item do arquivo vazio");
-    assert!(*done, "arquivo de 0 byte deve terminar (done)");
+    assert_eq!(
+        *status,
+        FileStatus::Done,
+        "arquivo de 0 byte deve terminar (done)"
+    );
 }
 
 #[test]
@@ -297,7 +302,11 @@ fn dois_envios_concorrentes_do_mesmo_nome_preservam_ambos() {
     // legitimamente terminar depois de um tempo fixo qualquer.
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     items.on_new(move |item| {
-        if let ItemBody::File { done: true, .. } = &item.body {
+        if let ItemBody::File {
+            status: FileStatus::Done,
+            ..
+        } = &item.body
+        {
             let _ = tx.send(());
         }
     });
@@ -395,6 +404,158 @@ fn envio_interrompido_nao_deixa_arquivo_com_nome_final() {
         !pasta.join("grande.bin").exists(),
         "envio incompleto não pode deixar arquivo com o nome final"
     );
+}
+
+#[test]
+fn envio_chunked_cortado_apos_ultimo_byte_ainda_termina() {
+    let (base, items, _outbox, raiz) = sobe();
+    let pasta = raiz.path().join("pasta");
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    // Sinal de fim é o evento file_done, como nos vizinhos que testam a
+    // mesma corrida (dois_envios_concorrentes...).
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    items.on_new(move |item| {
+        if let ItemBody::File {
+            status: FileStatus::Done,
+            ..
+        } = &item.body
+        {
+            let _ = tx.send(());
+        }
+    });
+
+    let corpo = vec![b'C'; 4096];
+    let pedido = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-File-Name: chunked.bin\r\n\
+         X-File-Size: {}\r\n\
+         Transfer-Encoding: chunked\r\n\
+         Connection: close\r\n\
+         \r\n",
+        corpo.len()
+    );
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    stream
+        .write_all(pedido.as_bytes())
+        .expect("escreve cabeçalhos");
+    // Um único chunk, devidamente fechado (tamanho em hex + CRLF, dados,
+    // CRLF): o cliente entregou o corpo inteiro. Falta só o chunk
+    // terminador "0\r\n\r\n" que fecha formalmente o corpo chunked -- a
+    // conexão cai antes dele, como um celular que não espera a resposta.
+    stream
+        .write_all(format!("{:x}\r\n", corpo.len()).as_bytes())
+        .expect("escreve tamanho do chunk");
+    stream.write_all(&corpo).expect("escreve o chunk");
+    stream.write_all(b"\r\n").expect("fecha o chunk");
+    drop(stream); // cai antes do chunk terminador
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("o envio chunked deve terminar (file_done) mesmo sem o chunk terminador");
+
+    let gravado = std::fs::read(pasta.join("chunked.bin")).expect("arquivo no nome final");
+    assert_eq!(gravado, corpo);
+}
+
+#[test]
+fn envio_cortado_no_meio_nao_deixa_part_na_pasta() {
+    let (base, items, _outbox, raiz) = sobe();
+    let pasta = raiz.path().join("pasta");
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    items.on_new(move |item| {
+        if let ItemBody::File {
+            status: FileStatus::Failed,
+            ..
+        } = &item.body
+        {
+            let _ = tx.send(());
+        }
+    });
+
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    let pedido = "POST /items/file HTTP/1.1\r\n\
+         Host: HOST\r\n\
+         Authorization: Bearer TOKEN\r\n\
+         X-File-Name: cortado.bin\r\n\
+         X-File-Size: 1000000\r\n\
+         Content-Length: 1000000\r\n\
+         Connection: close\r\n\
+         \r\n"
+        .replace("HOST", addr)
+        .replace("TOKEN", TOKEN);
+    stream
+        .write_all(pedido.as_bytes())
+        .expect("escreve cabeçalhos");
+    stream
+        .write_all(b"so uma fracao dos bytes prometidos")
+        .expect("escreve parte do corpo");
+    drop(stream); // fecha antes de completar os bytes prometidos
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("o envio cortado deve marcar o Item como failed");
+
+    let sobras: Vec<_> = std::fs::read_dir(&pasta)
+        .expect("lê a Pasta")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains(".part-"))
+        .collect();
+    assert!(
+        sobras.is_empty(),
+        "envio cortado não pode deixar .part na Pasta: {sobras:?}"
+    );
+}
+
+#[test]
+fn envio_cortado_no_meio_marca_item_como_failed() {
+    let (base, items, _outbox, _raiz) = sobe();
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    items.on_new(move |item| {
+        if let ItemBody::File {
+            status: FileStatus::Failed,
+            ..
+        } = &item.body
+        {
+            let _ = tx.send(());
+        }
+    });
+
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    let pedido = "POST /items/file HTTP/1.1\r\n\
+         Host: HOST\r\n\
+         Authorization: Bearer TOKEN\r\n\
+         X-File-Name: cortado2.bin\r\n\
+         X-File-Size: 1000000\r\n\
+         Content-Length: 1000000\r\n\
+         Connection: close\r\n\
+         \r\n"
+        .replace("HOST", addr)
+        .replace("TOKEN", TOKEN);
+    stream
+        .write_all(pedido.as_bytes())
+        .expect("escreve cabeçalhos");
+    stream
+        .write_all(b"so uma fracao dos bytes prometidos")
+        .expect("escreve parte do corpo");
+    drop(stream); // fecha antes de completar os bytes prometidos
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("o envio cortado deve marcar o Item como failed");
+
+    let status = items
+        .snapshot()
+        .into_iter()
+        .find_map(|i| match i.body {
+            ItemBody::File { name, status, .. } if name == "cortado2.bin" => Some(status),
+            _ => None,
+        })
+        .expect("item do envio cortado");
+    assert_eq!(status, FileStatus::Failed);
 }
 
 // SYN-004: direção PC -> celular. O PC é o remetente e gera o id do Item
