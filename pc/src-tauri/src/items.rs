@@ -4,6 +4,18 @@ use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Estado de um Item de arquivo. Uma dimensão só, três valores: nasce
+/// `Receiving`, termina em `Done` (renomeado para o nome final) ou `Failed`
+/// (conexão caiu no meio do corpo, ou o rename falhou). Terminal nunca volta
+/// a `Receiving`, e um dos dois terminais nunca sobrescreve o outro.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileStatus {
+    Receiving,
+    Done,
+    Failed,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ItemBody {
@@ -17,9 +29,7 @@ pub enum ItemBody {
         /// fim: com `size` desconhecido (0) nunca alcançaria `size`, e um
         /// arquivo de 0 byte já nasceria "completo" antes de sequer existir.
         received: u64,
-        /// Termina quando o servidor renomeia para o nome final — não quando
-        /// `received` alcança `size`, que nem sempre é conhecido de antemão.
-        done: bool,
+        status: FileStatus,
     },
 }
 
@@ -91,7 +101,7 @@ impl Items {
                 name,
                 size,
                 received: 0,
-                done: false,
+                status: FileStatus::Receiving,
             },
         };
         inner.items.push(item.clone());
@@ -117,13 +127,37 @@ impl Items {
     /// Marca um Item de arquivo como terminado e avisa quem escuta. Chamado
     /// só depois do arquivo já estar no nome final na Pasta — nunca antes,
     /// para a UI não tentar ler um arquivo que ainda está com nome temporário.
+    /// Sem efeito se o Item já chegou a um estado terminal (ver `file_failed`).
     pub fn file_done(&self, id: u64) {
         let mut inner = self.inner.lock().expect("lista de Itens sem panic");
         let Some(slot) = inner.items.iter_mut().find(|i| i.id == id) else {
             return;
         };
-        if let ItemBody::File { done, .. } = &mut slot.body {
-            *done = true;
+        match &mut slot.body {
+            ItemBody::File { status, .. } if *status == FileStatus::Receiving => {
+                *status = FileStatus::Done;
+            }
+            _ => return,
+        }
+        let item = slot.clone();
+        inner.notify(&item);
+    }
+
+    /// Marca um Item de arquivo como morto (conexão caiu no meio do corpo, ou
+    /// o rename para o nome final falhou) e avisa quem escuta. Sem efeito se
+    /// o Item já chegou a um estado terminal — `file_done` e `file_failed`
+    /// só agem sobre um Item ainda `Receiving`, para a limpeza de um envio
+    /// cancelado e a tarefa de conclusão nunca disputarem o resultado.
+    pub fn file_failed(&self, id: u64) {
+        let mut inner = self.inner.lock().expect("lista de Itens sem panic");
+        let Some(slot) = inner.items.iter_mut().find(|i| i.id == id) else {
+            return;
+        };
+        match &mut slot.body {
+            ItemBody::File { status, .. } if *status == FileStatus::Receiving => {
+                *status = FileStatus::Failed;
+            }
+            _ => return,
         }
         let item = slot.clone();
         inner.notify(&item);
