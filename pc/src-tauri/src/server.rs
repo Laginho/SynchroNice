@@ -315,19 +315,28 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         .to_string();
     let temp_path = temp_path_for(&final_path);
 
-    let mut file = match tokio::fs::File::create(&temp_path).await {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("não foi possível criar arquivo temporário {temp_path:?}: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR;
-        }
-    };
-
+    // O guarda é declarado antes do handle de propósito: a ordem de destruição
+    // é a inversa da declaração, então o `file` fecha primeiro e o
+    // `remove_file` do guarda encontra o `.part` sem nenhum handle aberto.
+    // Ao contrário, o unlink dependeria de o handle ter sido aberto com
+    // compartilhamento de exclusão e de o sistema de arquivos aceitar apagar
+    // um arquivo aberto — a Pasta é escolhida pelo usuário e pode estar em
+    // exFAT ou num share de rede.
     let item = state.items.start_file(final_name, size);
     let fail_guard = FailGuard {
         items: state.items.clone(),
         item_id: item.id,
         temp_path: temp_path.clone(),
+    };
+
+    let mut file = match tokio::fs::File::create(&temp_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("não foi possível criar arquivo temporário {temp_path:?}: {e}");
+            // fail_guard marca o Item como failed ao sair de escopo: um envio
+            // que morre antes do primeiro byte também não fica "em andamento".
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
     };
 
     let mut stream = request.into_body().into_data_stream();
@@ -375,6 +384,10 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         // está em voo.
         let _lease = _lease;
         let _fail_guard = fail_guard;
+        // Rebind depois do guarda pela mesma razão de lá em cima: se o flush
+        // falhar e sairmos sem chegar ao `drop(file)`, o handle ainda fecha
+        // antes de o guarda apagar o `.part`.
+        let mut file = file;
 
         // tokio::fs::File bufferiza a escrita; write_all().await devolve
         // antes de os bytes necessariamente chegarem ao disco, e o `drop`
