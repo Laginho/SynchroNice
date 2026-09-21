@@ -1,5 +1,5 @@
 # CLEAN-001: Teste de concorrência instável derruba o gate
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -154,3 +154,83 @@ Mais a repetição do critério 2, com a saída colada no ticket.
   e 150/150 verdes); registro aqui para quem revisar julgar se isso é sinal
   de outra causa raiz ainda por achar ou só o teste sendo empurrado além do
   que qualquer execução real do gate faria.
+
+#### Resolution (2026-09-20)
+
+Verdict: Approve
+
+**Decisão.** Critérios 1–4 aprovados, mergeado na branch de sessão em
+`e7aed15`. A prova red-before-green foi refeita nesta revisão, não só
+aceita do stage 2 — e é ela que responde à pergunta que o stage 2 deixou.
+
+**Prova red-green (feita pelo revisor, mesma máquina, mesma carga).** Com o
+teste já em espera por evento e o `server.rs` revertido ao estado
+pré-correção (`git checkout 8a2752b -- pc/src-tauri/src/server.rs`), o
+binário `tests/server.rs` rodou 20 vezes seguidas:
+
+    TOTAL: 16/20 verdes, 4 vermelhas
+
+As quatro vermelhas são todas o mesmo ponto, e todas gastam os 5s do
+`recv_timeout` — o evento nunca chega, o arquivo está no disco:
+
+    thread 'dois_envios_concorrentes_do_mesmo_nome_preservam_ambos' panicked
+    at tests\server.rs:346:14:
+    os dois envios devem terminar (evento file_done) dentro do prazo: Timeout
+    test result: FAILED. 18 passed; 1 failed; finished in 5.04s
+
+Com o `server.rs` corrigido de volta, o mesmo laço de 20:
+
+    TOTAL: 20/20 verdes, 0 vermelhas
+
+E outra vez 20/20 depois das pequenas correções da revisão abaixo. Ou seja:
+20% de vermelho sem a correção de produção, 0% com ela, em carga sequencial
+— exatamente a carga do gate. A correção é o que prende o teste.
+
+**Critérios.**
+
+1. ✅ `dois_envios_concorrentes_do_mesmo_nome_preservam_ambos`, causa em uma
+   linha no comentário do stage 2.
+2. ✅ 20/20, reverificado duas vezes pelo revisor (saídas acima).
+3. ✅ Comparado o corpo antigo com o novo: as mesmas duas leituras e o mesmo
+   `assert_eq!`, com a mesma mensagem; nada removido, nada afrouxado, sem
+   `#[ignore]`. A espera por evento **acrescenta** um modo de falha (o evento
+   não chegar), então a asserção ficou mais forte, não mais fraca.
+4. ✅ Causa raiz na produção descrita e corrigida em `post_file`.
+
+**Sobre as 2/120 sob carga 4x que o stage 2 pediu para julgar.** Não é outra
+causa raiz. O laço de 20 acima mostra que sem a correção o mesmo defeito dá
+20% em carga *sequencial*; com ela, 0%. O que sobra sob 4 cópias do binário
+em paralelo é o relógio que ainda existe no teste — o `recv_timeout(5s)` —
+estourando com a CPU saturada, não um `file_done` perdido. O gate nunca roda
+nessa carga, e o critério 2 pede carga sequencial. Não segura o ticket.
+
+**Correções pequenas feitas na revisão** (dentro dos Primary files, sem
+teste novo, commit `f4823bd`):
+
+- `.await.unwrap_or(false)` engolia um `JoinError` calado: um panic na tarefa
+  de conclusão virava 500 sem nada no console e com o Item parado em
+  andamento. Agora registra o erro com o caminho.
+- O doc de `LeaseGuard` ainda dizia que a reserva cai "em todo retorno de
+  `post_file`", o que a correção desta branch tornou falso — o guarda passa
+  para a tarefa do rename. Comentário atualizado, mais uma linha na própria
+  tarefa dizendo por que o guarda é movido para dentro dela. (Isso, aliás, é
+  uma melhoria de concorrência que a correção trouxe de brinde e que ninguém
+  tinha registrado: antes, uma requisição cancelada soltava a reserva do nome
+  com o rename ainda em voo, e um envio concorrente do mesmo nome podia
+  reservar o mesmo destino.)
+
+**Arquivos.** `pc/src-tauri/src/server.rs` (só a cauda de `post_file` e o doc
+de `LeaseGuard`), `pc/src-tauri/tests/server.rs` (só o teste em questão).
+Nada fora dos Primary files.
+
+**Gate.** `powershell -ExecutionPolicy Bypass -File .\gate.ps1` — verde três
+vezes nesta revisão (antes das correções, depois delas e depois do rebase na
+branch de sessão): `fmt` e `clippy` limpos, 19/19 em `tests/server.rs`,
+4+2 nos outros binários, `tsc` limpo, `gradle check` BUILD SUCCESSFUL.
+
+**Ficou fora, virou CLEAN-005.** Três restos do mesmo trecho, todos
+anteriores a este ticket e nenhum coberto pelos critérios daqui: a janela de
+cancelamento que sobra num corpo *chunked* (sem `Content-Length`, onde o
+`stream.next()` final ainda pode suspender antes do `spawn`), o `.part` que
+fica no disco para sempre quando o rename falha ou a conexão cai no meio, e
+o `drop(file)` sem `flush` antes do rename.
