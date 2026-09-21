@@ -23,8 +23,13 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
 - Base branch: `main`
 - Runner de testes (stage 2): `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly`
   — **não chame `cargo` direto**, é negado. O driver só libera `git`, `gh`, `npx`
-  e o primeiro token do gate (`powershell`), e `--allowedTools` restringe: regra
-  `allow` em `settings.json` não amplia nada. `-TestsOnly` roda só os testes, sem
+  e o primeiro token do gate (`powershell`) no `--allowedTools`. O
+  `.claude/settings.json` daqui tenta liberar `cargo`, mas está sendo **ignorado**
+  porque este workspace não foi marcado como confiável (`this workspace has not
+  been trusted`, visível nos `.err` de `.scratch/run-log/`); se alguém aceitar o
+  diálogo de trust, resta descobrir se a regra então amplia o `--allowedTools` ou
+  não — não foi testado. Até lá, o caminho pelo gate é o que funciona.
+  `-TestsOnly` roda só os testes, sem
   fmt/lint/typecheck, que é o que a prova red-before-green precisa; o gate
   completo continua sendo o portão antes de `to-review`.
 - Models: stage 2 sonnet xhigh, stage 3 opus high
