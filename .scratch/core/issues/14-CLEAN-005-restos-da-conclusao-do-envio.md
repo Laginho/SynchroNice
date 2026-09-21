@@ -1,5 +1,5 @@
 # CLEAN-005: Restos do caminho de conclusão do envio de arquivo
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -146,3 +146,88 @@ com o celular numa rede ruim, que é o cenário normal do app.
   truncado marcado `done` (consequencia do criterio 1 como aprovado, merece ticket
   proprio); criterio 3 vale por construcao mas nao tem teste, e o plano aprovado
   nao pediu; `CONTEXT.md` nao ganhou verbete para o terceiro estado do Item.
+
+- 2026-09-20 Débito humano: a bolha `.falhou` nunca foi vista rodando no app de
+  verdade. O que dá para provar sem olhar está provado na costura HTTP (o Item
+  vira `failed`, o `.part` some); o que ficou sem verificação manual é o
+  desenho: se a legenda "o envio não chegou ao fim" cabe na bolha, se o
+  `opacity: 0.5` herdado de `.sumiu` lê como "morreu" e não como "carregando",
+  e se a barra sumindo no meio do progresso não pisca feio. `pc/ui` não tem
+  runner de teste — o gate só roda `tsc --noEmit` nele.
+
+- 2026-09-20 Verbete do glossário em aberto: `CONTEXT.md` descreve **Pendente**
+  e **Entregue** como estados de Item, e agora existe um terceiro no PC
+  (`FileStatus::Failed`, a bolha que não vai chegar) sem nome no glossário.
+  Fora dos Primary files deste ticket e sem critério que o peça, então não foi
+  tocado aqui: é edição de stage 1 em `CONTEXT.md`, uma linha.
+
+#### Resolution (2026-09-20)
+
+Verdict: Needs your call: a correção que apliquei muda um caminho observável
+(um `File::create` que falha agora cria um Item marcado `failed`, antes não
+criava Item nenhum), e a bolha `.falhou` do critério 4 nunca foi vista
+rodando de verdade — ver o Débito humano acima.
+
+**Critérios.** ✅ 1 a 5.
+
+1. ✅ O laço sai em `received >= size` (com `size > 0`), antes de qualquer
+   `await` que possa suspender, e flush/rename/`file_done` vão para uma
+   `tokio::spawn` sem `await` no meio. Teste
+   `envio_chunked_cortado_apos_ultimo_byte_ainda_termina`, que fala HTTP
+   chunked cru num `TcpStream` e corta antes do chunk terminador.
+2. ✅ `FailGuard` (RAII) apaga o `.part` em todo caminho de morte, inclusive
+   a future cancelada. Teste `envio_cortado_no_meio_nao_deixa_part_na_pasta`.
+3. ✅ Por construção: o guarda é movido para dentro da tarefa de conclusão,
+   então o `Err` do rename também passa por ele. Sem teste próprio — o plano
+   aprovado não pediu um, e forçar um rename a falhar exigiria costura nova.
+4. ✅ `FileStatus { Receiving, Done, Failed }` em `snake_case`; `file_done` e
+   `file_failed` só agem sobre `Receiving`, então a limpeza e a conclusão não
+   disputam em nenhuma ordem. UI: `.falhou` perde `.enviando` e a barra,
+   ganha a legenda, não carrega miniatura, não arrasta (`mousedown` e
+   `cursor: grab`). Teste `envio_cortado_no_meio_marca_item_como_failed`.
+5. ✅ `file.flush().await` antes do rename, dentro da tarefa.
+
+**Correção aplicada na revisão** (`server.rs`, dentro dos Primary files, sem
+teste novo — a diferença só aparece num sistema de arquivos que recusa apagar
+arquivo aberto, que esta máquina não tem):
+
+`FailGuard` era declarado *depois* do `tokio::fs::File`, e ordem de destruição
+é a inversa da declaração — o `remove_file` do guarda corria com o handle do
+`.part` ainda aberto, em todo caminho de morte do laço e no flush que falha
+dentro da tarefa. Nesta máquina passa; numa Pasta em exFAT ou num share de
+rede o critério 2 estaria valendo por acidente. Agora `fail_guard` é declarado
+antes de `file` (e `file` é rebindado depois do guarda dentro da tarefa), então
+o handle fecha primeiro. Efeito colateral desejado, e o motivo do "Needs your
+call": um `File::create` que falha agora cria o Item e o marca `failed`, em vez
+de não criar Item nenhum — é mais um caminho de morte de `post_file` coberto
+pelo critério 4, mas é comportamento novo que ninguém pediu.
+
+**Achados não corrigidos.**
+
+- **`X-File-Size` mentiroso → CLEAN-006.** O `break` em `received >= size`
+  confia num número que só o celular controla (no caminho chunked não há
+  `Content-Length` para conferir): subestimado, o resto do corpo é descartado
+  e um arquivo truncado é renomeado e marcado `Done`. Superestimado, o corpo
+  acaba antes e cai no mesmo rename. Não é correção pequena — precisa de teste
+  novo e de uma decisão de stage 1 sobre o que fazer com um `size` que mente.
+- **Verbete do glossário** e **débito humano da bolha `.falhou`**: nos
+  Comments acima.
+
+**Arquivos.** `pc/src-tauri/src/items.rs`, `pc/src-tauri/src/server.rs`,
+`pc/src-tauri/tests/server.rs`, `pc/ui/main.ts`, `pc/ui/styles.css` — todos
+dentro dos Primary files. `android/` intocado, como o ticket previu.
+
+**Prova red-green.** Separação por commit, que é o check que sustenta a regra:
+`8e8d21f` (`test:`) mexe só em `pc/src-tauri/tests/server.rs` (+ a linha
+`Stage:`), `9e4f54f` (`fix:`) mexe só em `src/` e `ui/`, em nenhum arquivo de
+teste. O vermelho dos três testes novos é falha de compilação — `FileStatus`
+não existia em `items.rs` —, e os testes afirmam `FileStatus::Done` /
+`FileStatus::Failed`, não apenas tipam: um `status` que nascesse sempre
+`Receiving` compilaria e ainda assim falharia. Mesmo precedente de SYN-003.
+
+**Gate.** `powershell -ExecutionPolicy Bypass -File .\gate.ps1` na branch
+mesclada, em primeiro plano: `cargo fmt --check`, `cargo clippy -D warnings`,
+`cargo test` **22 passed; 0 failed** (as três novas incluídas), `tsc --noEmit`,
+`gradle check` BUILD SUCCESSFUL — `gate: passou`. A instabilidade do teste
+concorrente que CLEAN-001 deixou em observação foi medida fora desta sessão na
+`clean-005`: 12 rodadas de `-TestsOnly`, 12 verdes, 0 vermelhas.
