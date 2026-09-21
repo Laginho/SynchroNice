@@ -1,5 +1,5 @@
 # CLEAN-005: Restos do caminho de conclusão do envio de arquivo
-Stage: to-review
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -124,3 +124,5 @@ com o celular numa rede ruim, que é o cenário normal do app.
 - 2026-09-20 Review ended at to-review (exit 0); branch clean-005 holds the review; left for a human
 
 - 2026-09-20 Foreman: o review anterior terminou sem veredito (exit 0 logo apos "Baseline round 1 green. Waiting for the remaining 11") -- ele gastou o orcamento produzindo medicao de instabilidade, que a Verification deste ticket nem pede. A medicao ja esta feita, fora da sessao de review, na propria branch `clean-005`: **12 rodadas de `gate.ps1 -TestsOnly`, 12 verdes, 0 vermelhas**, mais uma rodada do gate completo, verde. Nao rode as 12 de novo -- julgue o codigo e use esta evidencia.
+
+- 2026-09-20 Review ended at to-review (exit 0); branch clean-005 holds the review; left for a human
