@@ -1,6 +1,6 @@
 # CLEAN-006: `X-File-Size` mentiroso vira arquivo truncado marcado `done`
-Stage: blocked
-Status: needs-triage
+Stage: to-review
+Status: ready-for-agent
 Blocked by: none
 Review: agent
 
@@ -39,10 +39,9 @@ garante que o número de bytes bate com o cabeçalho.
 2. Um envio chunked cujo corpo entrega **menos** bytes do que o `X-File-Size`
    anunciado, e fecha a conexão normalmente (chunk terminador), termina do
    mesmo jeito: Item `Failed`, sem `.part` e sem arquivo com nome final.
-3. O caso honesto (corpo chunked com exatamente `X-File-Size` bytes, conexão
-   cortada logo depois do último byte) continua terminando em `Done` — o
-   teste `envio_chunked_cortado_apos_ultimo_byte_ainda_termina` de CLEAN-005
-   segue verde.
+3. Um corpo chunked com exatamente `X-File-Size` bytes e o chunk terminador
+   termina em `Done`. Sem terminador, fica `Failed`, sem arquivo final nem
+   `.part`: o cabeçalho declarado não pode provar que não viriam mais chunks.
 
 #### Verification
 
@@ -57,6 +56,15 @@ garante que o número de bytes bate com o cabeçalho.
   corpo, fechado normalmente — vermelho hoje pela mesma razão.
 
 ## Comments
+
+- 2026-09-20 (correção do PR #3 autorizada pelo usuário): critério 3 revisto.
+  Aceitar antes do terminador contradizia o critério 1: o servidor não pode
+  distinguir um corpo completo de um prefixo cujo próximo chunk ainda não
+  chegou. Agora tamanho menor, maior, zero com bytes e ausência de terminador
+  falham; tamanho correto com terminador passa. Os quatro casos falharam
+  antes da correção e passaram depois via `gate.ps1 -TestsOnly`.
+  A conclusão após corpo completo continua em tarefa própria; o caminho
+  `Content-Length` conserva a proteção contra cancelamento após o último byte.
 
 - 2026-09-20 (revisão de CLEAN-005): aberto pela revisão. O `break` em
   `received >= size` é consequência direta do critério 1 de CLEAN-005 como

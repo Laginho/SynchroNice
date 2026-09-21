@@ -10,6 +10,110 @@ use std::time::Duration;
 
 const TOKEN: &str = "segredo-de-teste";
 
+#[test]
+fn nome_utf8_percent_encoded_preserva_acentos_espaco_e_percentual() {
+    let (base, _items, _outbox, raiz) = sobe();
+    let response = agent()
+        .post(format!("{base}/items/file"))
+        .header("Authorization", format!("Bearer {TOKEN}"))
+        .header("X-File-Name-Utf8", "relat%C3%B3rio%20%2B%20100%25.pdf")
+        .send(b"pdf")
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 201);
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/relatório + 100%.pdf")).unwrap(),
+        b"pdf"
+    );
+}
+
+#[test]
+fn rotacionar_descarta_pendentes_e_revoga_escuta_aberta() {
+    let raiz = tempfile::tempdir().unwrap();
+    let par = Par::load_or_create(raiz.path()).unwrap();
+    let antigo = par.token();
+    let outbox = Outbox::new(raiz.path().join("outbox")).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        par.clone(),
+        Items::new(),
+        outbox.clone(),
+        None,
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+    let (tx, rx) = std::sync::mpsc::channel();
+    running.presence.on_change(move |online| {
+        if online {
+            let _ = tx.send(());
+        }
+    });
+    let listen_base = base.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        done_tx
+            .send(requisicao_crua(
+                &listen_base,
+                "GET",
+                "/listen",
+                Some(&antigo),
+            ))
+            .unwrap();
+    });
+    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    par.rotate(&outbox).unwrap();
+    let revoked = done_rx.recv_timeout(Duration::from_secs(2));
+    // Também libera a thread no código antigo, para o teste não deixá-la presa.
+    outbox.enqueue_text("segredo novo".into()).unwrap();
+    assert_eq!(
+        revoked.expect("rotação deve encerrar a escuta antiga").0,
+        401
+    );
+
+    let old_file = outbox
+        .enqueue_file("antigo.bin".into(), b"segredo antigo")
+        .unwrap();
+    par.rotate(&outbox).unwrap();
+    assert!(outbox.pending().is_empty());
+    assert!(Outbox::new(raiz.path().join("outbox"))
+        .unwrap()
+        .pending()
+        .is_empty());
+    assert_eq!(
+        requisicao_crua(
+            &base,
+            "GET",
+            &format!("/outbox/{}/file", old_file.id),
+            Some(&par.token())
+        )
+        .0,
+        404
+    );
+    outbox.enqueue_text("so o par atual".into()).unwrap();
+    let (_, body) = requisicao_crua(&base, "GET", "/listen", Some(&par.token()));
+    assert!(String::from_utf8(body).unwrap().contains("so o par atual"));
+}
+
+#[test]
+fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
+    let raiz = tempfile::tempdir().unwrap();
+    let pasta = raiz.path().join("pasta");
+    std::fs::create_dir(&pasta).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        Items::new(),
+        Outbox::new(raiz.path().join("outbox")).unwrap(),
+        None,
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+    assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b"foto"), 503);
+    running.escolher_pasta(raiz.path(), &pasta).unwrap();
+    assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b"foto"), 201);
+    assert_eq!(std::fs::read(pasta.join("foto.png")).unwrap(), b"foto");
+    assert_eq!(pc_lib::config::load_pasta(raiz.path()), Some(pasta));
+}
+
 /// Sobe o servidor em porta aleatória com token conhecido, uma Pasta e uma
 /// fila de saída temporárias, que morrem com o teste.
 fn sobe() -> (String, Items, Outbox, tempfile::TempDir) {
@@ -407,17 +511,16 @@ fn envio_interrompido_nao_deixa_arquivo_com_nome_final() {
 }
 
 #[test]
-fn envio_chunked_cortado_apos_ultimo_byte_ainda_termina() {
+fn envio_chunked_sem_terminador_falha_mesmo_com_tamanho_prometido() {
     let (base, items, _outbox, raiz) = sobe();
     let pasta = raiz.path().join("pasta");
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
 
-    // Sinal de fim é o evento file_done, como nos vizinhos que testam a
-    // mesma corrida (dois_envios_concorrentes...).
+    // O tamanho declarado não substitui o terminador do corpo HTTP.
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     items.on_new(move |item| {
         if let ItemBody::File {
-            status: FileStatus::Done,
+            status: FileStatus::Failed,
             ..
         } = &item.body
         {
@@ -441,10 +544,7 @@ fn envio_chunked_cortado_apos_ultimo_byte_ainda_termina() {
     stream
         .write_all(pedido.as_bytes())
         .expect("escreve cabeçalhos");
-    // Um único chunk, devidamente fechado (tamanho em hex + CRLF, dados,
-    // CRLF): o cliente entregou o corpo inteiro. Falta só o chunk
-    // terminador "0\r\n\r\n" que fecha formalmente o corpo chunked -- a
-    // conexão cai antes dele, como um celular que não espera a resposta.
+    // Chunk de dados completo, mas corpo HTTP incompleto.
     stream
         .write_all(format!("{:x}\r\n", corpo.len()).as_bytes())
         .expect("escreve tamanho do chunk");
@@ -453,10 +553,52 @@ fn envio_chunked_cortado_apos_ultimo_byte_ainda_termina() {
     drop(stream); // cai antes do chunk terminador
 
     rx.recv_timeout(Duration::from_secs(5))
-        .expect("o envio chunked deve terminar (file_done) mesmo sem o chunk terminador");
+        .expect("corpo sem terminador deve falhar");
 
-    let gravado = std::fs::read(pasta.join("chunked.bin")).expect("arquivo no nome final");
-    assert_eq!(gravado, corpo);
+    assert_eq!(std::fs::read_dir(pasta).unwrap().count(), 0);
+}
+
+fn chunked_com_tamanho_declarado(size: u64, expected_status: u16) {
+    let (base, items, _outbox, raiz) = sobe();
+    let addr = base.strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(stream, "POST /items/file HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {TOKEN}\r\nX-File-Name: inteiro.bin\r\nX-File-Size: {size}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n").unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(
+        response.starts_with(&format!("HTTP/1.1 {expected_status}")),
+        "{response}"
+    );
+    let pasta = raiz.path().join("pasta");
+    if expected_status == 201 {
+        assert_eq!(std::fs::read(pasta.join("inteiro.bin")).unwrap(), b"abcdef");
+    } else {
+        assert_eq!(arquivos(&items)[0].3, FileStatus::Failed);
+        assert_eq!(std::fs::read_dir(pasta).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn chunked_maior_que_tamanho_declarado_falha() {
+    chunked_com_tamanho_declarado(3, 400);
+}
+
+#[test]
+fn chunked_menor_que_tamanho_declarado_falha() {
+    chunked_com_tamanho_declarado(9, 400);
+}
+
+#[test]
+fn chunked_com_tamanho_correto_termina() {
+    chunked_com_tamanho_declarado(6, 201);
+}
+
+#[test]
+fn chunked_com_tamanho_zero_e_bytes_falha() {
+    chunked_com_tamanho_declarado(0, 400);
 }
 
 #[test]
@@ -743,7 +885,9 @@ fn rotacionar_troca_o_token_e_o_servidor_recusa_o_antigo_e_aceita_o_novo() {
 
     assert_eq!(post_texto(&base, Some(&antigo), "antes de rotacionar"), 201);
 
-    let novo = par.rotate().expect("rotaciona o token");
+    let novo = par
+        .rotate(&Outbox::new(_raiz.path().join("outbox")).unwrap())
+        .expect("rotaciona o token");
 
     assert_ne!(antigo, novo, "rotacionar deve trocar o token");
     assert_eq!(

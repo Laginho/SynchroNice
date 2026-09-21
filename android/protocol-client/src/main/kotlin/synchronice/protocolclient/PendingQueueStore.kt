@@ -57,16 +57,21 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
 
     override fun enqueue(item: PendingItem): PendingItem? {
         val stored = if (item is PendingItem.File) copyIntoPayloadDir(item) ?: return null else item
+        try {
+            persist(items + stored)
+        } catch (e: IOException) {
+            if (stored is PendingItem.File) File(stored.path).delete()
+            throw e
+        }
         items.add(stored)
-        persist()
         return stored
     }
 
     override fun dequeueFirst() {
         if (items.isEmpty()) return
+        persist(items.drop(1))
         val removed = items.removeAt(0)
         if (removed is PendingItem.File) File(removed.path).delete()
-        persist()
     }
 
     /**
@@ -112,10 +117,10 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
      * essa janela — o temporário fica na mesma pasta do arquivo final
      * justamente para o rename atômico ser sempre possível.
      */
-    private fun persist() {
+    private fun persist(nextItems: List<PendingItem>) {
         file.parentFile?.mkdirs()
         val tempFile = File(file.parentFile ?: File("."), "${file.name}.tmp")
-        tempFile.writeText(items.joinToString("") { encodeLine(it) + "\n" })
+        tempFile.writeText(nextItems.joinToString("") { encodeLine(it) + "\n" })
         Files.move(
             tempFile.toPath(),
             file.toPath(),

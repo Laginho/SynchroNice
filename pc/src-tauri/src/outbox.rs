@@ -185,11 +185,31 @@ impl Outbox {
             .clone()
     }
 
+    /// Descarta o destino antigo sem reutilizar ids. Só publica o estado
+    /// vazio depois de persistir; payloads antigos deixam de ser acessíveis.
+    pub fn clear(&self) -> io::Result<()> {
+        let mut inner = self.inner.lock().expect("fila de saída sem panic");
+        let empty = Manifest {
+            next_id: inner.manifest.next_id,
+            items: Vec::new(),
+        };
+        save_manifest(&self.dir, &empty)?;
+        for item in &inner.manifest.items {
+            let _ = std::fs::remove_file(self.file_path(item.id));
+        }
+        inner.manifest = empty;
+        Ok(())
+    }
+
     /// Bytes de um Item de arquivo ainda pendente, para a rota de download.
     /// `Err` carrega o `io::Error` original: quem chama distingue "não achou"
     /// (`ErrorKind::NotFound`) de um erro de leitura de verdade, que não pode
     /// virar 404 — o celular lê 404 como Item já resolvido, não como recusa.
     pub fn file_bytes(&self, id: u64) -> io::Result<Vec<u8>> {
+        let inner = self.inner.lock().expect("fila de saída sem panic");
+        if !inner.manifest.items.iter().any(|item| item.id == id) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
         std::fs::read(self.file_path(id))
     }
 

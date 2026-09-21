@@ -39,6 +39,153 @@ private fun tempFile(bytes: ByteArray): File =
 class ProtocolClientTest {
 
     @Test
+    fun `503 preserva texto e arquivo para retry e 401 preserva pendentes`() {
+        val dir = kotlin.io.path.createTempDirectory("service-unavailable").toFile()
+        val queue = File(dir, "pending.txt")
+        val original = File(dir, "foto.bin").apply { writeText("foto") }
+        val port = freePort()
+        var status = 503
+        val received = mutableListOf<String>()
+        val server = fakeServer(port, "/items/") { exchange ->
+            val body = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
+            if (status == 201) received.add(body)
+            exchange.sendResponseHeaders(status, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port, FilePendingQueueStore(queue))
+            sender.sendFile(original)
+            sender.sendText("texto")
+            original.delete()
+            val restored = client(port, FilePendingQueueStore(queue))
+            status = 401
+            assertEquals(401, assertFailsWith<ProtocolRejectedException> { restored.retryPending() }.code)
+            assertTrue(restored.hasPending())
+            status = 201
+            restored.retryPending()
+            assertEquals(listOf("foto", "texto"), received)
+            assertFalse(restored.hasPending())
+            // Também cobre 503 no envio imediato de texto, sem arquivo à frente.
+            status = 503
+            restored.sendText("mais tarde")
+            assertTrue(restored.hasPending())
+            status = 201
+            restored.retryPending()
+            assertEquals(listOf("foto", "texto", "mais tarde"), received)
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `texto recebido pode ser confirmado e recusa de confirmacao sobe`() {
+        val port = freePort()
+        var confirmed = false
+        var reject = false
+        val server = fakeServer(port, "/") { exchange ->
+            if (exchange.requestURI.path == "/listen") {
+                val body = if (confirmed) "" else """{"id":7,"at_ms":100,"kind":"text","text":"oi"}"""
+                val bytes = body.toByteArray()
+                exchange.sendResponseHeaders(200, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            } else {
+                assertEquals("/outbox/7/ack", exchange.requestURI.path)
+                assertEquals("POST", exchange.requestMethod)
+                assertEquals("Bearer $TOKEN", exchange.requestHeaders.getFirst("Authorization"))
+                if (!reject) confirmed = true
+                exchange.sendResponseHeaders(if (reject) 401 else 204, -1)
+                exchange.close()
+            }
+        }
+        try {
+            val receiver = client(port)
+            val item = receiver.listen().single() as Item.Text
+            receiver.acknowledgeText(item)
+            assertEquals(emptyList(), receiver.listen())
+            reject = true
+            assertEquals(401, assertFailsWith<ProtocolRejectedException> { receiver.acknowledgeText(item) }.code)
+        } finally { server.stop(0) }
+    }
+
+    @Test
+    fun `falha ao persistir enqueue nao reaparece nem remove outro Item`() {
+        val dir = kotlin.io.path.createTempDirectory("queue-failure").toFile()
+        val queue = File(dir, "pending.txt")
+        val blockedTemp = File(dir, "pending.txt.tmp").apply { mkdir() }
+        val port = freePort()
+        val sender = client(port, FilePendingQueueStore(queue))
+        try {
+            assertFailsWith<IOException> { sender.sendText("nao enfileirado") }
+            assertFalse(sender.hasPending())
+            assertTrue(blockedTemp.delete())
+            sender.sendText("enfileirado")
+            val received = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                received.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            try {
+                sender.retryPending()
+                assertEquals(listOf("enfileirado"), received)
+                assertFalse(client(port, FilePendingQueueStore(queue)).hasPending())
+            } finally { server.stop(0) }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun `falha ao persistir confirmacao preserva fila e copia do arquivo`() {
+        val dir = kotlin.io.path.createTempDirectory("dequeue-failure").toFile()
+        val queue = File(dir, "pending.txt")
+        val original = File(dir, "original.bin").apply { writeText("bytes preservados") }
+        val port = freePort()
+        val sender = client(port, FilePendingQueueStore(queue))
+        sender.sendFile(original)
+        original.delete()
+        val blockedTemp = File(dir, "pending.txt.tmp").apply { mkdir() }
+        val received = mutableListOf<String>()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            received.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            assertFailsWith<IOException> { sender.retryPending() }
+            assertTrue(sender.hasPending())
+            assertTrue(blockedTemp.delete())
+            val restored = client(port, FilePendingQueueStore(queue))
+            restored.retryPending()
+            assertFalse(restored.hasPending())
+            assertEquals(listOf("bytes preservados", "bytes preservados"), received)
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `nome de arquivo UTF8 usa cabecalho ASCII sem perder caracteres`() {
+        val dir = kotlin.io.path.createTempDirectory("utf8-name").toFile()
+        val file = File(dir, "relatório + 100%.pdf").apply { writeText("pdf") }
+        val port = freePort()
+        val names = mutableListOf<String?>()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            names.add(exchange.requestHeaders.getFirst("X-File-Name-Utf8"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            client(port).sendFile(file)
+            assertEquals(listOf<String?>("relat%C3%B3rio%20%2B%20100%25.pdf"), names)
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `envia texto com o token do Par`() {
         val port = freePort()
         val requests = mutableListOf<Pair<String?, String>>()

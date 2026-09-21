@@ -6,13 +6,13 @@
 use crate::config;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use tokio::sync::watch;
 
 #[derive(Clone)]
 pub struct Par {
     config_dir: PathBuf,
     nome_instancia: String,
-    token: Arc<Mutex<String>>,
+    token: watch::Sender<String>,
 }
 
 impl Par {
@@ -24,7 +24,7 @@ impl Par {
         Ok(Self {
             config_dir: config_dir.to_path_buf(),
             nome_instancia,
-            token: Arc::new(Mutex::new(token)),
+            token: watch::channel(token).0,
         })
     }
 
@@ -33,23 +33,25 @@ impl Par {
     }
 
     pub fn token(&self) -> String {
-        self.token.lock().expect("Par sem panic").clone()
+        self.token.borrow().clone()
     }
 
     /// Gera um token novo, grava na configuração e passa a valer
     /// imediatamente — o anterior é recusado a partir da próxima requisição
     /// que qualquer alça deste Par (inclusive a que autentica o servidor)
     /// verificar.
-    pub fn rotate(&self) -> io::Result<String> {
+    pub fn rotate(&self, outbox: &crate::outbox::Outbox) -> io::Result<String> {
         let novo = config::new_token()?;
+        // Falha fechada: nunca publica um token novo com dados do Par antigo.
+        outbox.clear()?;
         config::save_token(&self.config_dir, &novo)?;
-        *self.token.lock().expect("Par sem panic") = novo.clone();
+        self.token.send_replace(novo.clone());
         Ok(novo)
     }
 
     /// A célula de token compartilhada — o servidor autentica contra o
     /// valor atual dela, mesmo depois de uma rotação.
-    pub(crate) fn shared_token(&self) -> Arc<Mutex<String>> {
+    pub(crate) fn shared_token(&self) -> watch::Sender<String> {
         self.token.clone()
     }
 }

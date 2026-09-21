@@ -202,6 +202,14 @@ novas, dos dois eixos desta):
 
 ## Comments
 
+- 2026-09-20 (follow-up PR #3): regressões novas provaram divergência entre
+  cliente e store quando `persist()` falha no enqueue e no dequeue. Corrigido:
+  persistir primeiro, publicar a mudança em memória depois e só então apagar
+  o payload. Critério 5 parcialmente fechado: 503 preserva texto/arquivo como
+  Pendente; 401 continua explícito e conserva a fila. A interação de
+  re-pareamento e o aviso de arquivo original sumido pertencem à casca adiada.
+  Recomendações para o autor e roteiro manual: `docs/pr-3-review-follow-up.md`.
+
 - Débito humano: a escrita atômica da fila (`persist()` com temporário +
   `ATOMIC_MOVE`) não tem teste que a observe — conferir à mão que matar o app
   no meio de um `enqueue` nunca deixa `pendentes.txt` truncado.

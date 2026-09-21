@@ -6,6 +6,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -42,7 +43,7 @@ class ProtocolClient(
     /**
      * Manda um Item de texto ao PC. Ao detectar o outro lado, drena o
      * Pendente em ordem antes deste texto — nunca fura a fila. Se o PC não
-     * estiver alcançável, o texto entra no fim da fila; se o PC recusar a
+     * estiver alcançável ou responder 503, o texto entra no fim da fila; se o PC recusar a
      * requisição (ex.: token errado), lança [ProtocolRejectedException] em
      * vez de ficar Pendente, porque recusa não é indisponibilidade.
      */
@@ -121,8 +122,8 @@ class ProtocolClient(
     }
 
     private fun dequeueFirst() {
-        pending.removeAt(0)
         queueStore.dequeueFirst()
+        pending.removeAt(0)
     }
 
     private fun trySendText(text: String): SendOutcome {
@@ -132,7 +133,11 @@ class ProtocolClient(
             connection.doOutput = true
             connection.outputStream.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
-            if (code == HttpURLConnection.HTTP_CREATED) SendOutcome.Success else SendOutcome.Rejected(code)
+            when (code) {
+                HttpURLConnection.HTTP_CREATED -> SendOutcome.Success
+                HttpURLConnection.HTTP_UNAVAILABLE -> SendOutcome.Unreachable
+                else -> SendOutcome.Rejected(code)
+            }
         } catch (_: IOException) {
             SendOutcome.Unreachable
         } finally {
@@ -145,7 +150,10 @@ class ProtocolClient(
         return try {
             connection = open("/items/file", "POST")
             connection.doOutput = true
-            connection.setRequestProperty("X-File-Name", displayName)
+            connection.setRequestProperty("X-File-Name-Utf8", URLEncoder.encode(displayName, Charsets.UTF_8).replace("+", "%20"))
+            if (displayName.all { it in ' '..'~' }) {
+                connection.setRequestProperty("X-File-Name", displayName)
+            }
             val total = file.length()
             connection.setFixedLengthStreamingMode(total)
             file.inputStream().use { input ->
@@ -155,6 +163,8 @@ class ProtocolClient(
             if (code == HttpURLConnection.HTTP_CREATED) {
                 onProgress(100)
                 SendOutcome.Success
+            } else if (code == HttpURLConnection.HTTP_UNAVAILABLE) {
+                SendOutcome.Unreachable
             } else {
                 SendOutcome.Rejected(code)
             }
@@ -220,6 +230,9 @@ class ProtocolClient(
         }
         return transferred
     }
+
+    /** Confirma texto depois de o chamador aceitá-lo na Sessão. Pode repetir após falha de rede. */
+    fun acknowledgeText(item: Item.Text) = ack(item.id)
 
     private fun ack(id: Long) {
         val connection = open("/outbox/$id/ack", "POST")

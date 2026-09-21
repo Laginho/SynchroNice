@@ -8,7 +8,8 @@
 //! Protocolo (SYN-003):
 //!   POST /items/file        corpo: os bytes do arquivo, em stream
 //!   Authorization: Bearer <token>
-//!   X-File-Name: <nome>
+//!   X-File-Name-Utf8: <nome UTF-8 percent-encoded, espaço = %20>
+//!   X-File-Name: <nome ASCII>       fallback legado; '%' é literal aqui
 //!   X-File-Size: <tamanho em bytes>    (só quando o corpo vier chunked, sem
 //!                                       Content-Length; um POST comum de
 //!                                       corpo cru — o `curl` do bloco
@@ -80,11 +81,11 @@ pub const PORT: u16 = 47820;
 /// compartilha a mesma célula — rotacionar o Par já vale para a próxima
 /// requisição, sem reiniciar o servidor.
 #[derive(Clone)]
-pub struct TokenCell(Arc<Mutex<String>>);
+pub struct TokenCell(tokio::sync::watch::Sender<String>);
 
 impl From<String> for TokenCell {
     fn from(token: String) -> Self {
-        TokenCell(Arc::new(Mutex::new(token)))
+        TokenCell(tokio::sync::watch::channel(token).0)
     }
 }
 
@@ -96,7 +97,7 @@ impl From<crate::par::Par> for TokenCell {
 
 impl TokenCell {
     fn get(&self) -> String {
-        self.0.lock().expect("token sem panic").clone()
+        self.0.borrow().clone()
     }
 }
 
@@ -107,7 +108,7 @@ struct AppState {
     outbox: Outbox,
     presence: Presence,
     /// `None` até o usuário escolher a Pasta na primeira abertura do app.
-    pasta: Option<PathBuf>,
+    pasta: Arc<Mutex<Option<PathBuf>>>,
     /// Nomes finais já reservados por um envio em andamento, mas ainda não
     /// gravados na Pasta — sem isso, dois envios concorrentes do mesmo nome
     /// podem ver `exists()` igualmente falso e resolver para o mesmo destino.
@@ -186,6 +187,16 @@ pub struct Running {
     /// Alça para o sinal de presença — quem sobe o servidor usa
     /// `on_change` para avisar a janela quando o celular conecta ou some.
     pub presence: Presence,
+    pasta: Arc<Mutex<Option<PathBuf>>>,
+}
+
+impl Running {
+    /// Persiste a escolha e a aplica ao servidor que já está escutando.
+    pub fn escolher_pasta(&self, config_dir: &Path, pasta: &Path) -> io::Result<()> {
+        crate::config::save_pasta(config_dir, pasta)?;
+        *self.pasta.lock().expect("Pasta sem panic") = Some(pasta.to_path_buf());
+        Ok(())
+    }
 }
 
 /// Sobe o servidor em `addr` (porta 0 escolhe uma livre) e devolve o endereço
@@ -201,6 +212,8 @@ pub fn spawn(
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
     let presence_da_thread = presence.clone();
+    let pasta = Arc::new(Mutex::new(pasta));
+    let pasta_da_thread = pasta.clone();
 
     std::thread::Builder::new()
         .name("synchronice-http".into())
@@ -230,7 +243,7 @@ pub fn spawn(
                     items,
                     outbox,
                     presence: presence_da_thread,
-                    pasta,
+                    pasta: pasta_da_thread,
                     leases: Arc::new(Mutex::new(HashSet::new())),
                 });
                 if let Err(e) = axum::serve(listener, app).await {
@@ -242,7 +255,11 @@ pub fn spawn(
     let addr = rx
         .recv()
         .map_err(|_| io::Error::other("thread do servidor morreu antes de escutar"))??;
-    Ok(Running { addr, presence })
+    Ok(Running {
+        addr,
+        presence,
+        pasta,
+    })
 }
 
 fn router(state: AppState) -> Router {
@@ -275,33 +292,40 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     if !authorized(request.headers(), &state.token) {
         return StatusCode::UNAUTHORIZED;
     }
-    let Some(pasta) = state.pasta.clone() else {
+    let Some(pasta) = state.pasta.lock().expect("Pasta sem panic").clone() else {
         return StatusCode::SERVICE_UNAVAILABLE;
     };
-    let Some(raw_name) = request
-        .headers()
-        .get("x-file-name")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string)
-    else {
+    let raw_name = if let Some(encoded) = request.headers().get("x-file-name-utf8") {
+        encoded.to_str().ok().and_then(|name| {
+            percent_encoding::percent_decode_str(name)
+                .decode_utf8()
+                .ok()
+                .map(|s| s.into_owned())
+        })
+    } else {
+        request
+            .headers()
+            .get("x-file-name")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let Some(raw_name) = raw_name else {
         return StatusCode::BAD_REQUEST;
     };
     // Content-Length primeiro: é o tamanho real que o corpo vai entregar.
     // X-File-Size só entra para um corpo chunked, sem Content-Length (ex.:
     // um provider do Android que não sabe o tamanho de antemão).
-    let size: u64 = request
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse().ok())
-        .or_else(|| {
-            request
-                .headers()
-                .get("x-file-size")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(0);
+    let content_length = request.headers().get("content-length");
+    let declared_size = content_length.or_else(|| request.headers().get("x-file-size"));
+    let expected_size = match declared_size {
+        Some(value) => match value.to_str().ok().and_then(|v| v.parse::<u64>().ok()) {
+            Some(size) => Some(size),
+            None => return StatusCode::BAD_REQUEST,
+        },
+        None => None,
+    };
+    let fixed_length = content_length.is_some();
+    let size = expected_size.unwrap_or(0);
 
     let final_path = reserve_path(&pasta, &sanitize_file_name(&raw_name), &state.leases);
     let _lease = LeaseGuard {
@@ -350,23 +374,23 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                 return StatusCode::BAD_REQUEST;
             }
         };
+        if expected_size.is_some_and(|size| received + bytes.len() as u64 > size) {
+            return StatusCode::BAD_REQUEST;
+        }
         if let Err(e) = file.write_all(&bytes).await {
             eprintln!("falha ao gravar {temp_path:?}: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR;
         }
         received += bytes.len() as u64;
         state.items.file_progress(item.id, received);
-        if size > 0 && received >= size {
-            // Todos os bytes prometidos (X-File-Size ou Content-Length) já
-            // chegaram: não esperamos mais nada da stream. Com Content-Length
-            // isso é exatamente onde o laço já parava sozinho (o próximo
-            // stream.next() devolve None sem ir à rede); num corpo chunked,
-            // esse próximo stream.next() precisaria ler o chunk terminador,
-            // um await que de fato suspende — se a conexão cair logo depois
-            // do último byte, é aí que a future seria cancelada antes de
-            // chegarmos ao spawn abaixo. Sair do laço aqui evita esse await.
+        if fixed_length && received == size {
+            // Content-Length delimita o corpo HTTP. X-File-Size é só uma
+            // declaração: chunked precisa chegar ao terminador para concluir.
             break;
         }
+    }
+    if expected_size.is_some_and(|size| received != size) {
+        return StatusCode::BAD_REQUEST;
     }
 
     // Flush, rename e aviso de fim rodam numa tarefa própria a partir daqui,
@@ -431,6 +455,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 /// reabre para continuar escutando. A conexão viva, do início ao fim desta
 /// função, é o sinal de presença.
 async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    let mut token_changes = state.token.0.subscribe();
     if !authorized(&headers, &state.token) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -439,11 +464,18 @@ async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl I
     let itens: Vec<OutItem> = if !pendentes.is_empty() {
         pendentes
     } else {
-        match novos.recv().await {
-            Some(item) => vec![item],
-            None => Vec::new(),
+        let next = novos.recv();
+        let revoked = token_changes.changed();
+        futures_util::pin_mut!(next, revoked);
+        match futures_util::future::select(next, revoked).await {
+            futures_util::future::Either::Left((Some(item), _)) => vec![item],
+            _ => return StatusCode::UNAUTHORIZED.into_response(),
         }
     };
+
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
 
     let corpo = itens
         .iter()

@@ -59,11 +59,16 @@ fn ask_pasta_on_first_run(app: &tauri::AppHandle) {
         return;
     }
 
+    let handle = app.clone();
     app.dialog().file().pick_folder(move |pasta| {
         let Some(pasta) = pasta.and_then(|p| p.into_path().ok()) else {
             return;
         };
-        if let Err(e) = config::save_pasta(&config_dir, &pasta) {
+        let result = match handle.try_state::<server::Running>() {
+            Some(running) => running.escolher_pasta(&config_dir, &pasta),
+            None => config::save_pasta(&config_dir, &pasta),
+        };
+        if let Err(e) = result {
             eprintln!("não foi possível gravar a Pasta: {e}");
         }
     });
@@ -95,8 +100,8 @@ fn estado_par_inicial(
 /// "Parear de novo": rotaciona o token do Par e devolve o QR com o token
 /// novo — o anterior passa a ser recusado a partir desta chamada.
 #[tauri::command]
-fn parear_de_novo(par: State<'_, Par>) -> Result<String, String> {
-    par.rotate().map_err(|e| e.to_string())?;
+fn parear_de_novo(par: State<'_, Par>, outbox: State<'_, Outbox>) -> Result<String, String> {
+    par.rotate(&outbox).map_err(|e| e.to_string())?;
     Ok(qr::par_svg(
         par.nome_instancia(),
         server::PORT,
@@ -242,6 +247,7 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
                     eprintln!("não foi possível avisar a janela da presença: {e}");
                 }
             });
+            app.manage(running);
         }
         Err(e) => eprintln!("servidor HTTP não subiu em {addr}: {e}"),
     }
