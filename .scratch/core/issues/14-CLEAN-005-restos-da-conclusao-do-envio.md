@@ -1,5 +1,5 @@
 # CLEAN-005: Restos do caminho de conclusão do envio de arquivo
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -126,3 +126,23 @@ com o celular numa rede ruim, que é o cenário normal do app.
 - 2026-09-20 Foreman: o review anterior terminou sem veredito (exit 0 logo apos "Baseline round 1 green. Waiting for the remaining 11") -- ele gastou o orcamento produzindo medicao de instabilidade, que a Verification deste ticket nem pede. A medicao ja esta feita, fora da sessao de review, na propria branch `clean-005`: **12 rodadas de `gate.ps1 -TestsOnly`, 12 verdes, 0 vermelhas**, mais uma rodada do gate completo, verde. Nao rode as 12 de novo -- julgue o codigo e use esta evidencia.
 
 - 2026-09-20 Review ended at to-review (exit 0); branch clean-005 holds the review; left for a human
+
+- 2026-09-20 Foreman: terceiro review morreu esperando o gate. A ultima frase dele
+  foi "The gate re-run is still in its cargo test link step. I'll pick this up when
+  it completes" -- mas `claude -p` acaba junto com o turno, entao nao ha retomada.
+  O AGENTS.md agora proibe rodar o gate em segundo plano. Para o proximo review,
+  duas coisas ja estao feitas e **nao precisam ser refeitas**:
+  - Gate na `clean-005`: 12 rodadas de `-TestsOnly`, 12 verdes, 0 vermelhas, mais
+    o gate completo verde. Medido fora da sessao de review.
+  - O review anterior chegou a um veredito e aplicou uma correcao que **se perdeu
+    no rollback**, e que vale reaplicar: em `server.rs`, `FailGuard::drop` apaga o
+    `.part` e notifica **antes** do handle do arquivo fechar, nos tres caminhos de
+    morte. Passa hoje so porque o NTFS desta maquina tem delete com semantica
+    POSIX; a Pasta e escolhida pelo usuario e pode estar em exFAT ou em share de
+    rede, onde o nome sobrevive ate o ultimo handle fechar. Os dois eixos de
+    review acharam isso de forma independente.
+  Achados que o review anterior decidiu **nao** corrigir, para o bloco Resolution:
+  o `break` em `received >= size` faz um `X-File-Size` subestimado virar arquivo
+  truncado marcado `done` (consequencia do criterio 1 como aprovado, merece ticket
+  proprio); criterio 3 vale por construcao mas nao tem teste, e o plano aprovado
+  nao pediu; `CONTEXT.md` nao ganhou verbete para o terceiro estado do Item.

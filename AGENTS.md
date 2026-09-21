@@ -21,6 +21,12 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
 
 - Gate: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` (criado por SYN-001; roda typecheck, lint e testes de tudo que existir em `pc/` e `android/`)
 - Base branch: `main`
+- **Nunca rode o gate em segundo plano.** Chame e espere terminar, na mesma
+  chamada. A sessão do driver é `claude -p`: ela morre quando o turno acaba, e
+  não existe "eu retomo quando o gate terminar" — três reviews já morreram
+  assim, com o veredito pronto e nada commitado (ver `.scratch/run-log/`,
+  `CLEAN-001-review-2038`, `CLEAN-005-review-2124` e `-2147`). Commite o que
+  tiver antes de qualquer espera longa.
 - Runner de testes (stage 2): `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly`
   — **não chame `cargo` direto**, é negado. O driver só libera `git`, `gh`, `npx`
   e o primeiro token do gate (`powershell`) no `--allowedTools`. O
