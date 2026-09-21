@@ -1,5 +1,5 @@
 # CLEAN-005: Restos do caminho de conclusão do envio de arquivo
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -120,3 +120,5 @@ com o celular numa rede ruim, que é o cenário normal do app.
   português?" que a review de SYN-003 parqueou continua parqueada. Não é
   `Pending` porque **Pendente** no glossário é o Item parado na origem com o
   destino fora da rede — um arquivo cujos bytes já estão chegando não é isso.
+
+- 2026-09-20 Review ended at to-review (exit 0); branch clean-005 holds the review; left for a human
