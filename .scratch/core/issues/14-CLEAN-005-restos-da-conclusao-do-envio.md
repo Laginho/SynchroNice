@@ -1,5 +1,5 @@
 # CLEAN-005: Restos do caminho de conclusão do envio de arquivo
-Stage: to-review
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
