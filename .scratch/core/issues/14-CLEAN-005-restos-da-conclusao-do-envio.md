@@ -231,3 +231,14 @@ mesclada, em primeiro plano: `cargo fmt --check`, `cargo clippy -D warnings`,
 `gradle check` BUILD SUCCESSFUL — `gate: passou`. A instabilidade do teste
 concorrente que CLEAN-001 deixou em observação foi medida fora desta sessão na
 `clean-005`: 12 rodadas de `-TestsOnly`, 12 verdes, 0 vermelhas.
+
+- 2026-09-23 (revisão de CLEAN-006): **o critério 1 daqui foi revertido de
+  propósito por CLEAN-006.** Ele pedia que um corpo chunked cuja conexão cai
+  logo depois do último byte terminasse em `Done` com o arquivo no nome final;
+  CLEAN-006 mostrou que aceitar sem o chunk terminador contradiz a recusa de um
+  corpo que não bate com o `X-File-Size`, porque o servidor não sabe distinguir
+  um corpo completo de um prefixo. Hoje, chunked sem terminador é `Failed`, sem
+  `.part` e sem nome final. A proteção contra cancelamento depois do último
+  byte — que era o miolo do critério — continua viva no caminho
+  `Content-Length`. Este ticket segue `done`; a linha fica aqui para o critério
+  1 não ser lido como comportamento atual.

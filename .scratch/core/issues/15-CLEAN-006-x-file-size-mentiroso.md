@@ -1,5 +1,5 @@
 # CLEAN-006: `X-File-Size` mentiroso vira arquivo truncado marcado `done`
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -83,3 +83,80 @@ garante que o número de bytes bate com o cabeçalho.
 
 - 2026-09-23 Review ended at to-review (exit 0); branch clean-006 holds the review; left for a human
 - 2026-09-23 Foreman: o review de 11:05 perdeu o veredito porque o daemon do Gradle segurava o pipe do gate (corrigido em c414424, `org.gradle.daemon=false`). Não era pergunta ao humano; de volta a `to-review`.
+
+#### Resolution (2026-09-23)
+
+**Verdict: Approve.**
+
+**Decisão.** Os três critérios estão implementados em `post_file`
+(`pc/src-tauri/src/server.rs`) e cada um tem teste no seam HTTP real
+(`pc/src-tauri/tests/server.rs`), batendo no servidor por `TcpStream` cru:
+
+- **C1** (corpo maior que o `X-File-Size`): o guarda dentro do laço recusa
+  **antes** de gravar o pedaço que estouraria o declarado — 400, o `FailGuard`
+  marca `Failed` e apaga o `.part`. Teste
+  `chunked_maior_que_tamanho_declarado_falha`, que também assere Pasta vazia.
+- **C2** (corpo menor, fechado com terminador): o laço acaba com
+  `received != declarado` → 400, mesmo caminho de limpeza. Teste
+  `chunked_menor_que_tamanho_declarado_falha`. O caso `size: 0` com bytes tem
+  teste próprio (`chunked_com_tamanho_zero_e_bytes_falha`).
+- **C3** (exato + terminador → `Done`; sem terminador → `Failed`): o `break`
+  ficou condicionado a `fixed_length`, ou seja, só o caminho `Content-Length`
+  sai antes do fim do stream. Chunked precisa de `stream.next() == None`.
+  Testes `chunked_com_tamanho_correto_termina` e
+  `envio_chunked_sem_terminador_falha_mesmo_com_tamanho_prometido`. A proteção
+  de CLEAN-005 contra cancelamento depois do último byte segue intacta no
+  caminho `Content-Length`.
+
+**Arquivos.** `pc/src-tauri/src/server.rs` (só `post_file`) e
+`pc/src-tauri/tests/server.rs` — os dois Primary files, nada fora.
+
+**Correção pequena da revisão** (`132ddc2`): os dois
+`expected_size.is_some_and(|size| …)` sombreavam o `size` externo, que é
+`expected_size.unwrap_or(0)` com `0` significando *desconhecido* — dois `size`
+no mesmo escopo com significados diferentes. O de dentro virou `declarado`.
+Dentro dos Primary files, sem teste novo: correção pequena pelo critério
+mecânico.
+
+**Prova red-green.** A separação por commit **não existe** aqui (ver o achado
+de processo abaixo), então a revisão provou o vermelho à mão: revertendo
+cirurgicamente os três guardas de `post_file` para o comportamento
+pré-CLEAN-006 (`break` em `expected_size.is_some() && received >= size`, sem o
+guarda de estouro e sem o `received != declarado` final) e rodando
+`gate.ps1 -TestsOnly`:
+
+    test result: FAILED. 25 passed; 4 failed
+      chunked_maior_que_tamanho_declarado_falha
+      chunked_menor_que_tamanho_declarado_falha
+      chunked_com_tamanho_zero_e_bytes_falha
+      envio_chunked_sem_terminador_falha_mesmo_com_tamanho_prometido
+
+Exatamente os quatro testes desta ticket, e só eles. Com os guardas de volta,
+29 passed. Os testes chamam o servidor de verdade por HTTP, não uma cópia da
+lógica.
+
+**Gate.** `powershell -ExecutionPolicy Bypass -File .\gate.ps1` em primeiro
+plano, na branch de sessão com a correção pequena já dentro: `cargo fmt
+--check`, `cargo clippy`, `cargo test` **29 passed; 0 failed** (4 + 2 + 29 + 0
+nos alvos, unit + integração + doc), `tsc --noEmit`, `gradle check` — `gate:
+passou`.
+
+**Achados não corrigidos.**
+
+- **Processo, o único achado duro: `b13d64a` é um commit só para seis
+  correções.** O código desta ticket entrou junto com fixes de PR #3 de outros
+  tickets — `lib.rs`, `outbox.rs`, `par.rs`, `Cargo.toml`, Kotlin, docs — e
+  **sem commit de teste separado, vermelho, antes do código**. A regra que
+  sustenta o loop é a separação por `diff --stat`, e dela não sobrou nada no
+  histórico. Não é corrigível agora (o commit está mesclado e o usuário
+  autorizou esse caminho na época do PR #3); fica registrado porque o próximo
+  stage 2 não pode repetir. O vermelho em si está provado acima, à mão.
+- **Data clump `expected_size` / `fixed_length` / `size`**: três primitivos
+  para um conceito só. Não vale ticket — o conceito tem exatamente um uso.
+- **Chunked sem `X-File-Size` nenhum** não é buraco: sem terminador o hyper
+  devolve `Err` no stream e cai no 400 (foi o que o teste do terminador provou
+  ser o caminho tomado, já que ali `received == declarado`). O único resíduo é
+  o Item nascer com `size: 0` na bolha enquanto os bytes chegam — cosmético,
+  e o `file_progress` corrige o número exibido.
+- **Débito humano:** nenhum. Os três critérios são observáveis por HTTP e
+  sistema de arquivos; nada aqui exigia abrir o app.
