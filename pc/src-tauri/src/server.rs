@@ -374,7 +374,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                 return StatusCode::BAD_REQUEST;
             }
         };
-        if expected_size.is_some_and(|size| received + bytes.len() as u64 > size) {
+        if expected_size.is_some_and(|declarado| received + bytes.len() as u64 > declarado) {
             return StatusCode::BAD_REQUEST;
         }
         if let Err(e) = file.write_all(&bytes).await {
@@ -389,7 +389,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
             break;
         }
     }
-    if expected_size.is_some_and(|size| received != size) {
+    if expected_size.is_some_and(|declarado| received != declarado) {
         return StatusCode::BAD_REQUEST;
     }
 

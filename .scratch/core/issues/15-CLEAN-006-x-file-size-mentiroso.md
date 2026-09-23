@@ -1,5 +1,5 @@
 # CLEAN-006: `X-File-Size` mentiroso vira arquivo truncado marcado `done`
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
