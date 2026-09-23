@@ -22,9 +22,14 @@ Item fica no aparelho de origem e é entregue sozinho quando o destino aparecer.
 
 **Entregue** — Estado de um Item que chegou ao aparelho de destino.
 
-**Pasta** — Diretório no PC onde arquivos recebidos são gravados. Escolhida
-uma vez, no primeiro uso. Os arquivos são arquivos comuns do sistema: o app
-não gerencia sua vida depois de gravados, e sobrevivem ao fim da Sessão.
+**Pasta** — Diretório, em cada aparelho, onde arquivos recebidos são gravados.
+Por padrão `Downloads/SynchroNice`, trocável nas configurações. Os arquivos são
+arquivos comuns do sistema: o app não gerencia sua vida depois de gravados, e
+sobrevivem ao fim da Sessão.
 
 **Compartilhar** — O caminho principal de entrada no celular: a ação
 "Compartilhar" do Android com o SynchroNice como destino, sem abrir o chat.
+
+**Copiável** — Trecho do texto de um Item que o app reconhece como dado (CPF,
+CNPJ, telefone, e-mail, chave PIX aleatória) e que um toque copia. Só formatos
+que se validam; um número qualquer nunca é Copiável.

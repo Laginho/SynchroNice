@@ -1,0 +1,65 @@
+# SYN-010: PC — Pasta padrão e engrenagem
+Stage: to-implement
+Status: ready-for-agent
+Blocked by: none
+Review: agent
+
+- Primary files:
+  - pc/src-tauri/src/lib.rs (diálogo do primeiro uso, comando de trocar Pasta)
+  - pc/src-tauri/src/config.rs (Pasta padrão quando a configuração não tem uma)
+  - pc/src-tauri/src/server.rs (só onde a Pasta ausente é tratada)
+  - pc/src-tauri/tests/config.rs
+  - pc/src-tauri/tests/server.rs
+  - pc/src-tauri/capabilities/default.json (se o diálogo passar a ser chamado pela UI)
+  - pc/index.html
+  - pc/ui/main.ts
+  - pc/ui/styles.css
+
+#### What to build
+
+Spec: `.scratch/android/spec.md`, histórias 34 a 38, e as seções "Pasta" e
+"Engrenagem".
+
+O PC deixa de abrir o diálogo de Pasta no primeiro uso. Sem Pasta na
+configuração, ele usa `Downloads\SynchroNice` (a pasta Downloads do usuário no
+Windows) e cria o diretório quando precisar gravar. Um arquivo recebido no
+primeiro uso já cai lá.
+
+Um ícone de engrenagem no canto superior da janela abre um painel de
+configurações. Hoje não há cabeçalho: o painel e o ícone são o mínimo para
+isso. O painel tem:
+- **Mudar pasta…**: abre o diálogo nativo de pasta. A escolha vale para o
+  próximo arquivo sem reiniciar, pelo mesmo caminho que já atualiza o servidor
+  em execução.
+- **Desparear**: o re-pareamento que já existe (token novo, Pendentes
+  descartados, QR na tela). O botão ⟳ do composer sai, porque o Desparear o
+  substitui.
+
+A bandeja continua só com "Abrir" e "Sair".
+
+#### Acceptance criteria
+
+1. Sem Pasta gravada na configuração, a Pasta efetiva é `SynchroNice` dentro da pasta Downloads do usuário.
+2. Um arquivo recebido sem Pasta gravada é escrito nessa pasta padrão, que é criada se não existir.
+3. Nenhum diálogo de Pasta abre na inicialização.
+4. A engrenagem abre um painel com "Mudar pasta…" e "Desparear"; fechar o painel volta ao chat.
+5. "Mudar pasta…" grava a nova Pasta, e o próximo arquivo recebido vai para ela sem reiniciar o app.
+6. "Desparear" rotaciona o token, descarta os Pendentes e mostra o QR novo, como o ⟳ fazia.
+7. O botão ⟳ do composer não existe mais.
+8. O menu da bandeja continua com exatamente "Abrir" e "Sair".
+
+#### Verification
+
+    powershell -ExecutionPolicy Bypass -File .\gate.ps1
+
+Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
+
+## Tests stage 2 writes (own commit, red)
+
+- `pc/src-tauri/tests/config.rs`: Pasta efetiva sem Pasta gravada é
+  `<Downloads>/SynchroNice`. Red porque hoje o carregamento devolve "sem Pasta".
+- `pc/src-tauri/tests/server.rs`: um arquivo recebido com a configuração sem
+  Pasta é gravado na pasta padrão, que é criada. Red porque hoje o servidor sobe
+  sem Pasta e recusa ou descarta o arquivo.
+
+## Comments

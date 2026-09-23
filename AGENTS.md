@@ -71,4 +71,5 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
 - `pc/` — app Tauri (`pc/src-tauri/` Rust, `pc/ui/` HTML/TS sem framework)
 - `android/` — app Kotlin (Gradle)
 - `prototype/` — descartável, sai quando o app real existir
-- `.scratch/core/` — spec e tickets
+- `.scratch/core/` — spec e tickets do v1 (PC e cliente do protocolo)
+- `.scratch/android/` — spec e tickets do app Android, Copiáveis e engrenagem

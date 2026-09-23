@@ -20,6 +20,12 @@ produto desenhado do experimento, não um sintoma de run malfeito.
 
 ## Pendências ("Sua vez")
 
+> **Atualização 2026-09-23 (tarde):** 1 e 2 feitos (PR #3 merged em `7aa8b0f`,
+> CLEAN-006 `done`). 4 fechado pelo dono: ele abriu o app e fez a verificação
+> manual, está tudo ok. 3 resolvido pela troca de máquina: esta máquina já tem
+> o SDK (`android-37`, `local.properties` apontando para ele) e o gate passa.
+> Falta abrir os tickets da casca Android. 5: as branches locais já saíram.
+
 ### 1. Merge do PR #3
 Única coisa que a regra do repo mantém explicitamente humana. Ler antes
 `docs/pr-3-review-follow-up.md`: ele lista as seis correções de `b13d64a`, o que
