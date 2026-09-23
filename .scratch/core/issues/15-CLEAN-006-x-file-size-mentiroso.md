@@ -1,5 +1,5 @@
 # CLEAN-006: `X-File-Size` mentiroso vira arquivo truncado marcado `done`
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -82,3 +82,4 @@ garante que o número de bytes bate com o cabeçalho.
 - 2026-09-20 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: CLEAN-006 is stuck at `Status: needs-triage` — stage 1 hasn't picked how to handle a lying `X-File-Size`, and the ticket's own comments say that choice is stage 1's call, not stage 2's. It reads as three options: /  / 1. **Reject** — mismatched `X-File-Size` (too small or too large) marks the Item `Failed`, no `.part`, no renamed file. (This is what the current acceptance criteria already describe.) / 2. **Accept the real body** — trust the bytes actually received, correct the Item's recorded size instead of trusting the header. / 3. **No change** — keep trusting the header as today (i.e. don't fix CLEAN-006 at all). /  / One more thing: the last `## Comments` line in the ticket file (from the failed attempt, commit `ed1283b`) isn't a normal one-line "Attempt N failed: reason" — it's a garbled multi-paragraph dump of what looks like a previous session's full response, with newlines flattened to `/`. That's not a clean log entry; worth cleaning up regardless of which option you pick. /  / Which option do you want for CLEAN-006 — 1, 2, or 3? I'll fold the answer into the ticket, clean up that comment line, set `Stage: to-implement` with `Status` off `needs-triage`, and hand off to stage 2. /
 
 - 2026-09-23 Review ended at to-review (exit 0); branch clean-006 holds the review; left for a human
+- 2026-09-23 Foreman: o review de 11:05 perdeu o veredito porque o daemon do Gradle segurava o pipe do gate (corrigido em c414424, `org.gradle.daemon=false`). Não era pergunta ao humano; de volta a `to-review`.
