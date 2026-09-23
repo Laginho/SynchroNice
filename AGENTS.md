@@ -39,11 +39,8 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
   fmt/lint/typecheck, que é o que a prova red-before-green precisa; o gate
   completo continua sendo o portão antes de `to-review`.
 - Models: stage 2 sonnet xhigh, stage 3 opus high
-- Times (stage 1 é sempre manual, sweatshop nunca roda). Trocar de time é
-  reescrever a linha `Models:` acima — o driver lê a primeira que casar, então o
-  menu abaixo não repete a string que ele procura:
-  - Time 1 (padrão): sonnet xhigh / opus high
-  - Time 2: fable medium / fable max
+  (`sonnet` = Sonnet 5, `opus` = Opus 5.5; o driver só aceita o alias, sem
+  hífen. Stage 1 é sempre manual, o sweatshop nunca o roda.)
 
 ## Humano simulado (somente neste repo — experimento)
 
