@@ -1,5 +1,5 @@
 # SYN-006: Arrastar arquivo da bolha para outro programa
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-003
 Review: agent
@@ -35,3 +35,180 @@ Todos os critérios são manuais; descrever cada um no Resolution.
 - Nenhum teste automático viável: o comportamento é integração com o shell do Windows. Se o comando Rust tiver lógica própria (por exemplo, recusar caminho fora da Pasta), um teste unitário para ela em `pc/src-tauri/tests/`.
 
 ## Comments
+
+- 2026-09-20 (stage 2, notas para o revisor): **escopo restrito às bolhas
+  recebidas** (`.item.file` sem `.mine`) — a bolha enviada (mine) não entra.
+  Dois sinais no próprio ticket apontam pra isso: "Blocked by: SYN-003" (PC
+  recebe) e não SYN-004 (PC envia), e os critérios 1 e 5 falam do arquivo
+  "que está na Pasta" — só o recebido mora lá. O enviado vive em
+  `outbox/{id}.bin` enquanto Pendente e é apagado no `ack` (`outbox.rs`,
+  `confirm`); depois de Entregue não sobra nada no PC pra arrastar. "Bolha
+  Pendente ou em progresso não arrasta" (What to build) cobre os dois casos
+  de bolha inacabada — Pendente (enviada, `outbox`) e em progresso (recebida,
+  `done: false`) — sem implicar que a enviada arrasta depois de acabar.
+
+  Se a leitura certa fosse "toda bolha, enviada inclusa", este ticket
+  precisaria também depender de SYN-004 e reter os bytes do enviado além da
+  confirmação — mudança de contrato do Outbox que não cabe como achado
+  pequeno da revisão; voltaria pra stage 1.
+
+  Dependência nova: `tauri-plugin-drag` (crate `drag` por baixo, MIT/Apache,
+  usa a API OLE de drag-and-drop do Windows — `DoDragDrop`/`IDataObject`/
+  `IDropSource`, a mesma família que o Explorer usa). Não usei o pacote npm
+  do plugin: a janela já só fala com o Rust por `invoke()` (nenhum outro
+  plugin daqui tem contraparte JS instalada), então `main.ts` chama
+  `plugin:drag|start_drag` direto pelo `invoke` de `@tauri-apps/api/core`
+  que já é dependência, com um `Channel` só pra satisfazer a assinatura do
+  comando (o resultado do drop não tem uso na UI ainda).
+
+  `caminho_para_arrastar` (novo comando) resolve o nome pro caminho absoluto
+  e recusa se o arquivo não existir mais — `drag::resolve` (`src/drag.rs`) é
+  a única lógica própria, e a única testável automaticamente, como o
+  ticket já antecipava. O resto (`start_drag` de fato) é chamada direta pro
+  plugin, sem lógica própria pra testar.
+
+  Um único "ícone" de arrastar para os dois casos: mando o próprio caminho
+  do arquivo como `image`. Pra imagem funciona como preview real; pra PDF
+  (ou qualquer outro tipo que o WIC não decodifica) a decodificação falha
+  silenciosamente dentro do plugin (`get_drag_image` engole o erro) e o
+  drag segue sem bitmap customizado — sem crash, sem erro visível, só sem
+  preview bonito. Não fiz nada especial pra ícone de arquivo genérico.
+
+  `capabilities/default.json` ganhou `drag:default` — sem isso o `invoke`
+  do plugin cai com erro de permissão; não é um Primary file listado, mas é
+  metade obrigatória de "plugin de drag" (a outra metade é o Cargo.toml).
+
+  Os 5 critérios de aceite são só verificação manual (o próprio bloco de
+  Verification já diz isso) — nenhum tenho como provar sozinho: preciso do
+  app aberto, um celular mandando arquivo de verdade, e soltar em
+  Explorer/navegador/campo de upload de um site real. Gate completo verde
+  (fmt, clippy, cargo test com os 2 testes novos de `drag.rs`, tsc) é a
+  garantia que dá pra dar de dentro daqui.
+
+- 2026-09-20 (humano simulado, stage 3): nenhum dos 5 critérios foi
+  exercitado à mão — sem app aberto, sem celular, sem Explorer/navegador de
+  verdade. O que dá pra afirmar por inspeção do diff, do fonte dos crates
+  (`drag 2.1.1` e `tauri-plugin-drag 2.1.1` no registro local) e do gate
+  (`gate.ps1 -TestsOnly` rodado de novo aqui: 2 testes de `drag.rs` + 18 de
+  `server.rs` verdes): (a) a cadeia de `invoke` está coerente — plugin
+  registrado como `"drag"`, `drag:default` = `allow-start-drag`, os args
+  `item: [caminho]`/`image: caminho`/`options: {mode: "copy"}`/`onEvent`
+  casam com os `#[serde(untagged)]`/`camelCase` de `commands.rs`; (b) no
+  Windows o plugin monta o `IDataObject` do próprio Shell
+  (`SHCreateShellItemArrayFromIDLists` + `BindToHandler(BHID_DataObject)`)
+  e chama `DoDragDrop` com `DROPEFFECT_COPY`, então Explorer, navegador e
+  campo de upload recebem exatamente o que receberiam de um drag saído do
+  Explorer — é o argumento pelos critérios 1-3, não uma prova; (c) critério
+  4: o guard de `mousedown` checa `.enviando`, que só sai quando `done`,
+  e `file_done` só dispara depois do `rename` para o nome final
+  (`server.rs`); antes disso `resolve` também devolveria `None`, porque só
+  existe o `.part`; (d) critério 5: `caminho_para_arrastar` falha se
+  `is_file()` é falso, o `.catch` marca `.sumiu` + legenda e `start_drag`
+  nunca é chamado — a metade Rust tem teste, a metade JS é só leitura; (e)
+  o nome do Item é o `final_name` já com ` (1)`, então `resolve` acha o
+  arquivo certo mesmo com nome repetido; (f) PDF como `image`: WIC falha em
+  `read_path_to_hbitmap`, `.ok()` engole, drag segue sem preview, como o
+  stage 2 descreveu.
+
+  Dois achados para o revisor pesar, não verificados em execução: (1) o
+  drag começa no `mousedown`, sem esperar movimento, e `DropSource::
+  QueryContinueDrag` devolve `DRAGDROP_S_DROP` ao soltar o botão — um
+  clique simples numa bolha recebida vira um drop em cima do próprio
+  WebView (`dragDropEnabled` default true, `ligarDrop` escuta `drop`), o
+  que tende a chamar `send_files` e mandar o arquivo de volta pro celular;
+  (2) o `.catch` de `iniciarDrag` também pega falha do `start_drag` em si
+  (OLE, canonicalize), e rotula a bolha como "não está mais na Pasta" sem
+  ser o caso. Cosmético: `.item.file:not(.enviando) { cursor: grab }` pega
+  a bolha enviada (`.mine`), que não arrasta.
+
+  Débito humano: critério 1 — arrastar bolha de imagem recebida e soltar numa pasta do Explorer, conferir que copiou.
+  Débito humano: critério 2 — arrastar bolha de PDF e soltar no navegador, conferir que abre.
+  Débito humano: critério 3 — arrastar bolha de imagem para um campo de anexo de site real, conferir que anexa como do Explorer.
+  Débito humano: critério 4 — com um arquivo grande chegando, tentar arrastar a bolha em progresso e conferir que nada começa (e que arrasta depois de concluir).
+  Débito humano: critério 5 — apagar o arquivo da Pasta, tentar arrastar, conferir que não há drag e a legenda vira "o arquivo não está mais na Pasta".
+  Débito humano: clicar (sem arrastar) numa bolha recebida e conferir se o arquivo NÃO é reenviado ao celular (achado 1 acima).
+
+#### Resolution (2026-09-20)
+
+Verdict: Needs your call: o achado do clique era real e tinha duas metades —
+consertei as duas, mas a interação (clicar, arrastar, desistir no meio) é
+exatamente o que nenhum portão daqui enxerga, e os 5 critérios de aceite
+seguem sem uma única passada de mão humana.
+
+**Achados corrigidos aqui** (pequenos pelo critério mecânico: dentro dos
+Primary files e sem teste novo — interface está fora do teste automático por
+decisão da spec, `spec.md` "Fora de teste automático"), commits `ce52e6f` e
+`caca901`:
+
+1. ❗ **Clicar numa bolha recebida mandava o arquivo de volta pro celular**
+   (`pc/ui/main.ts`). O drag começava no `mousedown` cru; uma vez começado,
+   soltar o botão solta um arquivo, e a própria janela é alvo de drop
+   (`ligarDrop`, SYN-004). Um clique simples virava um drop em si mesma →
+   `send_files` → o arquivo que veio do celular volta pra fila do celular.
+   Duas metades, as duas consertadas: o drag agora só começa depois de 4px
+   de movimento com o botão apertado (`LIMIAR_DRAG`, o `SM_CXDRAG` do
+   Windows), e uma bandeira ligada enquanto o `start_drag` está no ar faz
+   `ligarDrop` ignorar o drop de um drag que saiu daqui — essa segunda parte
+   cobre o caso do drag de verdade em que o usuário desiste e solta em cima
+   do chat. Nenhum portão automático pega isto: o gate não abre a janela.
+2. **Falha do drag mentia sobre o arquivo** (`pc/ui/main.ts`). O `.catch`
+   cobria os dois `invoke`, então um erro do `start_drag` (OLE, janela,
+   `run_on_main_thread`) marcava a bolha com "o arquivo não está mais na
+   Pasta" — critério 5 disparando sobre um arquivo intacto. Agora só a
+   resolução do caminho marca isso, e a bolha volta ao estado anterior
+   (`desmarcarArquivoSumido`) quando o arquivo reaparece, em vez de ficar
+   cinza e mentindo enquanto arrasta normalmente.
+3. **`cursor: grab` na bolha enviada** (`pc/ui/styles.css`).
+   `.item.file:not(.enviando)` também pega `.item.file.mine`, que nunca
+   recebe `.enviando` (só `atualizarProgresso`, que é dos recebidos) e não
+   tem `mousedown` de drag: afordância de arrastar no que não arrasta,
+   contradizendo a própria decisão de escopo do stage 2. Agora
+   `:not(.mine):not(.enviando)`.
+4. **Tipo do `Channel` errado** (`pc/ui/main.ts`): `"dropped" | "cancel"`; o
+   plugin serializa `{result: "Dropped" | "Cancel", cursorPos}`
+   (`commands.rs`, `CallbackResult`). Ninguém lê o canal, então não quebrava
+   nada — mas era uma afirmação falsa sobre o protocolo, e o `tsc` não tem
+   como conferir uma chamada de plugin feita por string.
+5. **Cabeçalho de `drag.rs` impreciso**: dizia reusar "o mesmo saneamento de
+   `server::post_file`", que faz mais que sanear (o ` (1)` do
+   `reserve_path`). O nome do Item já é o `final_name`, e é isso que o
+   comentário diz agora — a garantia que faz `resolve` achar o arquivo certo
+   quando o nome se repete.
+
+**Achados não corrigidos** (fora dos critérios deste ticket; stage 1 decide
+se viram critério aqui ou ticket próprio):
+
+6. **Preâmbulo duplicado em `lib.rs`**: `caminho_para_arrastar` repete as duas
+   linhas de `read_file_bytes` (`app_config_dir` + `load_pasta`), string de
+   erro inclusa. Extrair `fn pasta(&AppHandle)` mexeria num comando que este
+   ticket não toca — refatoração fora do que o ticket toca não é de nenhum
+   stage.
+7. **`sumiu` não está no glossário** (`CONTEXT.md`, fora dos Primary files).
+   O glossário só nomeia Pendente e Entregue; a bolha ganhou um terceiro
+   estado visível sem verbete.
+8. **A chamada do plugin é uma string** (`invoke("plugin:drag|start_drag")`,
+   sem o pacote JS do plugin em `pc/package.json`). Decisão documentada pelo
+   stage 2 e coerente com o resto da janela, mas deixa nomes e formato dos
+   args fora do alcance do `tsc`. Conferi à mão contra o fonte do crate
+   (`tauri-plugin-drag 2.1.1`): `item` casa com `DragItem::Files`, `image`
+   com `drag::Image::File` pelo `untagged`, `options.mode: "copy"` com o
+   `rename_all = "camelCase"` de `DragMode`, `onEvent` com `on_event`, e
+   `drag:default` expande para `allow-start-drag`. Está certo hoje; nada
+   avisa se o plugin mudar.
+9. **O drag resolve o caminho por IPC depois do movimento**: se o usuário
+   soltar o botão antes do `caminho_para_arrastar` responder, o drag não
+   pega. Resolver o caminho quando a bolha é criada tiraria o IPC do
+   caminho crítico — decisão de stage 1, não conserto de revisão.
+
+**Prova red-green.** Commit de teste `e145628` (só `tests/drag.rs` + o
+ticket), gate de testes vermelho pelo motivo certo:
+`error[E0432]: unresolved import pc_lib::drag` — o módulo que o teste nomeia
+não existia. Com `dbebd82` (nenhum arquivo de teste tocado), verde. Gate
+completo na ponta da branch, depois dos consertos desta revisão: `cargo fmt
+--check`, `cargo clippy`, `cargo test` (24 testes: 2 de `drag.rs`, 18 de
+`server.rs`, 4 de unidade) e `tsc --noEmit` — `gate: passou`.
+
+**Verificação manual**: nenhuma. Os 5 critérios são todos de mão, e estão
+como `Débito humano:` acima, junto com o clique do achado 1.
+
+  Débito humano: arrastar uma bolha de verdade e soltar de volta em cima do chat, conferindo que o arquivo não é reenviado ao celular (o conserto 1 é a bandeira `arrastandoDaBolha`, que depende da ordem de chegada do evento de drop).

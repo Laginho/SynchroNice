@@ -24,9 +24,22 @@ tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+percent-encoding = "2"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-tokio = { version = "1", features = ["rt", "net"] }
+tokio = { version = "1", features = ["rt", "net", "fs", "io-util", "sync"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = "0.3"
+# Lista de arquivos do clipboard do Windows (Ctrl+V de arquivo copiado no
+# Explorer, CF_HDROP) — formato que a Clipboard API da web não expõe.
+clipboard-win = "5"
+# Anúncio do serviço na rede local (SYN-005): sem daemon do sistema, funciona
+# no Windows sem instalar Bonjour.
+mdns-sd = { version = "0.21", default-features = false }
+# QR de pareamento (SYN-005), renderizado como SVG.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+# Arrastar o arquivo de uma bolha para outro programa (SYN-006): drag nativo
+# do SO a partir do WebView, que a Drag and Drop API da web não faz.
+tauri-plugin-drag = "2"
 
 [dev-dependencies]
 tempfile = "3"

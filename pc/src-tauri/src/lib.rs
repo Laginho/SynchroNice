@@ -1,13 +1,50 @@
+pub mod anuncio;
 pub mod config;
+pub mod drag;
 pub mod items;
+pub mod outbox;
+pub mod par;
+pub mod qr;
 pub mod server;
 
 use items::{Item, Items};
+use outbox::{OutItem, Outbox};
+use par::Par;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_dialog::DialogExt;
+
+/// Evento que a janela escuta para desenhar (ou atualizar) a bolha de um
+/// Item mandado ao celular.
+const SENT_EVENT: &str = "enviado";
+
+/// Evento que a janela escuta para o indicador de presença: `true` enquanto
+/// há uma conexão `/listen` viva, `false` quando ela cai.
+const PRESENCE_EVENT: &str = "presenca";
+
+/// Payload do evento `enviado`: o Item mais se ele já foi confirmado pelo
+/// celular (Entregue) ou ainda está Pendente.
+#[derive(Clone, serde::Serialize)]
+struct Enviado {
+    #[serde(flatten)]
+    item: OutItem,
+    entregue: bool,
+}
+
+/// Se um Par já estava gravado antes desta abertura do app — só para decidir
+/// se a janela abre na tela de QR (SYN-005). Guardado à parte do `Par` em si
+/// porque `Par::load_or_create` sempre devolve um (cria na primeira vez).
+struct ParJaExistia(bool);
+
+/// Devolvido ao abrir a janela: se ela deve abrir na tela de QR, e o QR do
+/// Par atual, para o caso de precisar mostrá-lo.
+#[derive(serde::Serialize)]
+struct EstadoParInicial {
+    mostrar_qr: bool,
+    svg: String,
+}
 
 /// Pede a Pasta se ainda não houver uma escolhida. Não-bloqueante: `setup` roda
 /// na thread principal, onde `blocking_pick_folder` travaria o event loop.
@@ -22,11 +59,16 @@ fn ask_pasta_on_first_run(app: &tauri::AppHandle) {
         return;
     }
 
+    let handle = app.clone();
     app.dialog().file().pick_folder(move |pasta| {
         let Some(pasta) = pasta.and_then(|p| p.into_path().ok()) else {
             return;
         };
-        if let Err(e) = config::save_pasta(&config_dir, &pasta) {
+        let result = match handle.try_state::<server::Running>() {
+            Some(running) => running.escolher_pasta(&config_dir, &pasta),
+            None => config::save_pasta(&config_dir, &pasta),
+        };
+        if let Err(e) = result {
             eprintln!("não foi possível gravar a Pasta: {e}");
         }
     });
@@ -41,20 +83,135 @@ fn list_items(items: State<'_, Items>) -> Vec<Item> {
     items.snapshot()
 }
 
-/// Sobe o servidor HTTP com o token do Par e liga a lista de Itens à janela.
+/// Se a janela deve abrir na tela de QR (Par ainda não existia antes desta
+/// abertura), e o QR do Par atual — pronto se for preciso mostrá-lo depois
+/// (SYN-005).
+#[tauri::command]
+fn estado_par_inicial(
+    par: State<'_, Par>,
+    ja_existia: State<'_, ParJaExistia>,
+) -> EstadoParInicial {
+    EstadoParInicial {
+        mostrar_qr: !ja_existia.0,
+        svg: qr::par_svg(par.nome_instancia(), server::PORT, &par.token()),
+    }
+}
+
+/// "Parear de novo": rotaciona o token do Par e devolve o QR com o token
+/// novo — o anterior passa a ser recusado a partir desta chamada.
+#[tauri::command]
+fn parear_de_novo(par: State<'_, Par>, outbox: State<'_, Outbox>) -> Result<String, String> {
+    par.rotate(&outbox).map_err(|e| e.to_string())?;
+    Ok(qr::par_svg(
+        par.nome_instancia(),
+        server::PORT,
+        &par.token(),
+    ))
+}
+
+/// Bytes de um arquivo já gravado na Pasta, para a miniatura de imagem na
+/// bolha. `name` é o nome final do Item (já saneado ao gravar); saneado de
+/// novo aqui para nunca ler fora da Pasta.
+#[tauri::command]
+fn read_file_bytes(app: tauri::AppHandle, name: String) -> Result<Vec<u8>, String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let pasta = config::load_pasta(&config_dir).ok_or("a Pasta ainda não foi escolhida")?;
+    std::fs::read(pasta.join(server::sanitize_file_name(&name))).map_err(|e| e.to_string())
+}
+
+/// Caminho absoluto do arquivo de uma bolha recebida, para o drag nativo do
+/// SO (SYN-006). Erro se a Pasta ainda não foi escolhida ou o arquivo não
+/// está mais lá — a janela então não chama o drag e marca a bolha como
+/// sumida, em vez de arrastar um caminho que não existe.
+#[tauri::command]
+fn caminho_para_arrastar(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let pasta = config::load_pasta(&config_dir).ok_or("a Pasta ainda não foi escolhida")?;
+    drag::resolve(&pasta, &name)
+        .and_then(|caminho| caminho.to_str().map(str::to_string))
+        .ok_or_else(|| "o arquivo não está mais na Pasta".to_string())
+}
+
+/// Enter no composer: enfileira o texto para o celular.
+#[tauri::command]
+fn send_text(outbox: State<'_, Outbox>, text: String) -> Result<(), String> {
+    outbox
+        .enqueue_text(text)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Drop de arquivo na janela, ou Ctrl+V de arquivos copiados no Explorer:
+/// `paths` são caminhos no disco do PC, um Item por caminho (nunca
+/// agrupados, spec "Enviar do PC").
+#[tauri::command]
+fn send_files(outbox: State<'_, Outbox>, paths: Vec<String>) -> Result<(), String> {
+    for caminho in paths {
+        let bytes = std::fs::read(&caminho).map_err(|e| e.to_string())?;
+        let nome = std::path::Path::new(&caminho)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("arquivo")
+            .to_string();
+        outbox
+            .enqueue_file(nome, &bytes)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Ctrl+V com uma imagem no clipboard: `bytes` já é o PNG, lido no lado
+/// TypeScript pela Clipboard API do WebView2 — sem caminho no disco, ao
+/// contrário de `send_files`.
+#[tauri::command]
+fn send_bytes(outbox: State<'_, Outbox>, name: String, bytes: Vec<u8>) -> Result<(), String> {
+    outbox
+        .enqueue_file(name, &bytes)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Lista de caminhos de arquivo do clipboard do Windows (Ctrl+C num arquivo
+/// no Explorer) — formato `CF_HDROP`, que a Clipboard API da web não expõe.
+#[tauri::command]
+fn read_clipboard_file_list() -> Result<Vec<String>, String> {
+    clipboard_win::get_clipboard(clipboard_win::formats::FileList).map_err(|e| e.to_string())
+}
+
+/// Sobe o servidor HTTP com o token do Par, anuncia o serviço por mDNS, liga
+/// a lista de Itens e a fila de saída à janela, e disponibiliza a fila para
+/// os comandos de envio.
 fn start_server(app: &tauri::AppHandle, items: Items) {
-    let token = app
-        .path()
-        .app_config_dir()
-        .map_err(std::io::Error::other)
-        .and_then(|dir| config::load_or_create_token(&dir));
-    let token = match token {
-        Ok(token) => token,
+    let config_dir = match app.path().app_config_dir() {
+        Ok(dir) => dir,
         Err(e) => {
-            eprintln!("sem token do Par, o servidor não sobe: {e}");
+            eprintln!("sem diretório de configuração, o servidor não sobe: {e}");
             return;
         }
     };
+    let par_ja_existia = config::par_ja_existe(&config_dir);
+    let par = match Par::load_or_create(&config_dir) {
+        Ok(par) => par,
+        Err(e) => {
+            eprintln!("sem Par, o servidor não sobe: {e}");
+            return;
+        }
+    };
+    app.manage(par.clone());
+    app.manage(ParJaExistia(par_ja_existia));
+
+    // `None` se a Pasta ainda não foi escolhida: o servidor sobe do mesmo
+    // jeito (texto funciona), e a rota de arquivo devolve 503 até a escolha.
+    let pasta = config::load_pasta(&config_dir);
+
+    let outbox = match Outbox::new(config_dir.join("outbox")) {
+        Ok(outbox) => outbox,
+        Err(e) => {
+            eprintln!("sem fila de saída, o servidor não sobe: {e}");
+            return;
+        }
+    };
+    app.manage(outbox.clone());
 
     let handle = app.clone();
     items.on_new(move |item| {
@@ -63,9 +220,35 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
         }
     });
 
+    let handle = app.clone();
+    outbox.on_change(move |item, entregue| {
+        let payload = Enviado {
+            item: item.clone(),
+            entregue,
+        };
+        if let Err(e) = handle.emit(SENT_EVENT, payload) {
+            eprintln!("não foi possível avisar a janela do envio {}: {e}", item.id);
+        }
+    });
+
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], server::PORT));
-    match server::spawn(addr, token, items) {
-        Ok(running) => println!("servidor HTTP em {}", running.addr),
+    match server::spawn(addr, par.clone(), items, outbox, pasta) {
+        Ok(running) => {
+            println!("servidor HTTP em {}", running.addr);
+            match anuncio::Anuncio::subir(par.nome_instancia(), server::PORT) {
+                Ok(anuncio) => {
+                    app.manage(anuncio);
+                }
+                Err(e) => eprintln!("não foi possível anunciar o serviço por mDNS: {e}"),
+            }
+            let handle = app.clone();
+            running.presence.on_change(move |online| {
+                if let Err(e) = handle.emit(PRESENCE_EVENT, online) {
+                    eprintln!("não foi possível avisar a janela da presença: {e}");
+                }
+            });
+            app.manage(running);
+        }
         Err(e) => eprintln!("servidor HTTP não subiu em {addr}: {e}"),
     }
 }
@@ -102,8 +285,19 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_drag::init())
         .manage(Items::new())
-        .invoke_handler(tauri::generate_handler![list_items])
+        .invoke_handler(tauri::generate_handler![
+            list_items,
+            estado_par_inicial,
+            parear_de_novo,
+            read_file_bytes,
+            send_text,
+            send_files,
+            send_bytes,
+            read_clipboard_file_list,
+            caminho_para_arrastar
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             start_server(&handle, app.state::<Items>().inner().clone());
