@@ -135,7 +135,10 @@ fn arquivo_sem_pasta_configurada_e_gravado_em_downloads_synchronice_criada_se_pr
 
     assert_eq!(post_arquivo(&base, Some(TOKEN), "primeiro.bin", bytes), 201);
     assert_eq!(std::fs::read(pasta.join("primeiro.bin")).unwrap(), bytes);
-    assert!(pasta.is_dir(), "o destino padrão é criado no primeiro arquivo");
+    assert!(
+        pasta.is_dir(),
+        "o destino padrão é criado no primeiro arquivo"
+    );
     assert_eq!(pc_lib::config::load_pasta(config_dir.path()), None);
 }
 
