@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -61,6 +61,10 @@ Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
 - `pc/src-tauri/tests/server.rs`: um arquivo recebido com a configuração sem
   Pasta é gravado na pasta padrão, que é criada. Red porque hoje o servidor sobe
   sem Pasta e recusa ou descarta o arquivo.
+- `pc/src-tauri/tests/server.rs`: depois de receber arquivos de mesmo nome em
+  Pastas diferentes, cada id de Item continua resolvendo para seu próprio
+  caminho e conteúdo. Red porque a UI hoje procura ambos pelo nome na Pasta
+  atual.
 
 ## Comments
 
