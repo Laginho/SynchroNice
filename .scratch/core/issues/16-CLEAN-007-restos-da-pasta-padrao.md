@@ -1,11 +1,11 @@
 # CLEAN-007: Restos da Pasta padrão (SYN-010)
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
 
 - Primary files:
-  - pc/src-tauri/src/lib.rs (só `start_server`)
+  - pc/src-tauri/src/lib.rs (só `start_server` e a linha `pub mod drag`, que sai)
   - pc/src-tauri/src/drag.rs (sai)
   - pc/src-tauri/tests/drag.rs (sai)
 
@@ -62,3 +62,5 @@ item 2 é deleção. Diga isso no commit.
 ## Comments
 
 - 2026-09-24 Attempt 1 stopped to ask: `CLEAN-007` está em `blocked` na branch `clean-007`, commit `71029fb`. /  / O critério 3 exige remover `pub mod drag` de `lib.rs`, mas o escopo aprovado limita alterações nesse arquivo a `start_server`. Registrei a pergunta no [ticket](D:/Desktop/Projects/SynchroNice/.scratch/core/issues/16-CLEAN-007-restos-da-pasta-padrao.md:2). Não há proxy disponível neste runtime, então o fluxo exige parar até o escopo ser ajustado no stage 1. /  / Nenhum código foi alterado; não rodei o gate. A inspeção inicial do Computer Use não encontrou apps abertos.
+
+- 2026-09-24 Proxy decided: o escopo de `lib.rs` passa a ser `start_server` e a linha `pub mod drag` (dobrado em Primary files acima) — o critério 3 já exigia que `lib.rs` não declarasse `mod drag`, e sem tirar a linha o item 2 não compila depois de apagar `drag.rs`; a restrição "só `start_server`" era deslize do stage 1, não decisão. Nada mais em `lib.rs` referencia o módulo (`tauri_plugin_drag::init()` é o plugin, que fica, conforme o critério 3). A branch `clean-007` não existe mais como ref; o commit `71029fb` citado acima era só o ticket, sem código, então o stage 2 recomeça de `main` sem perder nada.
