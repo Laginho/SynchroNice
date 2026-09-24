@@ -1,5 +1,5 @@
 # SYN-011: PC — Copiáveis
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-010
 Review: agent
@@ -82,3 +82,19 @@ Critérios 4 a 8 são de tela: verificação manual abrindo o app.
   de acessibilidade, mas a captura visual e o clique falharam novamente com os
   mesmos erros. O débito visual acima permanece. A validação de e-mail e UUID
   passou a usar os mesmos padrões da busca de candidatos, eliminando duplicação.
+
+#### Resolution (2026-09-24)
+Verdict: Approve
+
+PR #5 integrado em `main` por `ab76d7b`. Os oito critérios numerados foram
+atendidos por inspeção de código e pelos casos compartilhados. O commit
+`dc19ef6` contém só testes, casos e gate e falhou pela ausência do módulo;
+os commits de implementação não alteraram testes. Após a implementação, o gate
+passou com 39 testes Rust, 20 casos Node, `tsc --noEmit` e `gradle check`.
+
+Arquivos: `testdata/copiaveis.json`, `pc/ui/copiaveis.ts`,
+`pc/ui/copiaveis.test.ts`, `pc/ui/main.ts`, `pc/ui/styles.css`, `pc/index.html`
+e `gate.ps1`. A revisão removeu a duplicação dos padrões de e-mail e UUID.
+O débito visual dos critérios 4–8 registrado acima permanece; o Computer Use
+reproduziu a falha de captura e não conseguiu clicar no painel. O PR não tinha
+checks de CI configurados.
