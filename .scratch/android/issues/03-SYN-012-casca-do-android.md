@@ -11,6 +11,7 @@ Review: agent
   - android/gradle/wrapper/gradle-wrapper.properties (se o plugin Android exigir Gradle mais novo)
   - android/protocol-client/src/main/kotlin/** (só leitura do conteúdo do QR para o Par, se ainda não existir)
   - android/protocol-client/src/test/kotlin/**
+  - android/protocol-client/build.gradle.kts (só o bloco `plugins`: alinhar o Kotlin JVM à versão que o AGP escolhido traz; o módulo continua JVM puro, sem plugin Android)
   - gate.ps1 (só se o `check` do módulo Android precisar de tarefas explícitas)
   - .gitignore
 
@@ -38,9 +39,20 @@ confirmados ao aparecer. O composer tem campo e botão de enviar; o texto vira
 bolha à direita, Pendente até o PC confirmar e depois Entregue. O chat vazio
 diz o que fazer. O chat é memória do processo: some quando o Android mata o app.
 
-Build: o SDK da máquina só tem a plataforma `android-37`. Subir o Gradle e
-escolher o plugin Android que aceite essa plataforma faz parte deste ticket. O
-gate continua passando, com os testes JVM do módulo cliente inclusos.
+Build: a plataforma alvo é `android-37`. Subir o Gradle e escolher o plugin
+Android que aceite essa plataforma faz parte deste ticket; o AGP que a aceita
+traz o Kotlin Gradle Plugin embutido, então a versão do `kotlin("jvm")` do
+módulo cliente é ditada por ele (declarada uma vez, no `build.gradle.kts` da
+raiz com `apply false`, ou igualada no módulo — a que der o diff menor). O gate
+continua passando, com os testes JVM do módulo cliente inclusos.
+
+**Premissa aberta (ver `Proxy escalated` em `## Comments`):** o parágrafo acima
+supunha o SDK presente. Nesta máquina ele **não existe** (sem
+`android/local.properties`, sem `%LOCALAPPDATA%\Android\Sdk`, sem
+`ANDROID_HOME`/`ANDROID_SDK_ROOT`; só o Android Studio, sem SDK baixado). O
+`HANDOFF.md` que dizia "esta máquina já tem o SDK" falava de outra máquina.
+Enquanto o humano não decidir onde o app compila, este ticket fica `blocked`;
+nenhum stage instala o SDK.
 
 #### Acceptance criteria
 
@@ -77,3 +89,7 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.
 
 - 2026-09-24 Attempt 3 stopped to ask: ## SYN-012 bloqueado /  / Implementei o parser validado do QR e a casca Android com câmera CameraX/ZXing, descoberta mDNS e chat. Os commits na branch `syn-012` são `6b6f3b4` (testes) e `eb57837` (implementação parcial). /  / O ticket está em `Stage: blocked`, registrado em [SYN-012](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/03-SYN-012-casca-do-android.md). O gate confirmou o vermelho inicial esperado; depois, parou na configuração do Gradle, antes de compilar: o AGP compatível com API 37 traz Kotlin Gradle Plugin 2.2.10, mas `protocol-client` fixa 2.0.21. Corrigir isso exige incluir `android/protocol-client/build.gradle.kts` no escopo do ticket. A documentação oficial confirma que AGP 9.2 suporta API 37 e requer Gradle 9.4.1. ([AGP 9.2](https://developer.android.com/build/releases/agp-9-2-0-release-notes)) /  / Também não encontrei o Android SDK nesta máquina; a decisão anterior registrada no `HANDOFF.md` foi não instalá-lo. Sem o SDK, não consegui compilar o app nem fazer a verificação visual; o Computer Use não listou aplicativos disponíveis. /  / Para retomar, falta definir o escopo do arquivo de build do cliente e fornecer o caminho do SDK ou autorizar sua instalação. O gate completo e os fluxos no aparelho continuam sem validação.
+
+- 2026-09-24 Proxy decided: `android/protocol-client/build.gradle.kts` entra nos Primary files, só o bloco `plugins` (dobrado acima; o parágrafo "Build" do corpo diz como) — o AGP 9.x traz o KGP embutido no classpath e o Gradle recusa o `kotlin("jvm") version "2.0.21"` do módulo; alinhar a versão é mudança de build, reversível, sem tocar no código nem nos 7 testes do módulo, que são justamente a rede de segurança para a troca de Kotlin. Manter 2.0.21 não é opção com esse AGP.
+
+- 2026-09-24 Proxy escalated: **não há Android SDK nesta máquina, e instalar é decisão do humano de verdade** — registrada em SYN-007 (`## Comments`, 2026-09-20: "1–2 GB de SDK é mudança na máquina, não no repo, e essa decisão fica com o humano de verdade") e reafirmada no `HANDOFF.md` item 3. Sem SDK o `:app` não compila, o critério 2 não fecha e o stage 3 não teria como verificar 1000+ linhas de Kotlin/Compose nunca compiladas; mergear isso às cegas é o caso "caro de desfazer". Verifiquei de novo hoje: `android/local.properties`, `%LOCALAPPDATA%\Android\Sdk`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` e `sdkmanager` ausentes; `C:\Program Files\Android` só tem o Android Studio. O que o humano precisa decidir, uma das três: (1) instalar o SDK aqui (plataforma 37 + build-tools, via Android Studio ou cmdline-tools) e criar `android/local.properties`; (2) mover o build Android para outra máquina ou para CI (o repo é GitHub e não tem workflow ainda; os runners do Actions vêm com o SDK) — isso muda o contrato do gate e é stage 1; (3) parar este ticket até lá. Nada foi instalado nem autorizado. O trabalho do stage 2 sobrevive só como commits sem ref (`6b6f3b4` testes, `eb57837` implementação, base `61e8da2`, anterior ao merge do SYN-011): quem retomar faz `git branch syn-012 eb57837` e rebase em `main` antes de continuar; a branch `syn-012` em si já não existe.
