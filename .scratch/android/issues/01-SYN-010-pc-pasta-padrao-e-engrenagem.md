@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -43,7 +43,7 @@ A bandeja continua só com "Abrir" e "Sair".
 2. Um arquivo recebido sem Pasta gravada é escrito nessa pasta padrão, que é criada se não existir.
 3. Nenhum diálogo de Pasta abre na inicialização.
 4. A engrenagem abre um painel com "Mudar pasta…" e "Desparear"; fechar o painel volta ao chat.
-5. "Mudar pasta…" grava a nova Pasta, e o próximo arquivo recebido vai para ela sem reiniciar o app.
+5. ❌ "Mudar pasta…" grava a nova Pasta, e o próximo arquivo recebido vai para ela sem reiniciar o app. O arquivo dos Itens já recebidos precisa continuar acessível na Pasta original: hoje a bolha passa a resolver seu nome na Pasta nova e pode arrastar outro arquivo com o mesmo nome.
 6. "Desparear" rotaciona o token, descarta os Pendentes e mostra o QR novo, como o ⟳ fazia.
 7. O botão ⟳ do composer não existe mais.
 8. O menu da bandeja continua com exatamente "Abrir" e "Sair".
@@ -71,3 +71,11 @@ Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
 - 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.
 - Débito humano: inspeção visual do chat, painel, seletor nativo, tela inicial sem diálogo e menu da bandeja. O Computer Use falhou ao capturar a janela: `SetIsBorderRequired failed: No such interface supported`.
 - 2026-09-24 Inspeção: app encerrado e entrada de autostart removida. A revisão automática bloqueou a exclusão das pastas geradas nesta execução: `%APPDATA%\dev.synchronice.pc`, `%LOCALAPPDATA%\dev.synchronice.pc` e `%TEMP%\SynchroNice-SYN-010`; a limpeza manual ainda é necessária.
+
+#### Review (2026-09-24)
+
+Verdict: Reopen: o critério 5 exige guardar a Pasta de cada Item recebido para que trocar a Pasta afete apenas os próximos arquivos.
+
+- Standards: nenhum achado acionável.
+- Spec: o servidor grava o próximo arquivo na Pasta nova, mas `read_file_bytes` e `caminho_para_arrastar` procuram todos os Itens recebidos na Pasta atual. Uma bolha antiga perde a miniatura/arraste, ou aponta para outro arquivo se houver um nome igual. Reabrir para teste de regressão antes do código, no seam de `pc/src-tauri/tests/server.rs`, cobrindo mesmo nome em Pastas diferentes e resolução pelo id do Item. A correção pode ficar nos arquivos primários existentes (`server.rs`, `lib.rs`, `main.ts` e teste).
+- Gate: passou (`cargo fmt --check`, `cargo clippy`, 37 testes Rust, `tsc --noEmit`, `gradle check`). A inspeção visual permanece como débito humano registrado acima.
