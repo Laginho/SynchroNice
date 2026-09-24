@@ -7,6 +7,17 @@ fn ausencia_de_config_devolve_nao_escolhida() {
 }
 
 #[test]
+fn pasta_efetiva_sem_escolha_fica_em_synchronice_dentro_de_downloads() {
+    let config_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+
+    assert_eq!(
+        config::pasta_efetiva(config_dir.path(), downloads.path()),
+        downloads.path().join("SynchroNice")
+    );
+}
+
+#[test]
 fn grava_e_rele_o_caminho_da_pasta() {
     let dir = tempfile::tempdir().unwrap();
     let pasta = dir.path().join("Pasta SynchroNice");

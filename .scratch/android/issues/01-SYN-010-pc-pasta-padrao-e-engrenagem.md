@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
