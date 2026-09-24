@@ -29,13 +29,16 @@ body {
 #frame {
   position: absolute;
   inset: 0;
+  padding-top: 44px;
   background: var(--bg);
   display: flex;
   flex-direction: column;
 }
 .chat-header {
-  position: relative;
-  z-index: 1;
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  height: 44px;
   display: flex;
   justify-content: flex-end;
   padding: 8px 12px 0;

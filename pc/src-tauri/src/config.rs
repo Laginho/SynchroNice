@@ -35,7 +35,7 @@ pub fn load_pasta(config_dir: &Path) -> Option<PathBuf> {
 }
 
 /// A Pasta gravada, ou `SynchroNice` dentro de Downloads quando ainda não há
-/// uma preferência. O chamador resolve Downloads pela plataforma.
+/// uma preferência. O diretório de Downloads só é resolvido quando necessário.
 pub fn pasta_efetiva<E>(
     config_dir: &Path,
     downloads_dir: impl FnOnce() -> Result<PathBuf, E>,

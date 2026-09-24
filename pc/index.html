@@ -8,29 +8,29 @@
     <script type="module" src="/ui/main.ts"></script>
   </head>
   <body>
+    <header class="chat-header">
+      <button
+        id="settings-toggle"
+        class="settings-toggle"
+        type="button"
+        aria-label="Configurações"
+        aria-expanded="false"
+        aria-controls="settings-panel"
+        title="Configurações"
+      >
+        ⚙
+      </button>
+      <div id="settings-panel" class="settings-panel" aria-label="Configurações" hidden>
+        <button id="change-folder" type="button">Mudar pasta…</button>
+        <button id="unpair" type="button">Desparear</button>
+      </div>
+    </header>
     <div id="qr-screen" hidden>
       <div class="qr-svg"></div>
       <b>Escaneie no celular</b>
       <span>Abra o SynchroNice no celular e aponte a câmera para o QR.</span>
     </div>
     <div id="frame" hidden>
-      <header class="chat-header">
-        <button
-          id="settings-toggle"
-          class="settings-toggle"
-          type="button"
-          aria-label="Configurações"
-          aria-expanded="false"
-          aria-controls="settings-panel"
-          title="Configurações"
-        >
-          ⚙
-        </button>
-        <div id="settings-panel" class="settings-panel" aria-label="Configurações" hidden>
-          <button id="change-folder" type="button">Mudar pasta…</button>
-          <button id="unpair" type="button">Desparear</button>
-        </div>
-      </header>
       <div class="scroll">
         <div class="empty">
           <b>Nada aqui ainda</b>

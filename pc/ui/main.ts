@@ -420,7 +420,7 @@ function mostrarChat(): void {
   document.querySelector<HTMLElement>("#frame")!.hidden = false;
 }
 
-/** Abre as configurações da Pasta e do Par no cabeçalho do chat. */
+/** Abre as configurações da Pasta e do Par no cabeçalho da janela. */
 function ligarConfiguracoes(): void {
   const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
   const panel = document.querySelector<HTMLElement>("#settings-panel")!;

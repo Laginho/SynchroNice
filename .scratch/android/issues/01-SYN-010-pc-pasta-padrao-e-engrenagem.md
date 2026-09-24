@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -78,6 +78,7 @@ Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
 - 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.
 - Débito humano: inspeção visual do chat, painel, seletor nativo, tela inicial sem diálogo e menu da bandeja. O Computer Use falhou ao capturar a janela: `SetIsBorderRequired failed: No such interface supported`.
 - 2026-09-24 Inspeção: app encerrado e entrada de autostart removida. A revisão automática bloqueou a exclusão das pastas geradas nesta execução: `%APPDATA%\dev.synchronice.pc`, `%LOCALAPPDATA%\dev.synchronice.pc` e `%TEMP%\SynchroNice-SYN-010`; a limpeza manual ainda é necessária.
+- Débito humano: confirmar visualmente a engrenagem e o painel sobre a tela de QR e no chat após mover o cabeçalho; esta rodada não abriu o app.
 
 #### Review (2026-09-24)
 
