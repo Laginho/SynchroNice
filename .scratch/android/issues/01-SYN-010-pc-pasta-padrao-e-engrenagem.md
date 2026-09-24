@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -67,3 +67,5 @@ Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
 - 2026-09-24 Attempt 1 failed: exit 0. Log tail: Parei no guard de modelo do `ticket-flow`. O SYN-010 está em `Stage: to-implement` e o binding do repo atribui a implementação ao **gpt-6-luna max**. Este runtime está identificado apenas como Codex/GPT-6, então não consigo confirmar que corresponda ao modelo exigido. /  / A árvore está limpa na branch `sweatshop/2026-09-24-1506`. Não fiz alterações. O ticket está em [01-SYN-010-pc-pasta-padrao-e-engrenagem.md](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/01-SYN-010-pc-pasta-padrao-e-engrenagem.md).
 
 - 2026-09-24 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: O `SYN-010` está em `Stage: to-implement`, na branch de sessão `sweatshop/2026-09-24-1506`. O binding do repositório reserva a implementação para **gpt-6-luna max**; este runtime só está identificado como GPT-6, então o guard do `ticket-flow` exige parar sem implementar. /  / A árvore segue limpa e não rodei testes. Para avançar, execute o ticket com o modelo indicado.
+
+- 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.
