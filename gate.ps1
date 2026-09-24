@@ -38,6 +38,10 @@ if ((Test-Path "$root/pc/ui") -and (-not $TestsOnly)) {
     Run-Step "tsc --noEmit (pc/ui)" "$root/pc" { npx tsc --noEmit }
 }
 
+if (Test-Path "$root/pc/ui/copiaveis.test.ts") {
+    Run-Step "node --test (pc/ui)" "$root" { node --test pc/ui/copiaveis.test.ts }
+}
+
 # Ancorado no settings, nao na pasta: o wrapper do Gradle entra antes do modulo,
 # e uma pasta android/ so com wrapper nao tem o que testar -- gradle falharia e
 # levaria o gate junto.
