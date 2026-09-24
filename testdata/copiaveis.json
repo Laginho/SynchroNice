@@ -1,0 +1,213 @@
+{
+  "cases": [
+    {
+      "name": "número comum não é copiável",
+      "input": "Tenho 150 itens.",
+      "expected": [{ "type": "text", "text": "Tenho 150 itens." }]
+    },
+    {
+      "name": "CPF válido com pontuação preserva cópia simples e formatada",
+      "input": "CPF: 529.982.247-25",
+      "expected": [
+        { "type": "text", "text": "CPF: " },
+        {
+          "type": "copyable",
+          "kind": "cpf",
+          "text": "529.982.247-25",
+          "copyPlain": "52998224725",
+          "copyFormatted": "529.982.247-25"
+        }
+      ]
+    },
+    {
+      "name": "CPF válido sem pontuação é exibido formatado",
+      "input": "52998224725",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "cpf",
+          "text": "529.982.247-25",
+          "copyPlain": "52998224725",
+          "copyFormatted": "529.982.247-25"
+        }
+      ]
+    },
+    {
+      "name": "CPF com dígitos verificadores inválidos não é copiável",
+      "input": "CPF 529.982.247-24",
+      "expected": [{ "type": "text", "text": "CPF 529.982.247-24" }]
+    },
+    {
+      "name": "CPF com dígitos repetidos não é copiável",
+      "input": "111.111.111-11",
+      "expected": [{ "type": "text", "text": "111.111.111-11" }]
+    },
+    {
+      "name": "CNPJ válido preserva cópia simples e formatada",
+      "input": "CNPJ: 11.222.333/0001-81",
+      "expected": [
+        { "type": "text", "text": "CNPJ: " },
+        {
+          "type": "copyable",
+          "kind": "cnpj",
+          "text": "11.222.333/0001-81",
+          "copyPlain": "11222333000181",
+          "copyFormatted": "11.222.333/0001-81"
+        }
+      ]
+    },
+    {
+      "name": "CNPJ com dígito verificador inválido não é copiável",
+      "input": "11.222.333/0001-80",
+      "expected": [{ "type": "text", "text": "11.222.333/0001-80" }]
+    },
+    {
+      "name": "celular local sem pontuação é exibido formatado",
+      "input": "11912345678",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "mobile",
+          "text": "(11) 91234-5678",
+          "copyPlain": "11912345678",
+          "copyFormatted": "(11) 91234-5678"
+        }
+      ]
+    },
+    {
+      "name": "celular local com pontuação permanece formatado",
+      "input": "(11) 91234-5678",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "mobile",
+          "text": "(11) 91234-5678",
+          "copyPlain": "11912345678",
+          "copyFormatted": "(11) 91234-5678"
+        }
+      ]
+    },
+    {
+      "name": "celular com +55 e pontuação exibe formato local",
+      "input": "+55 (11) 91234-5678",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "mobile",
+          "text": "(11) 91234-5678",
+          "copyPlain": "11912345678",
+          "copyFormatted": "(11) 91234-5678"
+        }
+      ]
+    },
+    {
+      "name": "celular com +55 sem pontuação exibe formato local",
+      "input": "+5511912345678",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "mobile",
+          "text": "(11) 91234-5678",
+          "copyPlain": "11912345678",
+          "copyFormatted": "(11) 91234-5678"
+        }
+      ]
+    },
+    {
+      "name": "celular com +55 separado por espaços",
+      "input": "+55 11 912345678",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "mobile",
+          "text": "(11) 91234-5678",
+          "copyPlain": "11912345678",
+          "copyFormatted": "(11) 91234-5678"
+        }
+      ]
+    },
+    {
+      "name": "telefone fixo é exibido formatado",
+      "input": "Fixo: 11 3456-7890",
+      "expected": [
+        { "type": "text", "text": "Fixo: " },
+        {
+          "type": "copyable",
+          "kind": "landline",
+          "text": "(11) 3456-7890",
+          "copyPlain": "1134567890",
+          "copyFormatted": "(11) 3456-7890"
+        }
+      ]
+    },
+    {
+      "name": "celular vence a colisão com CPF válido",
+      "input": "11912345689",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "mobile",
+          "text": "(11) 91234-5689",
+          "copyPlain": "11912345689",
+          "copyFormatted": "(11) 91234-5689"
+        }
+      ]
+    },
+    {
+      "name": "dígitos colados a letras não formam copiável",
+      "input": "ID A52998224725B CPF52998224725",
+      "expected": [{ "type": "text", "text": "ID A52998224725B CPF52998224725" }]
+    },
+    {
+      "name": "dígitos colados a outros dígitos não formam copiável",
+      "input": "1529982247250",
+      "expected": [{ "type": "text", "text": "1529982247250" }]
+    },
+    {
+      "name": "DDD fora da lista da Anatel não forma telefone",
+      "input": "20 912345678",
+      "expected": [{ "type": "text", "text": "20 912345678" }]
+    },
+    {
+      "name": "e-mail é copiável como está",
+      "input": "E-mail: laginho+pix@example.com",
+      "expected": [
+        { "type": "text", "text": "E-mail: " },
+        {
+          "type": "copyable",
+          "kind": "email",
+          "text": "laginho+pix@example.com",
+          "copyPlain": "laginho+pix@example.com",
+          "copyFormatted": "laginho+pix@example.com"
+        }
+      ]
+    },
+    {
+      "name": "UUID é chave PIX copiável como está",
+      "input": "PIX: 550e8400-e29b-41d4-a716-446655440000",
+      "expected": [
+        { "type": "text", "text": "PIX: " },
+        {
+          "type": "copyable",
+          "kind": "pix",
+          "text": "550e8400-e29b-41d4-a716-446655440000",
+          "copyPlain": "550e8400-e29b-41d4-a716-446655440000",
+          "copyFormatted": "550e8400-e29b-41d4-a716-446655440000"
+        }
+      ]
+    },
+    {
+      "name": "link com número dentro continua um link",
+      "input": "Veja https://example.com/pix/52998224725. agora",
+      "expected": [
+        { "type": "text", "text": "Veja " },
+        {
+          "type": "link",
+          "text": "https://example.com/pix/52998224725",
+          "href": "https://example.com/pix/52998224725"
+        },
+        { "type": "text", "text": ". agora" }
+      ]
+    }
+  ]
+}

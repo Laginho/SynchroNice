@@ -1,5 +1,5 @@
 # SYN-011: PC — Copiáveis
-Stage: blocked
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-010
 Review: agent
@@ -66,6 +66,40 @@ Critérios 4 a 8 são de tela: verificação manual abrindo o app.
 
 ## Comments
 
-- 2026-09-24 Attempt 1 failed: exit 0. Log tail: O SYN-011 está em `Stage: reviewing` no ramo `syn-011`. O `ticket-flow` manda parar nessa etapa e reportar, sem continuar uma revisão iniciada por outra sessão. O ramo está limpo e contém os commits de testes e implementação; não fiz alterações de código. /  / Há uma diferença de estado: em `main`, o ticket está `done` e consta no ledger, mas o ramo de sessão ativo não inclui esse merge. Deixei `syn-011` checado para refletir o ramo do ticket. Consulte [o ticket SYN-011](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/02-SYN-011-pc-copiaveis.md).
+- 2026-09-24 Red-green proof: the test-only commit `dc19ef6` made
+  `gate.ps1 -TestsOnly` fail because `pc/ui/copiaveis.ts` did not exist; the
+  existing 39 Rust tests and Gradle tests passed. After implementation,
+  `gate.ps1 -TestsOnly` passed with 20/20 Node cases, 39 Rust tests (6 config,
+  2 drag, 31 server) and Gradle tests. The full gate passed fmt, Clippy, those
+  39 Rust tests, `tsc --noEmit`, all 20 Node cases and `gradle check`.
+- Débito humano: inspeção ao vivo dos critérios 4–8. A árvore de acessibilidade
+  mostrou Configurações na tela de QR, mas a captura visual falhou (`SetIsBorderRequired
+  failed: No such interface supported (0x80004002)`) e o clique por índice falhou
+  (`coordinate input geometry is unavailable`). O painel e checkbox, o estilo,
+  a cópia real, a abertura de link e a seleção por arraste não foram observados
+  ao vivo.
+- 2026-09-24 Revisão de estágio 3: o app abriu e mostrou a tela de QR na árvore
+  de acessibilidade, mas a captura visual e o clique falharam novamente com os
+  mesmos erros. O débito visual acima permanece. A validação de e-mail e UUID
+  passou a usar os mesmos padrões da busca de candidatos, eliminando duplicação.
+- 2026-09-24 Foreman: a revisão mergeou pela `main` (PR #5) porque a sessão
+  `sweatshop/2026-09-24-1855` ainda era igual à `main` e contava como mergeada;
+  corrigido no driver (Agent-Skills `8ba1ce1`). As duas tentativas de stage 2
+  que se seguiram na sessão leram `reviewing` e pararam; o `blocked` delas foi
+  desfeito ao trazer a `main` para a sessão.
 
-- 2026-09-24 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: O SYN-011 está em `Stage: reviewing` na branch `syn-011`. O fluxo `ticket-flow` manda parar nessa etapa e reportar, sem continuar a revisão. /  / Deixei o workspace na branch `syn-011`, sincronizada com `origin/syn-011`; está limpa no commit `17a6a27`. O ticket registra a implementação e os gates aprovados, além de um débito de inspeção visual. Não fiz alterações nem rodei o gate nesta etapa. /  / [Tíquete SYN-011](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/02-SYN-011-pc-copiaveis.md)
+#### Resolution (2026-09-24)
+Verdict: Approve
+
+PR #5 integrado em `main` por `ab76d7b`. Os oito critérios numerados foram
+atendidos por inspeção de código e pelos casos compartilhados. O commit
+`dc19ef6` contém só testes, casos e gate e falhou pela ausência do módulo;
+os commits de implementação não alteraram testes. Após a implementação, o gate
+passou com 39 testes Rust, 20 casos Node, `tsc --noEmit` e `gradle check`.
+
+Arquivos: `testdata/copiaveis.json`, `pc/ui/copiaveis.ts`,
+`pc/ui/copiaveis.test.ts`, `pc/ui/main.ts`, `pc/ui/styles.css`, `pc/index.html`
+e `gate.ps1`. A revisão removeu a duplicação dos padrões de e-mail e UUID.
+O débito visual dos critérios 4–8 registrado acima permanece; o Computer Use
+reproduziu a falha de captura e não conseguiu clicar no painel. O PR não tinha
+checks de CI configurados.
