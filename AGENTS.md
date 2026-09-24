@@ -41,6 +41,7 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
 - Models: stage 2 sonnet xhigh, stage 3 opus high
   (`sonnet` = Sonnet 5, `opus` = Opus 5.5; o driver só aceita o alias, sem
   hífen. Stage 1 é sempre manual, o sweatshop nunca o roda.)
+- Models (Codex): stage 2 gpt-6-luna max, stage 3 gpt-6-sol high
 
 ## Humano simulado (somente neste repo — experimento)
 
