@@ -39,6 +39,13 @@ Dois restos achados na revisão do PR #4 (SYN-010).
 3. `pc/src-tauri/src/drag.rs` e `pc/src-tauri/tests/drag.rs` não existem
    mais, e `lib.rs` não declara `mod drag`. O plugin `tauri_plugin_drag`
    continua registrado.
+4. O débito visual do SYN-010 é refeito com o Computer Use, com o app
+   rodando: chat, painel, seletor nativo, tela inicial sem diálogo, menu da
+   bandeja, e a engrenagem e o painel sobre a tela de QR e no chat. Cada item
+   fica confirmado ou vira achado em `## Comments` deste ticket; só o que o
+   Computer Use não conseguir ver volta a ser `Débito humano:`. Limpe no fim o
+   que a inspeção criar (perfil, autostart, pastas em `%APPDATA%`,
+   `%LOCALAPPDATA%` e `%TEMP%`).
 
 #### Verification
 

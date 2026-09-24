@@ -41,7 +41,7 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
 - Models: stage 2 sonnet xhigh, stage 3 opus high
   (`sonnet` = Sonnet 5, `opus` = Opus 5.5; o driver só aceita o alias, sem
   hífen. Stage 1 é sempre manual, o sweatshop nunca o roda.)
-- Models (Codex): stage 2 gpt-6-luna max, stage 3 gpt-6-sol high
+- Models (Codex): stage 2 gpt-6-luna max, stage 3 gpt-6-sol max
 
 ## Humano simulado (somente neste repo — experimento)
 
@@ -61,6 +61,10 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
   registra a revisão humana como débito: uma linha `Débito humano: <o que
   ficou sem verificar à mão>` em `## Comments` do ticket, committed. Nunca
   bloqueia por isso.
+- O Computer Use do Codex funciona nesta máquina: a falha de 2026-09-24
+  (`SetIsBorderRequired … No such interface supported`) era do ambiente, já
+  resolvida. Tente-o antes de registrar débito visual; débito é só o que ele
+  de fato não conseguiu ver.
 - O foreman não para o run por `blocked` esperando humano: spawna o fable high
   e segue. Para só quando não há ticket rodável nem `blocked` respondível.
 - Vale para qualquer decisão que o foreman levaria ao humano, não só
