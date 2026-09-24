@@ -12,9 +12,29 @@ fn pasta_efetiva_sem_escolha_fica_em_synchronice_dentro_de_downloads() {
     let downloads = tempfile::tempdir().unwrap();
 
     assert_eq!(
-        config::pasta_efetiva(config_dir.path(), downloads.path()),
+        config::pasta_efetiva(config_dir.path(), || {
+            Ok::<_, std::io::Error>(downloads.path().to_path_buf())
+        })
+        .unwrap(),
         downloads.path().join("SynchroNice")
     );
+}
+
+#[test]
+fn pasta_escolhida_continua_efetiva_quando_downloads_nao_pode_ser_resolvida() {
+    let config_dir = tempfile::tempdir().unwrap();
+    let pasta_escolhida = config_dir.path().join("Pasta escolhida");
+    config::save_pasta(config_dir.path(), &pasta_escolhida).unwrap();
+    let mut resolveu_downloads = false;
+
+    let pasta = config::pasta_efetiva(config_dir.path(), || {
+        resolveu_downloads = true;
+        Err("Downloads indisponíveis")
+    })
+    .unwrap();
+
+    assert_eq!(pasta, pasta_escolhida);
+    assert!(!resolveu_downloads);
 }
 
 #[test]

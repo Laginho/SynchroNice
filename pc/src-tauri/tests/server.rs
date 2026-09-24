@@ -118,7 +118,10 @@ fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
 fn arquivo_sem_pasta_configurada_e_gravado_em_downloads_synchronice_criada_se_precisar() {
     let config_dir = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
-    let pasta = pc_lib::config::pasta_efetiva(config_dir.path(), downloads.path());
+    let pasta = pc_lib::config::pasta_efetiva(config_dir.path(), || {
+        Ok::<_, std::io::Error>(downloads.path().to_path_buf())
+    })
+    .unwrap();
     assert_eq!(pc_lib::config::load_pasta(config_dir.path()), None);
     assert!(!pasta.exists());
 
