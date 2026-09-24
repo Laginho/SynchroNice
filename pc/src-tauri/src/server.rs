@@ -107,7 +107,7 @@ struct AppState {
     items: Items,
     outbox: Outbox,
     presence: Presence,
-    /// `None` até o usuário escolher a Pasta na primeira abertura do app.
+    /// `None` quando quem sobe o servidor ainda não resolveu uma Pasta.
     pasta: Arc<Mutex<Option<PathBuf>>>,
     /// Nomes finais já reservados por um envio em andamento, mas ainda não
     /// gravados na Pasta — sem isso, dois envios concorrentes do mesmo nome
@@ -326,6 +326,11 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     };
     let fixed_length = content_length.is_some();
     let size = expected_size.unwrap_or(0);
+
+    if let Err(e) = tokio::fs::create_dir_all(&pasta).await {
+        eprintln!("não foi possível criar a Pasta {pasta:?}: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
 
     let final_path = reserve_path(&pasta, &sanitize_file_name(&raw_name), &state.leases);
     let _lease = LeaseGuard {

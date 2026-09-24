@@ -420,14 +420,64 @@ function mostrarChat(): void {
   document.querySelector<HTMLElement>("#frame")!.hidden = false;
 }
 
-/** Botão de "parear de novo" no composer: rotaciona o token e mostra o QR
- * com o token novo. */
-function ligarParear(): void {
-  const botao = document.querySelector<HTMLButtonElement>(".composer .parear")!;
-  botao.addEventListener("click", () => {
-    invoke<string>("parear_de_novo")
-      .then((svg) => mostrarQr(svg))
-      .catch((e) => console.error(`não foi possível parear de novo: ${e}`));
+/** Abre as configurações da Pasta e do Par no cabeçalho do chat. */
+function ligarConfiguracoes(): void {
+  const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
+  const panel = document.querySelector<HTMLElement>("#settings-panel")!;
+  const mudarPasta = document.querySelector<HTMLButtonElement>("#change-folder")!;
+  const desparear = document.querySelector<HTMLButtonElement>("#unpair")!;
+
+  function fechar(): void {
+    panel.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+  }
+
+  toggle.addEventListener("click", () => {
+    const abrir = panel.hidden;
+    panel.hidden = !abrir;
+    toggle.setAttribute("aria-expanded", String(abrir));
+  });
+
+  document.addEventListener("click", (event) => {
+    const alvo = event.target;
+    if (
+      !panel.hidden &&
+      alvo instanceof Node &&
+      !panel.contains(alvo) &&
+      !toggle.contains(alvo)
+    ) {
+      fechar();
+    }
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || panel.hidden) return;
+    fechar();
+    toggle.focus();
+  });
+
+  mudarPasta.addEventListener("click", async () => {
+    mudarPasta.disabled = true;
+    try {
+      if (await invoke<boolean>("mudar_pasta")) fechar();
+    } catch (e) {
+      console.error(`não foi possível mudar a Pasta: ${e}`);
+    } finally {
+      mudarPasta.disabled = false;
+    }
+  });
+
+  desparear.addEventListener("click", async () => {
+    desparear.disabled = true;
+    try {
+      const svg = await invoke<string>("parear_de_novo");
+      fechar();
+      mostrarQr(svg);
+    } catch (e) {
+      console.error(`não foi possível desparear: ${e}`);
+    } finally {
+      desparear.disabled = false;
+    }
   });
 }
 
@@ -559,7 +609,7 @@ async function main(): Promise<void> {
   ligarComposer();
   ligarDrop();
   ligarColar();
-  ligarParear();
+  ligarConfiguracoes();
 }
 
 void main();
