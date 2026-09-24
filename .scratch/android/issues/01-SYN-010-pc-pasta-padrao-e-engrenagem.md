@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -42,8 +42,8 @@ A bandeja continua só com "Abrir" e "Sair".
 1. Sem Pasta gravada na configuração, a Pasta efetiva é `SynchroNice` dentro da pasta Downloads do usuário.
 2. Um arquivo recebido sem Pasta gravada é escrito nessa pasta padrão, que é criada se não existir.
 3. Nenhum diálogo de Pasta abre na inicialização.
-4. ❌ A engrenagem abre um painel com "Mudar pasta…" e "Desparear"; fechar o painel volta ao chat. Ela também precisa estar acessível enquanto o QR é mostrado, inclusive no primeiro uso e após Desparear; hoje fica dentro de `#frame`, que é ocultado nessa tela.
-5. ❌ "Mudar pasta…" grava a nova Pasta, e o próximo arquivo recebido vai para ela sem reiniciar o app. O arquivo dos Itens já recebidos continua acessível na Pasta original, mesmo com nomes iguais na Pasta nova. Uma Pasta escolhida também precisa funcionar se Downloads não puder ser resolvida; hoje a inicialização consulta Downloads antes de ler a preferência gravada.
+4. A engrenagem abre um painel com "Mudar pasta…" e "Desparear"; fechar o painel volta ao chat. Ela também precisa estar acessível enquanto o QR é mostrado, inclusive no primeiro uso e após Desparear.
+5. "Mudar pasta…" grava a nova Pasta, e o próximo arquivo recebido vai para ela sem reiniciar o app. O arquivo dos Itens já recebidos continua acessível na Pasta original, mesmo com nomes iguais na Pasta nova. Uma Pasta escolhida também precisa funcionar se Downloads não puder ser resolvida.
 6. "Desparear" rotaciona o token, descarta os Pendentes e mostra o QR novo, como o ⟳ fazia.
 7. O botão ⟳ do composer não existe mais.
 8. O menu da bandeja continua com exatamente "Abrir" e "Sair".
@@ -97,3 +97,13 @@ Verdict: Reopen: critérios 4 e 5 ainda têm lacunas; o critério 5 requer novo 
 - Spec: `lib.rs::pasta_efetiva` resolve Downloads antes de consultar a Pasta gravada. Se a resolução falhar, `start_server` não sobe mesmo com uma Pasta escolhida (critério 5). Registrar o caso no seam de `tests/config.rs` antes de corrigir.
 - O defeito anterior do critério 5, arquivos homônimos em Pastas diferentes, foi corrigido por lookup pelo id do Item e coberto em `tests/server.rs`.
 - Verificação visual continua como débito humano já registrado; esta passagem não rodou o gate porque reabriu o ticket para teste e implementação.
+
+#### Resolution (2026-09-24)
+
+Verdict: Approve
+
+- Standards: nenhum achado acionável. Corrigido um comentário obsoleto em `pc/ui/main.ts`.
+- Spec: critérios 1–8 atendidos na revisão do diff. A engrenagem fica fora das telas de chat e QR; a Pasta escolhida dispensa a resolução de Downloads; miniatura e arraste resolvem o arquivo pelo id do Item.
+- Arquivos: `pc/index.html`, `pc/ui/main.ts`, `pc/ui/styles.css`, `pc/src-tauri/src/{config,lib,server}.rs`, `pc/src-tauri/tests/{config,server}.rs`.
+- Red-green: commits de teste isolados `7d31288`, `e05b6f7` e `131c0d8` falharam antes das respectivas correções (Pasta padrão ausente, consulta de arquivo por id ausente e resolução prematura de Downloads). Após as correções, os 39 testes Rust passaram (6 config, 2 drag, 31 server).
+- Gate após rebase na branch de sessão: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` passou (`cargo fmt --check`, `cargo clippy`, 39 testes Rust, `tsc --noEmit`, `gradle check`). A inspeção visual segue como débito humano acima.
