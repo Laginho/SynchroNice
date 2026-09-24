@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -69,3 +69,5 @@ Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
 - 2026-09-24 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: O `SYN-010` está em `Stage: to-implement`, na branch de sessão `sweatshop/2026-09-24-1506`. O binding do repositório reserva a implementação para **gpt-6-luna max**; este runtime só está identificado como GPT-6, então o guard do `ticket-flow` exige parar sem implementar. /  / A árvore segue limpa e não rodei testes. Para avançar, execute o ticket com o modelo indicado.
 
 - 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.
+- Débito humano: inspeção visual do chat, painel, seletor nativo, tela inicial sem diálogo e menu da bandeja. O Computer Use falhou ao capturar a janela: `SetIsBorderRequired failed: No such interface supported`.
+- 2026-09-24 Inspeção: app encerrado e entrada de autostart removida. A revisão automática bloqueou a exclusão das pastas geradas nesta execução: `%APPDATA%\dev.synchronice.pc`, `%LOCALAPPDATA%\dev.synchronice.pc` e `%TEMP%\SynchroNice-SYN-010`; a limpeza manual ainda é necessária.

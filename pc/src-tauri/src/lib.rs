@@ -10,12 +10,12 @@ pub mod server;
 use items::{Item, Items};
 use outbox::{OutItem, Outbox};
 use par::Par;
+use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_dialog::DialogExt;
-use std::path::{Path, PathBuf};
 
 /// Evento que a janela escuta para desenhar (ou atualizar) a bolha de um
 /// Item mandado ao celular.
