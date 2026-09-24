@@ -202,9 +202,7 @@ async function iniciarDrag(id: number, nome: string, bubble: HTMLElement): Promi
   try {
     caminho = await invoke<string>("caminho_para_arrastar", { id });
   } catch (e) {
-    // Só a resolução do caminho fala sobre a Pasta: falhar aqui é o arquivo
-    // não estar mais lá (a outra causa, Pasta não escolhida, não deixaria
-    // esta bolha existir — arquivo recebido é arquivo gravado na Pasta).
+    // Se o caminho não puder ser resolvido, a bolha deixa de oferecer drag.
     marcarArquivoSumido(bubble);
     console.error(`não foi possível arrastar ${nome}: ${e}`);
     return;
