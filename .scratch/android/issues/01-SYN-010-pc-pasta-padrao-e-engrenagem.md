@@ -63,3 +63,5 @@ Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
   sem Pasta e recusa ou descarta o arquivo.
 
 ## Comments
+
+- 2026-09-24 Attempt 1 failed: exit 0. Log tail: Parei no guard de modelo do `ticket-flow`. O SYN-010 está em `Stage: to-implement` e o binding do repo atribui a implementação ao **gpt-6-luna max**. Este runtime está identificado apenas como Codex/GPT-6, então não consigo confirmar que corresponda ao modelo exigido. /  / A árvore está limpa na branch `sweatshop/2026-09-24-1506`. Não fiz alterações. O ticket está em [01-SYN-010-pc-pasta-padrao-e-engrenagem.md](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/01-SYN-010-pc-pasta-padrao-e-engrenagem.md).
