@@ -1,0 +1,230 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs,array,tabularx}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+
+\definecolor{luna}{HTML}{3B6EA8}
+\definecolor{sol}{HTML}{D08A1E}
+\definecolor{cache}{HTML}{B9C6D6}
+
+\title{Sweatshop no Codex: primeira leva\\\large gpt-6-luna (max) no stage 2, gpt-6-sol (high) no stage 3}
+\author{Foreman, sessão \texttt{sweatshop/2026-09-24-1506}}
+\date{24 de setembro de 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Resumo}
+
+Primeira execução do driver \texttt{sweatshop-codex.ps1} no SynchroNice, com a
+lineup nova: \textbf{gpt-6-luna max} implementando e \textbf{gpt-6-sol high}
+revisando. O run foi encerrado a pedido após o primeiro ticket mergeado.
+
+\begin{itemize}
+  \item \textbf{Produzido:} 1 ticket (SYN-010, PC: Pasta padrão e engrenagem),
+        mergeado na sessão após \textbf{3 ciclos} de implementação e revisão.
+        PR de sessão: \href{https://github.com/Laginho/SynchroNice/pull/4}{\#4}.
+  \item \textbf{Custo do ticket:} 95 min de relógio, 20,8\,M tokens de entrada
+        (96,8\,\% em cache) e 160\,k de saída (72\,\% raciocínio).
+  \item \textbf{Integração Codex:} um bug bloqueante no \texttt{ticket-flow}
+        (guarda de modelo), corrigido durante o run; a integração em si
+        (commit, push, gate, merge na sessão, PR) funcionou.
+  \item \textbf{Veredito provisório:} o luna produz código correto e respeita o
+        TDD, mas é mais lento que a lineup Claude. O gargalo maior foi o
+        \textbf{sol}: revisões incrementais e com aumento de escopo custaram dois
+        ciclos extras (52\,\% do tempo do ticket). Com $n=1$, nada disso é
+        conclusivo.
+\end{itemize}
+
+\section{Linha do tempo}
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+15:06 & Primeiro lançamento. Quatro estágios (SYN-010 e SYN-012, duas tentativas cada)
+        recusam trabalhar em cerca de 1 min cada: o Codex não informa à sessão o
+        nome do modelo, e a guarda \emph{``Wrong model, no work''} do
+        \texttt{ticket-flow} manda parar. Os dois tickets ficam \texttt{blocked}.\\
+15:11 & Driver para (``nothing runnable''). Correção no skill
+        (Agent-Skills \texttt{a8cdadb}): no Codex, confiar no \path{--model} do
+        lançamento. Tickets de volta a \texttt{to-implement}.\\
+15:14 & Segundo lançamento. SYN-010, implementação 1.\\
+15:54 & \texttt{to-review} após 40 min. Revisão 1 (6 min): \textbf{reaberto}.\\
+16:15 & Implementação 2 (15 min). Revisão 2 (3 min): \textbf{reaberto}.\\
+16:43 & Implementação 3 (24 min). Revisão 3 (7 min): \textbf{mergeado}.\\
+16:50 & Encerramento pedido: o estágio seguinte (SYN-011) é interrompido nos
+        primeiros segundos e o driver fecha pelo próprio \texttt{finally}
+        (árvore limpa, PR atualizado, volta a \texttt{main}).\\
+\bottomrule
+\end{tabularx}
+
+\section{Métricas por estágio (SYN-010)}
+
+Tokens do evento \texttt{turn.completed} do \path{codex exec --json}.
+``Cmds'' é o número de comandos de shell que a sessão executou.
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}l l r r r r r X@{}}
+\toprule
+Estágio & Modelo & Min & Cmds & Entrada & Cache & Saída & Desfecho\\
+\midrule
+Impl.\ 1   & luna & 40 & 192 & 10,61\,M & 97,9\,\% & 75,4\,k & to-review\\
+Revisão 1  & sol  &  6 &  48 &  1,04\,M & 94,2\,\% &  5,5\,k & reaberto (crit.\ 5)\\
+Impl.\ 2   & luna & 15 &  84 &  2,50\,M & 95,7\,\% & 28,5\,k & to-review\\
+Revisão 2  & sol  &  3 &  32 &  0,74\,M & 93,5\,\% &  5,5\,k & reaberto (crit.\ 4, 5)\\
+Impl.\ 3   & luna & 24 &  86 &  3,60\,M & 96,4\,\% & 37,8\,k & to-review\\
+Revisão 3  & sol  &  7 & 118 &  2,28\,M & 96,0\,\% &  7,0\,k & mergeado\\
+\midrule
+\multicolumn{2}{@{}l}{Total} & 95 & 560 & 20,76\,M & 96,8\,\% & 159,6\,k & \\
+\multicolumn{2}{@{}l}{Recusas (bug)} & 4 & 28 & 0,42\,M & 77,9\,\% & 10,5\,k & 4 estágios perdidos\\
+\bottomrule
+\end{tabularx}}
+
+\bigskip
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar stacked, bar width=18pt, width=0.92\linewidth, height=6cm,
+  ylabel={Tokens de entrada (M)}, ymin=0,
+  symbolic x coords={Impl 1,Rev 1,Impl 2,Rev 2,Impl 3,Rev 3},
+  xtick=data, legend style={at={(0.98,0.95)},anchor=north east,draw=none},
+  nodes near coords align={vertical},
+  axis lines*=left, ymajorgrids, grid style={gray!25}]
+\addplot[fill=cache,draw=none] coordinates
+  {(Impl 1,10.386) (Rev 1,0.977) (Impl 2,2.390) (Rev 2,0.695) (Impl 3,3.471) (Rev 3,2.185)};
+\addplot[fill=luna,draw=none] coordinates
+  {(Impl 1,0.222) (Rev 1,0.060) (Impl 2,0.109) (Rev 2,0.049) (Impl 3,0.129) (Rev 3,0.091)};
+\legend{em cache, sem cache}
+\end{axis}
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Onde foi o custo.} Os ciclos 2 e 3, que só existiram por causa das
+reaberturas, somaram 49 min (52\,\% do relógio), 9,1\,M de entrada (44\,\%) e
+79\,k de saída (49\,\%). A primeira implementação sozinha foi metade da entrada
+do ticket; parte disso foi a tentativa de verificação visual pelo Computer Use
+(ver seção~\ref{sec:integracao}).
+
+\section{Comparação com a lineup Claude}
+
+Referência: os 13 tickets mergeados nos runs anteriores com Sonnet 5 no stage 2
+e Opus 5.5 no stage 3 (\texttt{run-log.md}). Não há tokens para eles: o driver
+Claude grava a saída em texto, sem contagem.
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}X r r@{}}
+\toprule
+& Claude (13 tickets) & Codex (SYN-010)\\
+\midrule
+Minutos por ticket mergeado, mediana (faixa) & 42 (7--89) & 95\\
+Tickets reabertos & 5 de 13 & 1 de 1\\
+Reaberturas no mesmo ticket, máximo & 1 & 2\\
+Minutos por implementação que chegou a \texttt{to-review}, média & 14,7 & 26,3\\
+Minutos por revisão, média & 9,2 & 5,3\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+SYN-010 foi mais lento que qualquer ticket da lineup Claude. Ressalvas: é um
+ticket largo (backend Rust, UI e casos de borda do Windows, 12 arquivos e
+$+406/-73$ na sessão), a comparação é com uma amostra de outro tamanho, e parte
+do tempo da implementação 1 foi gasta com o ambiente, não com o modelo.
+
+\section{Observações sobre os modelos}
+
+\subsection*{gpt-6-luna (max), implementação}
+\begin{itemize}
+  \item \textbf{TDD respeitado:} em cada ciclo, commit só de teste, vermelho,
+        antes do código; a revisão 3 aprovou os dois critérios reabertos com
+        testes de regressão nos seams pedidos (37 $\rightarrow$ 39 testes Rust).
+  \item \textbf{Uma infração pequena:} \texttt{0a88f83 test: format default
+        folder assertion} mexe num teste depois do commit \texttt{feat}. É só
+        formatação, mas o \texttt{ticket-flow} proíbe, e nenhuma das três
+        revisões apontou.
+  \item \textbf{Bom senso operacional:} ao verificar a tela, usou um perfil
+        temporário, desfez a entrada de autostart que a própria instância criou
+        e registrou o que não conseguiu verificar como débito humano, em vez de
+        declarar sucesso.
+  \item \textbf{Caro:} 192 comandos e 10,6\,M de entrada na primeira passada.
+\end{itemize}
+
+\subsection*{gpt-6-sol (high), revisão}
+\begin{itemize}
+  \item \textbf{Revisão incremental.} Ao que tudo indica, os três defeitos apontados já estavam no
+        código na primeira passada, mas foram listados um por revisão (1, depois
+        2). Cada achado adiado custou um ciclo de cerca de 20 min e 3--4\,M
+        tokens. O Opus nunca reabriu o mesmo ticket duas vezes.
+  \item \textbf{Aumento de escopo.} Nenhum dos três achados estava nos
+        critérios originais. A revisão reescreveu o texto dos critérios 4 e 5
+        (engrenagem acessível na tela de QR; Pasta gravada funcionando sem
+        Downloads resolvível; arquivos antigos na Pasta original). O primeiro é
+        uma regressão real introduzida pela feature; os outros dois são
+        requisitos novos, que pelo fluxo iriam para o stage 1 ou para um
+        \texttt{CLEAN-*}.
+  \item \textbf{Deixou passar} a infração de TDD acima.
+  \item \textbf{Barato por passada:} 3--7 min, 0,7--2,3\,M de entrada.
+\end{itemize}
+
+\section{Integração com o Codex}\label{sec:integracao}
+\begin{itemize}
+  \item \textbf{Bug corrigido:} a guarda de modelo do \texttt{ticket-flow}
+        pressupunha que a sessão conhece o próprio modelo. No Codex isso não é
+        verdade, e todo estágio parava. Correção em Agent-Skills
+        \texttt{a8cdadb}.
+  \item \textbf{Funcionou:} commit e push de dentro do estágio, gate completo
+        (fmt, clippy, testes Rust, \texttt{tsc}, Gradle), merge na branch de
+        sessão, publicação do PR, contagem de tentativas, tratamento de erro de
+        API.
+  \item \textbf{Computer Use não funciona nesta máquina:} a captura de janela
+        falha em \texttt{SetIs\allowbreak Border\allowbreak Required} (\emph{No such interface
+        supported}). Toda verificação visual virou débito humano.
+  \item \textbf{Sandbox:} os estágios rodam com
+        \path{--dangerously-bypass-approvals-and-sandbox}. A regra de revisão
+        automática do Codex barrou, corretamente, a exclusão de
+        \path{%APPDATA%\dev.synchronice.pc}.
+  \item \textbf{Sem parada limpa:} o driver não tem sinal de ``pare após o
+        estágio atual''; o encerramento pedido foi feito interrompendo o
+        estágio seguinte duas vezes, o que o driver lê como queda de API.
+\end{itemize}
+
+\section{Recomendações}
+\begin{enumerate}
+  \item \textbf{Subir o sol para max na próxima leva.} A revisão custa cerca de
+        um terço de um ciclo de retrabalho; se o esforço maior evitar uma
+        reabertura a cada dois tickets, já se paga.
+  \item \textbf{Instruir contra aumento de escopo} no stage 3 do
+        \texttt{ticket-flow}: revisar contra os critérios escritos, listar
+        \emph{todos} os achados numa passada e mandar requisito novo para
+        \texttt{CLEAN-*}. Sem isso, mais esforço pode gerar mais reaberturas.
+  \item \textbf{Manter o luna max} até haver amostra: reavaliar depois de
+        SYN-011 e SYN-012.
+  \item \textbf{Adicionar ao driver um arquivo de parada} (terminar após o
+        estágio atual), para não depender de matar processos.
+\end{enumerate}
+
+\section{Débito humano}
+\begin{itemize}
+  \item Inspeção visual do chat, painel, seletor nativo, tela inicial sem
+        diálogo e menu da bandeja (Computer Use falhou).
+  \item Confirmar a engrenagem e o painel sobre a tela de QR e no chat após a
+        mudança do cabeçalho.
+  \item Pastas deixadas pela inspeção, para limpar à mão (confira antes: as
+        duas primeiras podem ser as do app real, com o pareamento do celular):
+        \begin{itemize}
+          \item \path{%APPDATA%\dev.synchronice.pc}
+          \item \path{%LOCALAPPDATA%\dev.synchronice.pc}
+          \item \path{%TEMP%\SynchroNice-SYN-010}
+        \end{itemize}
+\end{itemize}
+
+\end{document}
