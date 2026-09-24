@@ -109,26 +109,32 @@ async fn mudar_pasta(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Bytes de um arquivo já gravado na Pasta, para a miniatura de imagem na
-/// bolha. `name` é o nome final do Item (já saneado ao gravar); saneado de
-/// novo aqui para nunca ler fora da Pasta.
+/// Caminho do arquivo recebido de um Item que terminou de gravar. A consulta
+/// por id mantém os Itens antigos ligados à Pasta em que chegaram.
+fn caminho_do_arquivo_recebido(app: &tauri::AppHandle, id: u64) -> Result<PathBuf, String> {
+    app.try_state::<server::Running>()
+        .ok_or_else(|| "servidor HTTP não está disponível".to_string())?
+        .caminho_do_arquivo(id)
+        .filter(|caminho| caminho.is_file())
+        .ok_or_else(|| "o arquivo não está mais na Pasta".to_string())
+}
+
+/// Bytes de um arquivo recebido, para a miniatura de imagem na bolha.
 #[tauri::command]
-fn read_file_bytes(app: tauri::AppHandle, name: String) -> Result<Vec<u8>, String> {
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    let pasta = pasta_efetiva(&app, &config_dir)?;
-    std::fs::read(pasta.join(server::sanitize_file_name(&name))).map_err(|e| e.to_string())
+fn read_file_bytes(app: tauri::AppHandle, id: u64) -> Result<Vec<u8>, String> {
+    let caminho = caminho_do_arquivo_recebido(&app, id)?;
+    std::fs::read(caminho).map_err(|e| e.to_string())
 }
 
 /// Caminho absoluto do arquivo de uma bolha recebida, para o drag nativo do
 /// SO (SYN-006). Se o arquivo não está mais lá, a janela não chama o drag e
 /// marca a bolha como sumida, em vez de arrastar um caminho que não existe.
 #[tauri::command]
-fn caminho_para_arrastar(app: tauri::AppHandle, name: String) -> Result<String, String> {
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    let pasta = pasta_efetiva(&app, &config_dir)?;
-    drag::resolve(&pasta, &name)
-        .and_then(|caminho| caminho.to_str().map(str::to_string))
-        .ok_or_else(|| "o arquivo não está mais na Pasta".to_string())
+fn caminho_para_arrastar(app: tauri::AppHandle, id: u64) -> Result<String, String> {
+    caminho_do_arquivo_recebido(&app, id)?
+        .to_str()
+        .map(str::to_string)
+        .ok_or_else(|| "o caminho do arquivo não é válido".to_string())
 }
 
 /// Enter no composer: enfileira o texto para o celular.

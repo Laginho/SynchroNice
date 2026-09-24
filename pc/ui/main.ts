@@ -127,8 +127,8 @@ function renderTexto(item: TextItem): HTMLElement {
 }
 
 /** Troca a miniatura por uma imagem real assim que o arquivo termina de chegar. */
-function carregarMiniatura(nome: string, thumb: HTMLElement): void {
-  invoke<number[]>("read_file_bytes", { name: nome })
+function carregarMiniatura(id: number, nome: string, thumb: HTMLElement): void {
+  invoke<number[]>("read_file_bytes", { id })
     .then((bytes) => {
       const blob = new Blob([new Uint8Array(bytes)]);
       const img = document.createElement("img");
@@ -165,7 +165,7 @@ function atualizarProgresso(bubble: HTMLElement, item: FileItem): void {
   bubble.querySelector(".progress")?.remove();
   if (completo && IMAGEM.has(extensao(item.name))) {
     const thumb = bubble.querySelector<HTMLElement>(".file-thumb");
-    if (thumb) carregarMiniatura(item.name, thumb);
+    if (thumb) carregarMiniatura(item.id, item.name, thumb);
   }
 }
 
@@ -197,10 +197,10 @@ function desmarcarArquivoSumido(bubble: HTMLElement): void {
  * confere que o arquivo ainda existe; só então o plugin de drag assume o
  * rastreio nativo do mouse, no lugar da Drag and Drop API da web (que só
  * entrega o arquivo dentro da própria janela). */
-async function iniciarDrag(nome: string, bubble: HTMLElement): Promise<void> {
+async function iniciarDrag(id: number, nome: string, bubble: HTMLElement): Promise<void> {
   let caminho: string;
   try {
-    caminho = await invoke<string>("caminho_para_arrastar", { name: nome });
+    caminho = await invoke<string>("caminho_para_arrastar", { id });
   } catch (e) {
     // Só a resolução do caminho fala sobre a Pasta: falhar aqui é o arquivo
     // não estar mais lá (a outra causa, Pasta não escolhida, não deixaria
@@ -268,7 +268,7 @@ function renderArquivo(item: FileItem): HTMLElement {
         return;
       }
       soltou();
-      void iniciarDrag(item.name, bubble);
+      void iniciarDrag(item.id, item.name, bubble);
     };
     const soltou = (): void => {
       window.removeEventListener("mousemove", andou);

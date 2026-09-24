@@ -66,7 +66,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use futures_util::StreamExt;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -113,6 +113,9 @@ struct AppState {
     /// gravados na Pasta — sem isso, dois envios concorrentes do mesmo nome
     /// podem ver `exists()` igualmente falso e resolver para o mesmo destino.
     leases: Arc<Mutex<HashSet<PathBuf>>>,
+    /// Caminho de cada arquivo recebido que terminou de gravar, indexado pelo
+    /// id do Item para que Itens antigos continuem apontando à Pasta original.
+    received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
 }
 
 /// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
@@ -188,6 +191,7 @@ pub struct Running {
     /// `on_change` para avisar a janela quando o celular conecta ou some.
     pub presence: Presence,
     pasta: Arc<Mutex<Option<PathBuf>>>,
+    received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
 }
 
 impl Running {
@@ -196,6 +200,16 @@ impl Running {
         crate::config::save_pasta(config_dir, pasta)?;
         *self.pasta.lock().expect("Pasta sem panic") = Some(pasta.to_path_buf());
         Ok(())
+    }
+
+    /// Caminho do arquivo recebido que pertence ao Item `id`, se ele chegou
+    /// a terminar de gravar. O caminho não depende da Pasta atualmente ativa.
+    pub fn caminho_do_arquivo(&self, id: u64) -> Option<PathBuf> {
+        self.received_files
+            .lock()
+            .expect("arquivos recebidos sem panic")
+            .get(&id)
+            .cloned()
     }
 }
 
@@ -214,6 +228,8 @@ pub fn spawn(
     let presence_da_thread = presence.clone();
     let pasta = Arc::new(Mutex::new(pasta));
     let pasta_da_thread = pasta.clone();
+    let received_files = Arc::new(Mutex::new(HashMap::new()));
+    let received_files_da_thread = received_files.clone();
 
     std::thread::Builder::new()
         .name("synchronice-http".into())
@@ -245,6 +261,7 @@ pub fn spawn(
                     presence: presence_da_thread,
                     pasta: pasta_da_thread,
                     leases: Arc::new(Mutex::new(HashSet::new())),
+                    received_files: received_files_da_thread,
                 });
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
@@ -259,6 +276,7 @@ pub fn spawn(
         addr,
         presence,
         pasta,
+        received_files,
     })
 }
 
@@ -405,6 +423,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     // não é abortada por isso — sem essa separação flush/rename/file_done
     // já podiam ter acontecido pela metade e o aviso de fim nunca sair.
     let items = state.items.clone();
+    let received_files = state.received_files.clone();
     let final_path_bg = final_path.clone();
     let temp_path_bg = temp_path.clone();
     let concluido = tokio::spawn(async move {
@@ -433,6 +452,10 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                 // Só agora o arquivo existe com o nome final: o sinal de fim
                 // não pode vir antes disso, ou a UI tentaria ler um caminho
                 // que ainda não existe.
+                received_files
+                    .lock()
+                    .expect("arquivos recebidos sem panic")
+                    .insert(item.id, final_path_bg.clone());
                 items.file_done(item.id);
                 true
             }
