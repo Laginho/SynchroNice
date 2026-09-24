@@ -10,6 +10,7 @@ pub mod server;
 use items::{Item, Items};
 use outbox::{OutItem, Outbox};
 use par::Par;
+use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State, WindowEvent};
@@ -46,32 +47,10 @@ struct EstadoParInicial {
     svg: String,
 }
 
-/// Pede a Pasta se ainda não houver uma escolhida. Não-bloqueante: `setup` roda
-/// na thread principal, onde `blocking_pick_folder` travaria o event loop.
-/// Cancelar não grava nada — pergunta de novo na próxima abertura.
-fn ask_pasta_on_first_run(app: &tauri::AppHandle) {
-    let Ok(config_dir) = app.path().app_config_dir() else {
-        eprintln!("sem diretório de configuração: a Pasta não será lembrada");
-        return;
-    };
-
-    if config::load_pasta(&config_dir).is_some() {
-        return;
-    }
-
-    let handle = app.clone();
-    app.dialog().file().pick_folder(move |pasta| {
-        let Some(pasta) = pasta.and_then(|p| p.into_path().ok()) else {
-            return;
-        };
-        let result = match handle.try_state::<server::Running>() {
-            Some(running) => running.escolher_pasta(&config_dir, &pasta),
-            None => config::save_pasta(&config_dir, &pasta),
-        };
-        if let Err(e) = result {
-            eprintln!("não foi possível gravar a Pasta: {e}");
-        }
-    });
+fn pasta_efetiva(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, String> {
+    config::pasta_efetiva(config_dir, || {
+        app.path().download_dir().map_err(|e| e.to_string())
+    })
 }
 
 /// Evento que a janela escuta para desenhar a bolha de um Item novo.
@@ -109,27 +88,54 @@ fn parear_de_novo(par: State<'_, Par>, outbox: State<'_, Outbox>) -> Result<Stri
     ))
 }
 
-/// Bytes de um arquivo já gravado na Pasta, para a miniatura de imagem na
-/// bolha. `name` é o nome final do Item (já saneado ao gravar); saneado de
-/// novo aqui para nunca ler fora da Pasta.
+/// Abre o seletor nativo e aplica a nova Pasta ao servidor sem reiniciá-lo.
 #[tauri::command]
-fn read_file_bytes(app: tauri::AppHandle, name: String) -> Result<Vec<u8>, String> {
+async fn mudar_pasta(app: tauri::AppHandle) -> Result<bool, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |selection| {
+        let pasta = selection.and_then(|path| path.into_path().ok());
+        let _ = tx.send(pasta);
+    });
+
+    let Some(pasta) = rx.await.map_err(|e| e.to_string())? else {
+        return Ok(false);
+    };
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    let pasta = config::load_pasta(&config_dir).ok_or("a Pasta ainda não foi escolhida")?;
-    std::fs::read(pasta.join(server::sanitize_file_name(&name))).map_err(|e| e.to_string())
+    let running = app
+        .try_state::<server::Running>()
+        .ok_or_else(|| "servidor HTTP não está disponível".to_string())?;
+    running
+        .escolher_pasta(&config_dir, &pasta)
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Caminho do arquivo recebido de um Item que terminou de gravar. A consulta
+/// por id mantém os Itens antigos ligados à Pasta em que chegaram.
+fn caminho_do_arquivo_recebido(app: &tauri::AppHandle, id: u64) -> Result<PathBuf, String> {
+    app.try_state::<server::Running>()
+        .ok_or_else(|| "servidor HTTP não está disponível".to_string())?
+        .caminho_do_arquivo(id)
+        .filter(|caminho| caminho.is_file())
+        .ok_or_else(|| "o arquivo não está mais na Pasta".to_string())
+}
+
+/// Bytes de um arquivo recebido, para a miniatura de imagem na bolha.
+#[tauri::command]
+fn read_file_bytes(app: tauri::AppHandle, id: u64) -> Result<Vec<u8>, String> {
+    let caminho = caminho_do_arquivo_recebido(&app, id)?;
+    std::fs::read(caminho).map_err(|e| e.to_string())
 }
 
 /// Caminho absoluto do arquivo de uma bolha recebida, para o drag nativo do
-/// SO (SYN-006). Erro se a Pasta ainda não foi escolhida ou o arquivo não
-/// está mais lá — a janela então não chama o drag e marca a bolha como
-/// sumida, em vez de arrastar um caminho que não existe.
+/// SO (SYN-006). Se o arquivo não está mais lá, a janela não chama o drag e
+/// marca a bolha como sumida, em vez de arrastar um caminho que não existe.
 #[tauri::command]
-fn caminho_para_arrastar(app: tauri::AppHandle, name: String) -> Result<String, String> {
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    let pasta = config::load_pasta(&config_dir).ok_or("a Pasta ainda não foi escolhida")?;
-    drag::resolve(&pasta, &name)
-        .and_then(|caminho| caminho.to_str().map(str::to_string))
-        .ok_or_else(|| "o arquivo não está mais na Pasta".to_string())
+fn caminho_para_arrastar(app: tauri::AppHandle, id: u64) -> Result<String, String> {
+    caminho_do_arquivo_recebido(&app, id)?
+        .to_str()
+        .map(str::to_string)
+        .ok_or_else(|| "o caminho do arquivo não é válido".to_string())
 }
 
 /// Enter no composer: enfileira o texto para o celular.
@@ -200,9 +206,13 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     app.manage(par.clone());
     app.manage(ParJaExistia(par_ja_existia));
 
-    // `None` se a Pasta ainda não foi escolhida: o servidor sobe do mesmo
-    // jeito (texto funciona), e a rota de arquivo devolve 503 até a escolha.
-    let pasta = config::load_pasta(&config_dir);
+    let pasta = match pasta_efetiva(app, &config_dir) {
+        Ok(pasta) => pasta,
+        Err(e) => {
+            eprintln!("sem Pasta efetiva, o servidor não sobe: {e}");
+            return;
+        }
+    };
 
     let outbox = match Outbox::new(config_dir.join("outbox")) {
         Ok(outbox) => outbox,
@@ -232,7 +242,7 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     });
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], server::PORT));
-    match server::spawn(addr, par.clone(), items, outbox, pasta) {
+    match server::spawn(addr, par.clone(), items, outbox, Some(pasta)) {
         Ok(running) => {
             println!("servidor HTTP em {}", running.addr);
             match anuncio::Anuncio::subir(par.nome_instancia(), server::PORT) {
@@ -291,6 +301,7 @@ pub fn run() {
             list_items,
             estado_par_inicial,
             parear_de_novo,
+            mudar_pasta,
             read_file_bytes,
             send_text,
             send_files,
@@ -306,7 +317,6 @@ pub fn run() {
             if let Err(e) = handle.autolaunch().enable() {
                 eprintln!("não foi possível registrar no autostart: {e}");
             }
-            ask_pasta_on_first_run(&handle);
             setup_tray(&handle)?;
             Ok(())
         })

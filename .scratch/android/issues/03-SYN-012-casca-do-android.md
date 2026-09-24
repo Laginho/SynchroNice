@@ -69,3 +69,9 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   e cobrir isso, o ticket não escreve teste nesta costura e diz isso no commit.
 
 ## Comments
+
+- 2026-09-24 Attempt 1 failed: exit 0. Log tail: Encontrei SYN-012 em `Stage: to-implement`, com árvore de trabalho limpa. O binding do repositório atribui o stage 2 ao **gpt-6-luna max**, mas esta sessão não está identificada como esse modelo. Pelo `ticket-flow`, devo parar sem implementar; o próximo passo é executar SYN-012 com gpt-6-luna max.
+
+- 2026-09-24 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: Parei conforme a regra de modelo da `ticket-flow`: [SYN-012](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/03-SYN-012-casca-do-android.md) está em `to-implement`, e o `AGENTS.md` atribui o stage 2 ao **gpt-6-luna max**. Esta sessão não está identificada como esse modelo. /  / Não alterei arquivos nem rodei testes. O ticket já registra uma tentativa anterior com o mesmo impedimento; o próximo passo é executar SYN-012 com gpt-6-luna max.
+
+- 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.

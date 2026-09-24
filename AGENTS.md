@@ -63,6 +63,13 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
   bloqueia por isso.
 - O foreman não para o run por `blocked` esperando humano: spawna o fable high
   e segue. Para só quando não há ticket rodável nem `blocked` respondível.
+- Vale para qualquer decisão que o foreman levaria ao humano, não só
+  `blocked` — um pormenor de escopo, se um arquivo entra ou não no commit, uma
+  anomalia vista num check-in: se um agente pode decidir, o foreman spawna um
+  **fable high** (Fable 5.1) como humano provisório, que decide e responde no
+  lugar do humano. O foreman só para esperando o humano quando não há como
+  seguir sem ele, ou quando a decisão errada é irreversível ou cara/demorada de
+  reverter.
 - O que continua humano: o merge do PR de sessão. O resumo final do foreman
   lista, além dos blocos normais, todos os `Débito humano:` do run
   (`grep -rh 'Débito humano:' .scratch/`), para a revisão ser feita de uma vez.

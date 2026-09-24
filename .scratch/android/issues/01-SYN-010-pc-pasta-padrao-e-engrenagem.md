@@ -1,5 +1,5 @@
 # SYN-010: PC — Pasta padrão e engrenagem
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -42,8 +42,8 @@ A bandeja continua só com "Abrir" e "Sair".
 1. Sem Pasta gravada na configuração, a Pasta efetiva é `SynchroNice` dentro da pasta Downloads do usuário.
 2. Um arquivo recebido sem Pasta gravada é escrito nessa pasta padrão, que é criada se não existir.
 3. Nenhum diálogo de Pasta abre na inicialização.
-4. A engrenagem abre um painel com "Mudar pasta…" e "Desparear"; fechar o painel volta ao chat.
-5. "Mudar pasta…" grava a nova Pasta, e o próximo arquivo recebido vai para ela sem reiniciar o app.
+4. A engrenagem abre um painel com "Mudar pasta…" e "Desparear"; fechar o painel volta ao chat. Ela também precisa estar acessível enquanto o QR é mostrado, inclusive no primeiro uso e após Desparear.
+5. "Mudar pasta…" grava a nova Pasta, e o próximo arquivo recebido vai para ela sem reiniciar o app. O arquivo dos Itens já recebidos continua acessível na Pasta original, mesmo com nomes iguais na Pasta nova. Uma Pasta escolhida também precisa funcionar se Downloads não puder ser resolvida.
 6. "Desparear" rotaciona o token, descarta os Pendentes e mostra o QR novo, como o ⟳ fazia.
 7. O botão ⟳ do composer não existe mais.
 8. O menu da bandeja continua com exatamente "Abrir" e "Sair".
@@ -61,5 +61,49 @@ Critérios 3, 4, 7 e 8 são de tela: verificação manual abrindo o app.
 - `pc/src-tauri/tests/server.rs`: um arquivo recebido com a configuração sem
   Pasta é gravado na pasta padrão, que é criada. Red porque hoje o servidor sobe
   sem Pasta e recusa ou descarta o arquivo.
+- `pc/src-tauri/tests/server.rs`: depois de receber arquivos de mesmo nome em
+  Pastas diferentes, cada id de Item continua resolvendo para seu próprio
+  caminho e conteúdo. Red porque a UI hoje procura ambos pelo nome na Pasta
+  atual.
+- `pc/src-tauri/tests/config.rs`: uma Pasta já gravada continua efetiva quando
+  Downloads não pode ser resolvida. Red porque a inicialização tenta resolver
+  Downloads antes de consultar a preferência.
 
 ## Comments
+
+- 2026-09-24 Attempt 1 failed: exit 0. Log tail: Parei no guard de modelo do `ticket-flow`. O SYN-010 está em `Stage: to-implement` e o binding do repo atribui a implementação ao **gpt-6-luna max**. Este runtime está identificado apenas como Codex/GPT-6, então não consigo confirmar que corresponda ao modelo exigido. /  / A árvore está limpa na branch `sweatshop/2026-09-24-1506`. Não fiz alterações. O ticket está em [01-SYN-010-pc-pasta-padrao-e-engrenagem.md](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/01-SYN-010-pc-pasta-padrao-e-engrenagem.md).
+
+- 2026-09-24 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: O `SYN-010` está em `Stage: to-implement`, na branch de sessão `sweatshop/2026-09-24-1506`. O binding do repositório reserva a implementação para **gpt-6-luna max**; este runtime só está identificado como GPT-6, então o guard do `ticket-flow` exige parar sem implementar. /  / A árvore segue limpa e não rodei testes. Para avançar, execute o ticket com o modelo indicado.
+
+- 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.
+- Débito humano: inspeção visual do chat, painel, seletor nativo, tela inicial sem diálogo e menu da bandeja. O Computer Use falhou ao capturar a janela: `SetIsBorderRequired failed: No such interface supported`.
+- 2026-09-24 Inspeção: app encerrado e entrada de autostart removida. A revisão automática bloqueou a exclusão das pastas geradas nesta execução: `%APPDATA%\dev.synchronice.pc`, `%LOCALAPPDATA%\dev.synchronice.pc` e `%TEMP%\SynchroNice-SYN-010`; a limpeza manual ainda é necessária.
+- Débito humano: confirmar visualmente a engrenagem e o painel sobre a tela de QR e no chat após mover o cabeçalho; esta rodada não abriu o app.
+
+#### Review (2026-09-24)
+
+Verdict: Reopen: o critério 5 exige guardar a Pasta de cada Item recebido para que trocar a Pasta afete apenas os próximos arquivos.
+
+- Standards: nenhum achado acionável.
+- Spec: o servidor grava o próximo arquivo na Pasta nova, mas `read_file_bytes` e `caminho_para_arrastar` procuram todos os Itens recebidos na Pasta atual. Uma bolha antiga perde a miniatura/arraste, ou aponta para outro arquivo se houver um nome igual. Reabrir para teste de regressão antes do código, no seam de `pc/src-tauri/tests/server.rs`, cobrindo mesmo nome em Pastas diferentes e resolução pelo id do Item. A correção pode ficar nos arquivos primários existentes (`server.rs`, `lib.rs`, `main.ts` e teste).
+- Gate: passou (`cargo fmt --check`, `cargo clippy`, 37 testes Rust, `tsc --noEmit`, `gradle check`). A inspeção visual permanece como débito humano registrado acima.
+
+#### Review (2026-09-24, segunda passagem)
+
+Verdict: Reopen: critérios 4 e 5 ainda têm lacunas; o critério 5 requer novo teste de regressão antes da correção.
+
+- Standards: nenhum achado acionável.
+- Spec: a engrenagem está dentro de `#frame`, oculto por `mostrarQr`, então não abre configurações na tela inicial de QR nem após Desparear (critério 4).
+- Spec: `lib.rs::pasta_efetiva` resolve Downloads antes de consultar a Pasta gravada. Se a resolução falhar, `start_server` não sobe mesmo com uma Pasta escolhida (critério 5). Registrar o caso no seam de `tests/config.rs` antes de corrigir.
+- O defeito anterior do critério 5, arquivos homônimos em Pastas diferentes, foi corrigido por lookup pelo id do Item e coberto em `tests/server.rs`.
+- Verificação visual continua como débito humano já registrado; esta passagem não rodou o gate porque reabriu o ticket para teste e implementação.
+
+#### Resolution (2026-09-24)
+
+Verdict: Approve
+
+- Standards: nenhum achado acionável. Corrigido um comentário obsoleto em `pc/ui/main.ts`.
+- Spec: critérios 1–8 atendidos na revisão do diff. A engrenagem fica fora das telas de chat e QR; a Pasta escolhida dispensa a resolução de Downloads; miniatura e arraste resolvem o arquivo pelo id do Item.
+- Arquivos: `pc/index.html`, `pc/ui/main.ts`, `pc/ui/styles.css`, `pc/src-tauri/src/{config,lib,server}.rs`, `pc/src-tauri/tests/{config,server}.rs`.
+- Red-green: commits de teste isolados `7d31288`, `e05b6f7` e `131c0d8` falharam antes das respectivas correções (Pasta padrão ausente, consulta de arquivo por id ausente e resolução prematura de Downloads). Após as correções, os 39 testes Rust passaram (6 config, 2 drag, 31 server).
+- Gate após rebase na branch de sessão: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` passou (`cargo fmt --check`, `cargo clippy`, 39 testes Rust, `tsc --noEmit`, `gradle check`). A inspeção visual segue como débito humano acima.
