@@ -1,5 +1,5 @@
 # SYN-011: PC — Copiáveis
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-010
 Review: agent
@@ -67,3 +67,5 @@ Critérios 4 a 8 são de tela: verificação manual abrindo o app.
 ## Comments
 
 - 2026-09-24 Attempt 1 failed: exit 0. Log tail: O SYN-011 está em `Stage: reviewing` no ramo `syn-011`. O `ticket-flow` manda parar nessa etapa e reportar, sem continuar uma revisão iniciada por outra sessão. O ramo está limpo e contém os commits de testes e implementação; não fiz alterações de código. /  / Há uma diferença de estado: em `main`, o ticket está `done` e consta no ledger, mas o ramo de sessão ativo não inclui esse merge. Deixei `syn-011` checado para refletir o ramo do ticket. Consulte [o ticket SYN-011](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/02-SYN-011-pc-copiaveis.md).
+
+- 2026-09-24 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: O SYN-011 está em `Stage: reviewing` na branch `syn-011`. O fluxo `ticket-flow` manda parar nessa etapa e reportar, sem continuar a revisão. /  / Deixei o workspace na branch `syn-011`, sincronizada com `origin/syn-011`; está limpa no commit `17a6a27`. O ticket registra a implementação e os gates aprovados, além de um débito de inspeção visual. Não fiz alterações nem rodei o gate nesta etapa. /  / [Tíquete SYN-011](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/02-SYN-011-pc-copiaveis.md)
