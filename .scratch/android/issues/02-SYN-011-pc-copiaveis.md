@@ -65,3 +65,5 @@ Critérios 4 a 8 são de tela: verificação manual abrindo o app.
   no gate.
 
 ## Comments
+
+- 2026-09-24 Attempt 1 failed: exit 0. Log tail: O SYN-011 está em `Stage: reviewing` no ramo `syn-011`. O `ticket-flow` manda parar nessa etapa e reportar, sem continuar uma revisão iniciada por outra sessão. O ramo está limpo e contém os commits de testes e implementação; não fiz alterações de código. /  / Há uma diferença de estado: em `main`, o ticket está `done` e consta no ledger, mas o ramo de sessão ativo não inclui esse merge. Deixei `syn-011` checado para refletir o ramo do ticket. Consulte [o ticket SYN-011](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/02-SYN-011-pc-copiaveis.md).
