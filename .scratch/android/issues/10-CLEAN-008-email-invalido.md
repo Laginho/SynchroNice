@@ -1,5 +1,5 @@
 # CLEAN-008: E-mail inválido não é Copiável
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-011
 Review: agent
