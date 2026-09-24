@@ -36,8 +36,14 @@ pub fn load_pasta(config_dir: &Path) -> Option<PathBuf> {
 
 /// A Pasta gravada, ou `SynchroNice` dentro de Downloads quando ainda não há
 /// uma preferência. O chamador resolve Downloads pela plataforma.
-pub fn pasta_efetiva(config_dir: &Path, downloads_dir: &Path) -> PathBuf {
-    load_pasta(config_dir).unwrap_or_else(|| downloads_dir.join("SynchroNice"))
+pub fn pasta_efetiva<E>(
+    config_dir: &Path,
+    downloads_dir: impl FnOnce() -> Result<PathBuf, E>,
+) -> Result<PathBuf, E> {
+    match load_pasta(config_dir) {
+        Some(pasta) => Ok(pasta),
+        None => downloads_dir().map(|dir| dir.join("SynchroNice")),
+    }
 }
 
 pub fn save_pasta(config_dir: &Path, pasta: &Path) -> io::Result<()> {

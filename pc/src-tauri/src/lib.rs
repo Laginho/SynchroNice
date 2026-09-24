@@ -48,8 +48,9 @@ struct EstadoParInicial {
 }
 
 fn pasta_efetiva(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, String> {
-    let downloads_dir = app.path().download_dir().map_err(|e| e.to_string())?;
-    Ok(config::pasta_efetiva(config_dir, &downloads_dir))
+    config::pasta_efetiva(config_dir, || {
+        app.path().download_dir().map_err(|e| e.to_string())
+    })
 }
 
 /// Evento que a janela escuta para desenhar a bolha de um Item novo.
