@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -75,3 +75,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-24 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: Parei conforme a regra de modelo da `ticket-flow`: [SYN-012](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/03-SYN-012-casca-do-android.md) está em `to-implement`, e o `AGENTS.md` atribui o stage 2 ao **gpt-6-luna max**. Esta sessão não está identificada como esse modelo. /  / Não alterei arquivos nem rodei testes. O ticket já registra uma tentativa anterior com o mesmo impedimento; o próximo passo é executar SYN-012 com gpt-6-luna max.
 
 - 2026-09-24 De volta a to-implement: o bloqueio era o guard de modelo do `ticket-flow` (Codex não informa o modelo à sessão), corrigido no skill. O ticket em si não tem pendência.
+
+- 2026-09-24 Attempt 3 stopped to ask: ## SYN-012 bloqueado /  / Implementei o parser validado do QR e a casca Android com câmera CameraX/ZXing, descoberta mDNS e chat. Os commits na branch `syn-012` são `6b6f3b4` (testes) e `eb57837` (implementação parcial). /  / O ticket está em `Stage: blocked`, registrado em [SYN-012](D:/Desktop/Projects/SynchroNice/.scratch/android/issues/03-SYN-012-casca-do-android.md). O gate confirmou o vermelho inicial esperado; depois, parou na configuração do Gradle, antes de compilar: o AGP compatível com API 37 traz Kotlin Gradle Plugin 2.2.10, mas `protocol-client` fixa 2.0.21. Corrigir isso exige incluir `android/protocol-client/build.gradle.kts` no escopo do ticket. A documentação oficial confirma que AGP 9.2 suporta API 37 e requer Gradle 9.4.1. ([AGP 9.2](https://developer.android.com/build/releases/agp-9-2-0-release-notes)) /  / Também não encontrei o Android SDK nesta máquina; a decisão anterior registrada no `HANDOFF.md` foi não instalá-lo. Sem o SDK, não consegui compilar o app nem fazer a verificação visual; o Computer Use não listou aplicativos disponíveis. /  / Para retomar, falta definir o escopo do arquivo de build do cliente e fornecer o caminho do SDK ou autorizar sua instalação. O gate completo e os fluxos no aparelho continuam sem validação.
