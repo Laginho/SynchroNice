@@ -94,6 +94,22 @@ body {
   color: var(--fg-dim);
   cursor: wait;
 }
+.settings-panel .settings-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.settings-panel .settings-option:hover {
+  background: #414141;
+}
+.settings-panel .settings-option input {
+  margin: 0;
+  accent-color: #7ba7ff;
+}
 .scroll {
   flex: 1;
   overflow-y: auto;
@@ -213,6 +229,17 @@ body {
 }
 .item a {
   color: #1b4fa8;
+  text-decoration: underline;
+}
+.item .copyable {
+  color: #1b4fa8;
+  text-decoration: none;
+  cursor: pointer;
+}
+.item .copyable:focus-visible {
+  outline: 2px solid #1b4fa8;
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 .item time {
   display: block;
