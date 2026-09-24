@@ -29,9 +29,21 @@ fn save(config_dir: &Path, config: &ConfigFile) -> io::Result<()> {
     std::fs::write(config_dir.join(FILE_NAME), data)
 }
 
-/// A Pasta escolhida, ou `None` se o app nunca perguntou ("não escolhida").
+/// A Pasta escolhida, ou `None` se o app ainda não gravou uma preferência.
 pub fn load_pasta(config_dir: &Path) -> Option<PathBuf> {
     load(config_dir).pasta
+}
+
+/// A Pasta gravada, ou `SynchroNice` dentro de Downloads quando ainda não há
+/// uma preferência. O diretório de Downloads só é resolvido quando necessário.
+pub fn pasta_efetiva<E>(
+    config_dir: &Path,
+    downloads_dir: impl FnOnce() -> Result<PathBuf, E>,
+) -> Result<PathBuf, E> {
+    match load_pasta(config_dir) {
+        Some(pasta) => Ok(pasta),
+        None => downloads_dir().map(|dir| dir.join("SynchroNice")),
+    }
 }
 
 pub fn save_pasta(config_dir: &Path, pasta: &Path) -> io::Result<()> {

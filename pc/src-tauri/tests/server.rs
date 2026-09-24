@@ -114,6 +114,74 @@ fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
     assert_eq!(pc_lib::config::load_pasta(raiz.path()), Some(pasta));
 }
 
+#[test]
+fn arquivo_sem_pasta_configurada_e_gravado_em_downloads_synchronice_criada_se_precisar() {
+    let config_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let pasta = pc_lib::config::pasta_efetiva(config_dir.path(), || {
+        Ok::<_, std::io::Error>(downloads.path().to_path_buf())
+    })
+    .unwrap();
+    assert_eq!(pc_lib::config::load_pasta(config_dir.path()), None);
+    assert!(!pasta.exists());
+
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        Items::new(),
+        Outbox::new(config_dir.path().join("outbox")).unwrap(),
+        Some(pasta.clone()),
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+    let bytes = b"arquivo recebido sem pasta configurada";
+
+    assert_eq!(post_arquivo(&base, Some(TOKEN), "primeiro.bin", bytes), 201);
+    assert_eq!(std::fs::read(pasta.join("primeiro.bin")).unwrap(), bytes);
+    assert!(
+        pasta.is_dir(),
+        "o destino padrão é criado no primeiro arquivo"
+    );
+    assert_eq!(pc_lib::config::load_pasta(config_dir.path()), None);
+}
+
+#[test]
+fn item_recebido_continua_resolvendo_sua_pasta_depois_da_troca() {
+    let raiz = tempfile::tempdir().unwrap();
+    let pasta_original = raiz.path().join("original");
+    let pasta_nova = raiz.path().join("nova");
+    std::fs::create_dir_all(&pasta_original).unwrap();
+    std::fs::create_dir_all(&pasta_nova).unwrap();
+    let items = Items::new();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        items.clone(),
+        Outbox::new(raiz.path().join("outbox")).unwrap(),
+        Some(pasta_original.clone()),
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+
+    assert_eq!(
+        post_arquivo(&base, Some(TOKEN), "foto.png", b"original"),
+        201
+    );
+    let id_original = items.snapshot()[0].id;
+
+    running.escolher_pasta(raiz.path(), &pasta_nova).unwrap();
+
+    assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b"novo"), 201);
+    let id_novo = items.snapshot()[1].id;
+
+    let caminho_original = running.caminho_do_arquivo(id_original).unwrap();
+    let caminho_novo = running.caminho_do_arquivo(id_novo).unwrap();
+    assert_eq!(caminho_original, pasta_original.join("foto.png"));
+    assert_eq!(caminho_novo, pasta_nova.join("foto.png"));
+    assert_eq!(std::fs::read(caminho_original).unwrap(), b"original");
+    assert_eq!(std::fs::read(caminho_novo).unwrap(), b"novo");
+}
+
 /// Sobe o servidor em porta aleatória com token conhecido, uma Pasta e uma
 /// fila de saída temporárias, que morrem com o teste.
 fn sobe() -> (String, Items, Outbox, tempfile::TempDir) {
