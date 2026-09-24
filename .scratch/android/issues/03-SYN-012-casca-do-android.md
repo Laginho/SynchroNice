@@ -69,3 +69,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   e cobrir isso, o ticket não escreve teste nesta costura e diz isso no commit.
 
 ## Comments
+
+- 2026-09-24 Attempt 1 failed: exit 0. Log tail: Encontrei SYN-012 em `Stage: to-implement`, com árvore de trabalho limpa. O binding do repositório atribui o stage 2 ao **gpt-6-luna max**, mas esta sessão não está identificada como esse modelo. Pelo `ticket-flow`, devo parar sem implementar; o próximo passo é executar SYN-012 com gpt-6-luna max.
