@@ -34,7 +34,7 @@ const DDD_VALIDOS = new Set(
 );
 
 const URL_SOURCE = String.raw`https?:\/\/[^\s<>"']+`;
-const EMAIL_SOURCE = String.raw`[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+`;
+const EMAIL_SOURCE = String.raw`[A-Z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+`;
 const UUID_SOURCE = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`;
 const CNPJ_FORMATADO_SOURCE = String.raw`\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}`;
 const CPF_FORMATADO_SOURCE = String.raw`\d{3}\.\d{3}\.\d{3}-\d{2}`;

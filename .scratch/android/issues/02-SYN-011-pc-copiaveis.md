@@ -1,5 +1,5 @@
 # SYN-011: PC — Copiáveis
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-010
 Review: agent
@@ -65,3 +65,16 @@ Critérios 4 a 8 são de tela: verificação manual abrindo o app.
   no gate.
 
 ## Comments
+
+- 2026-09-24 Red-green proof: the test-only commit `dc19ef6` made
+  `gate.ps1 -TestsOnly` fail because `pc/ui/copiaveis.ts` did not exist; the
+  existing 39 Rust tests and Gradle tests passed. After implementation,
+  `gate.ps1 -TestsOnly` passed with 20/20 Node cases, 39 Rust tests (6 config,
+  2 drag, 31 server) and Gradle tests. The full gate passed fmt, Clippy, those
+  39 Rust tests, `tsc --noEmit`, all 20 Node cases and `gradle check`.
+- Débito humano: inspeção ao vivo dos critérios 4–8. A árvore de acessibilidade
+  mostrou Configurações na tela de QR, mas a captura visual falhou (`SetIsBorderRequired
+  failed: No such interface supported (0x80004002)`) e o clique por índice falhou
+  (`coordinate input geometry is unavailable`). O painel e checkbox, o estilo,
+  a cópia real, a abertura de link e a seleção por arraste não foram observados
+  ao vivo.
