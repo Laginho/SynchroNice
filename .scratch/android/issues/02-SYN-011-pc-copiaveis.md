@@ -1,5 +1,5 @@
 # SYN-011: PC — Copiáveis
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-010
 Review: agent
@@ -78,3 +78,7 @@ Critérios 4 a 8 são de tela: verificação manual abrindo o app.
   (`coordinate input geometry is unavailable`). O painel e checkbox, o estilo,
   a cópia real, a abertura de link e a seleção por arraste não foram observados
   ao vivo.
+- 2026-09-24 Revisão de estágio 3: o app abriu e mostrou a tela de QR na árvore
+  de acessibilidade, mas a captura visual e o clique falharam novamente com os
+  mesmos erros. O débito visual acima permanece. A validação de e-mail e UUID
+  passou a usar os mesmos padrões da busca de candidatos, eliminando duplicação.

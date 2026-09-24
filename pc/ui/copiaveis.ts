@@ -36,6 +36,8 @@ const DDD_VALIDOS = new Set(
 const URL_SOURCE = String.raw`https?:\/\/[^\s<>"']+`;
 const EMAIL_SOURCE = String.raw`[A-Z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+`;
 const UUID_SOURCE = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`;
+const EMAIL_EXATO = new RegExp(`^${EMAIL_SOURCE}$`, "i");
+const UUID_EXATO = new RegExp(`^${UUID_SOURCE}$`, "i");
 const CNPJ_FORMATADO_SOURCE = String.raw`\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}`;
 const CPF_FORMATADO_SOURCE = String.raw`\d{3}\.\d{3}\.\d{3}-\d{2}`;
 const TELEFONE_SOURCE = String.raw`(?:\+?55[ \t]*)?(?:\(\d{2}\)|\d{2})[ \t.-]*(?:\d{4,5})[ \t.-]*\d{4}`;
@@ -116,10 +118,10 @@ function contar(texto: string, caractere: string): number {
 }
 
 function criarTrechoCopiavel(bruto: string): TrechoCopiavel | null {
-  if (/^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+$/i.test(bruto)) {
+  if (EMAIL_EXATO.test(bruto)) {
     return criarCopiavel("email", bruto, bruto, bruto);
   }
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bruto)) {
+  if (UUID_EXATO.test(bruto)) {
     return criarCopiavel("pix", bruto, bruto, bruto);
   }
 
