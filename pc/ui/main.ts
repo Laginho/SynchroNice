@@ -5,6 +5,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { segmentarTexto } from "./copiaveis.ts";
 
 interface TextItem {
   id: number;
@@ -54,6 +55,8 @@ const IMAGEM = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp"]);
 /** Quanto o mouse precisa andar, com o botão apertado, para virar drag e não
  * clique (SYN-006). 4px é o mesmo `SM_CXDRAG` que o Windows usa. */
 const LIMIAR_DRAG = 4;
+const PREFERENCIA_COPIAR_COM_PONTUACAO = "copy-with-punctuation";
+let copiarComPontuacao = localStorage.getItem(PREFERENCIA_COPIAR_COM_PONTUACAO) === "true";
 
 const scroll = document.querySelector<HTMLElement>(".scroll")!;
 const empty = scroll.querySelector<HTMLElement>(".empty")!;
@@ -62,18 +65,6 @@ const recebidas = new Map<number, HTMLElement>();
 /** Bolha enviada já desenhada por id — ids do PC, num espaço à parte dos ids
  * de Item recebido, então as duas listas precisam de mapas separados. */
 const enviadas = new Map<number, HTMLElement>();
-
-/** Só um texto que é, inteiro, uma URL http(s) vira link. */
-function asUrl(text: string): string | null {
-  const candidate = text.trim();
-  if (/\s/.test(candidate)) return null;
-  try {
-    const url = new URL(candidate);
-    return url.protocol === "http:" || url.protocol === "https:" ? candidate : null;
-  } catch {
-    return null;
-  }
-}
 
 function hora(atMs: number): string {
   return new Date(atMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -95,24 +86,94 @@ function tamanhoLegivel(bytes: number): string {
   return `${valor.toFixed(i === 0 ? 0 : 1).replace(".", ",")} ${unidades[i]}`;
 }
 
-function linkDeTexto(texto: string): HTMLElement {
+function renderizarTrechos(texto: string): HTMLElement {
   const body = document.createElement("div");
   body.className = "text";
-  // textContent, nunca innerHTML: HTML recebido aparece como texto literal.
-  const url = asUrl(texto);
-  if (url) {
-    const link = document.createElement("a");
-    link.href = url;
-    link.textContent = texto;
-    link.addEventListener("click", (event) => {
-      event.preventDefault();
-      void openUrl(url);
-    });
-    body.append(link);
-  } else {
-    body.textContent = texto;
+
+  for (const trecho of segmentarTexto(texto)) {
+    if (trecho.type === "text") {
+      body.append(document.createTextNode(trecho.text));
+    } else if (trecho.type === "link") {
+      const link = document.createElement("a");
+      link.href = trecho.href;
+      link.textContent = trecho.text;
+      body.append(link);
+    } else {
+      const copiavel = document.createElement("span");
+      copiavel.className = "copyable";
+      copiavel.textContent = trecho.text;
+      copiavel.dataset.copyPlain = trecho.copyPlain;
+      copiavel.dataset.copyFormatted = trecho.copyFormatted;
+      copiavel.tabIndex = 0;
+      copiavel.setAttribute("role", "button");
+      copiavel.setAttribute("aria-label", `Copiar ${trecho.kind}: ${trecho.text}`);
+      body.append(copiavel);
+    }
   }
   return body;
+}
+
+function ligarAcoesDeTexto(bolha: HTMLElement, textoCompleto: string): void {
+  let inicioPonteiro: { x: number; y: number } | null = null;
+  let arrastou = false;
+
+  bolha.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    inicioPonteiro = { x: event.clientX, y: event.clientY };
+    arrastou = false;
+  });
+  bolha.addEventListener("pointermove", (event) => {
+    if (!inicioPonteiro) return;
+    arrastou ||= Math.hypot(event.clientX - inicioPonteiro.x, event.clientY - inicioPonteiro.y) > LIMIAR_DRAG;
+  });
+  bolha.addEventListener("pointercancel", () => {
+    inicioPonteiro = null;
+    arrastou = false;
+  });
+  bolha.addEventListener("click", (event) => {
+    const alvo = event.target;
+    if (!(alvo instanceof Element)) return;
+    const link = alvo.closest<HTMLAnchorElement>("a");
+    const copiavel = alvo.closest<HTMLElement>(".copyable");
+    const selecao = window.getSelection();
+
+    if (arrastou || (selecao && !selecao.isCollapsed)) {
+      if (link) event.preventDefault();
+      inicioPonteiro = null;
+      arrastou = false;
+      return;
+    }
+    inicioPonteiro = null;
+
+    if (link) {
+      event.preventDefault();
+      void openUrl(link.href);
+    } else if (copiavel) {
+      event.preventDefault();
+      void copiarParaClipboard(textoDoCopiavel(copiavel));
+    } else {
+      void copiarParaClipboard(textoCompleto);
+    }
+  });
+  bolha.addEventListener("keydown", (event) => {
+    if ((event.key !== "Enter" && event.key !== " ") || !(event.target instanceof HTMLElement)) return;
+    const copiavel = event.target.closest<HTMLElement>(".copyable");
+    if (!copiavel) return;
+    event.preventDefault();
+    void copiarParaClipboard(textoDoCopiavel(copiavel));
+  });
+}
+
+function textoDoCopiavel(elemento: HTMLElement): string {
+  return copiarComPontuacao ? elemento.dataset.copyFormatted ?? "" : elemento.dataset.copyPlain ?? "";
+}
+
+async function copiarParaClipboard(texto: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch (e) {
+    console.error(`não foi possível copiar o texto: ${e}`);
+  }
 }
 
 function renderTexto(item: TextItem): HTMLElement {
@@ -122,7 +183,8 @@ function renderTexto(item: TextItem): HTMLElement {
   const time = document.createElement("time");
   time.textContent = hora(item.at_ms);
 
-  bubble.append(linkDeTexto(item.text), time);
+  bubble.append(renderizarTrechos(item.text), time);
+  ligarAcoesDeTexto(bubble, item.text);
   return bubble;
 }
 
@@ -347,7 +409,8 @@ function renderTextoEnviado(item: EnviadoTexto): HTMLElement {
   time.textContent = hora(item.at_ms);
   rodape.append(time);
 
-  bubble.append(linkDeTexto(item.text), rodape);
+  bubble.append(renderizarTrechos(item.text), rodape);
+  ligarAcoesDeTexto(bubble, item.text);
   atualizarEstadoEnvio(bubble, rodape, item.entregue);
   return bubble;
 }
@@ -424,6 +487,13 @@ function ligarConfiguracoes(): void {
   const panel = document.querySelector<HTMLElement>("#settings-panel")!;
   const mudarPasta = document.querySelector<HTMLButtonElement>("#change-folder")!;
   const desparear = document.querySelector<HTMLButtonElement>("#unpair")!;
+  const copiarComPontuacaoInput = document.querySelector<HTMLInputElement>("#copy-with-punctuation")!;
+  copiarComPontuacaoInput.checked = copiarComPontuacao;
+
+  copiarComPontuacaoInput.addEventListener("change", () => {
+    copiarComPontuacao = copiarComPontuacaoInput.checked;
+    localStorage.setItem(PREFERENCIA_COPIAR_COM_PONTUACAO, String(copiarComPontuacao));
+  });
 
   function fechar(): void {
     panel.hidden = true;
