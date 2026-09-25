@@ -65,6 +65,9 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
   (`SetIsBorderRequired … No such interface supported`) era do ambiente, já
   resolvida. Tente-o antes de registrar débito visual; débito é só o que ele
   de fato não conseguiu ver.
+- Débito humano se acumula até o app ficar pronto: o humano verifica tudo de
+  uma vez, junto com o próprio QA. Não é pendência de run: o resumo do foreman
+  lista os débitos, mas não os põe em "Your turn".
 - O foreman não para o run por `blocked` esperando humano: spawna o fable high
   e segue. Para só quando não há ticket rodável nem `blocked` respondível.
 - Vale para qualquer decisão que o foreman levaria ao humano, não só

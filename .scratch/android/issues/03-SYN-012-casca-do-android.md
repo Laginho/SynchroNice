@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -93,3 +93,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-24 Proxy decided: `android/protocol-client/build.gradle.kts` entra nos Primary files, só o bloco `plugins` (dobrado acima; o parágrafo "Build" do corpo diz como) — o AGP 9.x traz o KGP embutido no classpath e o Gradle recusa o `kotlin("jvm") version "2.0.21"` do módulo; alinhar a versão é mudança de build, reversível, sem tocar no código nem nos 7 testes do módulo, que são justamente a rede de segurança para a troca de Kotlin. Manter 2.0.21 não é opção com esse AGP.
 
 - 2026-09-24 Proxy escalated: **não há Android SDK nesta máquina, e instalar é decisão do humano de verdade** — registrada em SYN-007 (`## Comments`, 2026-09-20: "1–2 GB de SDK é mudança na máquina, não no repo, e essa decisão fica com o humano de verdade") e reafirmada no `HANDOFF.md` item 3. Sem SDK o `:app` não compila, o critério 2 não fecha e o stage 3 não teria como verificar 1000+ linhas de Kotlin/Compose nunca compiladas; mergear isso às cegas é o caso "caro de desfazer". Verifiquei de novo hoje: `android/local.properties`, `%LOCALAPPDATA%\Android\Sdk`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` e `sdkmanager` ausentes; `C:\Program Files\Android` só tem o Android Studio. O que o humano precisa decidir, uma das três: (1) instalar o SDK aqui (plataforma 37 + build-tools, via Android Studio ou cmdline-tools) e criar `android/local.properties`; (2) mover o build Android para outra máquina ou para CI (o repo é GitHub e não tem workflow ainda; os runners do Actions vêm com o SDK) — isso muda o contrato do gate e é stage 1; (3) parar este ticket até lá. Nada foi instalado nem autorizado. O trabalho do stage 2 sobrevive só como commits sem ref (`6b6f3b4` testes, `eb57837` implementação, base `61e8da2`, anterior ao merge do SYN-011): quem retomar faz `git branch syn-012 eb57837` e rebase em `main` antes de continuar; a branch `syn-012` em si já não existe.
+
+- 2026-09-25 De volta a to-implement: o humano instalou o Android SDK em `D:\Android\Sdk`; `android/local.properties` (fora do git) aponta para ele. O trabalho parcial da tentativa 3 está na tag local `keep/syn-012` (`6b6f3b4` testes, `eb57837` implementação), reaproveitável.

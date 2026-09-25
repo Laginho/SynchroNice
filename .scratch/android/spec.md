@@ -247,12 +247,13 @@ enquanto dura um envio longo.
 
 ## Further Notes
 
-- **Build Android.** O SDK desta máquina tem só a plataforma `android-37`. O
-  módulo do app pode exigir subir o Gradle 8.10 e escolher uma versão do
-  Android Gradle Plugin que aceite essa plataforma. O JDK 17 do módulo cliente
-  continua. O `gradlew check` com um módulo Android inclui o lint do Android,
-  que é lento. Se ele pesar demais no gate, o gate passa a rodar tarefas
-  explícitas.
+- **Build Android.** O SDK desta máquina fica em `D:\Android\Sdk`
+  (command-line tools, `platform-tools`, `platforms/android-37.0`), apontado
+  por `android/local.properties` (fora do git). O AGP que aceita a API 37
+  (9.2) exige Gradle 9.4.1 e traz o Kotlin 2.2.10, então o módulo cliente sobe
+  junto. O JDK 17 continua. O `gradlew check` com um módulo Android inclui o
+  lint do Android, que é lento. Se ele pesar demais no gate, o gate passa a
+  rodar tarefas explícitas.
 - **Visualização manual.** Pelo experimento do repo, o que exigir abrir o app
   vira `Débito humano:` no ticket. O dono verifica tudo de uma vez no fim.
 - Ordem sugerida: PC primeiro (a engrenagem e os copiáveis criam o arquivo de
