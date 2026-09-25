@@ -34,7 +34,8 @@ const DDD_VALIDOS = new Set(
 );
 
 const URL_SOURCE = String.raw`https?:\/\/[^\s<>"']+`;
-const EMAIL_SOURCE = String.raw`[A-Z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+`;
+const EMAIL_LOCAL_ATOM_SOURCE = String.raw`[A-Z0-9!#$%&'*+/=?^_\x60{|}~-]+`;
+const EMAIL_SOURCE = String.raw`${EMAIL_LOCAL_ATOM_SOURCE}(?:\.${EMAIL_LOCAL_ATOM_SOURCE})*@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+`;
 const UUID_SOURCE = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`;
 const EMAIL_EXATO = new RegExp(`^${EMAIL_SOURCE}$`, "i");
 const UUID_EXATO = new RegExp(`^${UUID_SOURCE}$`, "i");
@@ -45,7 +46,7 @@ const TELEFONE_SOURCE = String.raw`(?:\+?55[ \t]*)?(?:\(\d{2}\)|\d{2})[ \t.-]*(?
 // Um copiável termina em uma letra ou dígito: links têm pontuação final e
 // seguem regra própria para não interpretar os números do endereço como ID.
 const CANDIDATOS = new RegExp(
-  String.raw`(?<![\p{L}\d])(?:(${URL_SOURCE})|(?:${EMAIL_SOURCE}|${UUID_SOURCE}|${CNPJ_FORMATADO_SOURCE}|${CPF_FORMATADO_SOURCE}|${TELEFONE_SOURCE}|\d{14})(?![\p{L}\d]))`,
+  String.raw`(?<![\p{L}\d])(?:(${URL_SOURCE})|(?<!\.)(?:${EMAIL_SOURCE})|(?:${UUID_SOURCE}|${CNPJ_FORMATADO_SOURCE}|${CPF_FORMATADO_SOURCE}|${TELEFONE_SOURCE}|\d{14})(?![\p{L}\d]))`,
   "giu",
 );
 
