@@ -1,5 +1,5 @@
 # CLEAN-007: Restos da Pasta padrão (SYN-010)
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -60,6 +60,8 @@ costura de teste. O lado do servidor já está coberto por
 item 2 é deleção. Diga isso no commit.
 
 ## Comments
+
+- 2026-09-24 Stage 2 started: no new tests per the approved ticket; existing server and config tests cover the named seams, while the startup fallback remains glue in `start_server`.
 
 - 2026-09-24 Attempt 1 stopped to ask: `CLEAN-007` está em `blocked` na branch `clean-007`, commit `71029fb`. /  / O critério 3 exige remover `pub mod drag` de `lib.rs`, mas o escopo aprovado limita alterações nesse arquivo a `start_server`. Registrei a pergunta no [ticket](D:/Desktop/Projects/SynchroNice/.scratch/core/issues/16-CLEAN-007-restos-da-pasta-padrao.md:2). Não há proxy disponível neste runtime, então o fluxo exige parar até o escopo ser ajustado no stage 1. /  / Nenhum código foi alterado; não rodei o gate. A inspeção inicial do Computer Use não encontrou apps abertos.
 
