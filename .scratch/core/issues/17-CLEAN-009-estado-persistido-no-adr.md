@@ -1,5 +1,5 @@
 # CLEAN-009: Atualizar estado persistido no ADR-0002
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-011
 Review: agent
@@ -34,3 +34,12 @@ Nenhum: o ticket altera apenas documentação.
 
 - 2026-09-24 Achado de Standards na revisão de SYN-011; o ADR já estava
   desatualizado antes desse ticket pela Pasta persistente.
+
+#### Resolution (2026-09-24)
+
+Verdict: Approve
+
+- Standards: nenhum achado; o ADR usa os termos do glossário e preserva a decisão original.
+- Spec: critérios 1 e 2 atendidos. O ADR nomeia Par, Pasta, Pendentes e a preferência de cópia, situa a preferência no `localStorage` do WebView e distingue esses dados da Sessão em memória.
+- Arquivo: `docs/adr/0002-par-persistente-sessao-descartavel.md`.
+- Prova: ticket apenas documental, sem testes novos nem etapa red-green, conforme `Tests stage 2 writes`. O diff do ADR e o código de persistência foram revisados; `git diff --check` passou. Após rebase, `gate.ps1` passou: fmt, clippy, 37 testes Rust (6 de config e 31 de servidor), typecheck TS, 24 testes de UI e Gradle check.
