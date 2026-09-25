@@ -39,12 +39,15 @@ confirmados ao aparecer. O composer tem campo e botão de enviar; o texto vira
 bolha à direita, Pendente até o PC confirmar e depois Entregue. O chat vazio
 diz o que fazer. O chat é memória do processo: some quando o Android mata o app.
 
-Build: a plataforma alvo é `android-37`. Subir o Gradle e escolher o plugin
-Android que aceite essa plataforma faz parte deste ticket; o AGP que a aceita
-traz o Kotlin Gradle Plugin embutido, então a versão do `kotlin("jvm")` do
-módulo cliente é ditada por ele (declarada uma vez, no `build.gradle.kts` da
-raiz com `apply false`, ou igualada no módulo — a que der o diff menor). O gate
-continua passando, com os testes JVM do módulo cliente inclusos.
+Build (pronto em `main`, 2026-09-25): Gradle 9.4.1, AGP 9.2.0 e o plugin
+Compose 2.2.10 declarados na raiz com `apply false`; o `kotlin("jvm")` do módulo
+cliente perdeu a versão e usa o KGP que o AGP traz; `gradle.properties` dá 2 GB
+ao Gradle (o dex do Compose + CameraX estoura o padrão); o `:app` já existe, com
+o `build.gradle.kts` da tentativa 3 (dependências de Compose, CameraX e ZXing
+resolvidas) e um manifesto mínimo que este ticket substitui. O gate já compila o
+`:app` e roda o lint dele (~1 min): o critério 2 está coberto pela casca, o
+ticket só não pode quebrá-lo. Ao reaproveitar `keep/syn-012`, os arquivos de
+build de lá são iguais aos de `main`; só o manifesto conflita, e vale o da tag.
 
 **SDK (resolvido 2026-09-25):** o humano instalou o SDK em
 `D:\AppData\Local\Android\Sdk`, com `platforms/android-37.0`, e o
@@ -92,3 +95,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-24 Proxy escalated: **não há Android SDK nesta máquina, e instalar é decisão do humano de verdade** — registrada em SYN-007 (`## Comments`, 2026-09-20: "1–2 GB de SDK é mudança na máquina, não no repo, e essa decisão fica com o humano de verdade") e reafirmada no `HANDOFF.md` item 3. Sem SDK o `:app` não compila, o critério 2 não fecha e o stage 3 não teria como verificar 1000+ linhas de Kotlin/Compose nunca compiladas; mergear isso às cegas é o caso "caro de desfazer". Verifiquei de novo hoje: `android/local.properties`, `%LOCALAPPDATA%\Android\Sdk`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` e `sdkmanager` ausentes; `C:\Program Files\Android` só tem o Android Studio. O que o humano precisa decidir, uma das três: (1) instalar o SDK aqui (plataforma 37 + build-tools, via Android Studio ou cmdline-tools) e criar `android/local.properties`; (2) mover o build Android para outra máquina ou para CI (o repo é GitHub e não tem workflow ainda; os runners do Actions vêm com o SDK) — isso muda o contrato do gate e é stage 1; (3) parar este ticket até lá. Nada foi instalado nem autorizado. O trabalho do stage 2 sobrevive só como commits sem ref (`6b6f3b4` testes, `eb57837` implementação, base `61e8da2`, anterior ao merge do SYN-011): quem retomar faz `git branch syn-012 eb57837` e rebase em `main` antes de continuar; a branch `syn-012` em si já não existe.
 
 - 2026-09-25 De volta a to-implement: o humano instalou o Android SDK em `D:\AppData\Local\Android\Sdk`; `android/local.properties` (fora do git) aponta para ele. O trabalho parcial da tentativa 3 está na tag local `keep/syn-012` (`6b6f3b4` testes, `eb57837` implementação), reaproveitável.
+
+- 2026-09-25 Build Android montado em `main` antes do run (humano pediu): gate passa com `:app` compilando e lint incluso. O ticket fica com o código do app.
