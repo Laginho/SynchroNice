@@ -13,6 +13,10 @@ gerenciamento de arquivos pelo app.
 
 - O **Par** (vínculo PC-celular) persiste indefinidamente após um único QR.
   Só um Par existe; parear de novo substitui.
+- A **Pasta** escolhida no PC também persiste entre execuções; seu caminho é
+  guardado em `config.json` no diretório de configuração do app.
+- A preferência do PC **Copiar com pontuação** persiste no `localStorage` do
+  WebView.
 - A **Sessão** (conteúdo do chat) é descartada quando o app encerra de fato
   (sair pela bandeja, reiniciar Windows, Android matar o app). Esconder a
   janela não encerra.
@@ -31,6 +35,9 @@ gerenciamento de arquivos pelo app.
 
 - Reconexão exige que o celular encontre o PC na rede local sem intervenção,
   com IP variável. É a parte mais delicada do projeto.
-- Sem banco de dados: o estado em disco é só o Par e a fila de pendentes.
+- Sem banco de dados nem histórico de chat: fora dos arquivos comuns gravados
+  na Pasta, o estado persistente é o Par, a Pasta escolhida, a preferência de
+  cópia do PC e a fila de Pendentes mantida no aparelho de origem. A Sessão
+  continua apenas em memória.
 - Segurança: rede doméstica, uso pessoal. Só o token do QR autentica a
   conexão; sem cifra. Decisão explícita do autor.
