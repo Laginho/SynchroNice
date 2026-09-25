@@ -1,5 +1,5 @@
 # CLEAN-009: Atualizar estado persistido no ADR-0002
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-011
 Review: agent
