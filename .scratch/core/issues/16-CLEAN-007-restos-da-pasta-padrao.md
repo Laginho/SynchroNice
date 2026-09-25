@@ -1,5 +1,5 @@
 # CLEAN-007: Restos da Pasta padrão (SYN-010)
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -60,6 +60,10 @@ costura de teste. O lado do servidor já está coberto por
 item 2 é deleção. Diga isso no commit.
 
 ## Comments
+
+- 2026-09-24 Stage 2 verificado: `gate.ps1` passou (`cargo fmt --check`, clippy, 6 testes de config + 31 de servidor, `tsc --noEmit`, 24 testes de UI e `gradle check`). O commit de teste remove `tests/drag.rs` e atualiza o estágio; o commit de código não toca testes.
+- 2026-09-24 Débito humano: o app iniciou e o servidor subiu, mas o Computer Use desta sessão não expôs janelas nativas (`apps: []`, sem `listApps`/`listWindows`) nem browsers. Não foi possível confirmar visualmente chat, painel, seletor nativo, tela inicial sem diálogo, menu da bandeja, ou engrenagem/painel na tela de QR e no chat.
+- 2026-09-24 Limpeza da inspeção: a entrada de autostart foi restaurada à baseline e a pasta temporária isolada foi removida. O `config.json` e o `outbox` em `%APPDATA%` já existiam; o perfil `EBWebView` em `%LOCALAPPDATA%` também existia e recebeu escritas durante a execução. Seis objetos de cache foram criados; a remoção explícita deles foi rejeitada pela política automática (`blocked by policy`), então o perfil preexistente foi preservado.
 
 - 2026-09-24 Stage 2 started: no new tests per the approved ticket; existing server and config tests cover the named seams, while the startup fallback remains glue in `start_server`.
 
