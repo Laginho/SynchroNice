@@ -1,6 +1,5 @@
 pub mod anuncio;
 pub mod config;
-pub mod drag;
 pub mod items;
 pub mod outbox;
 pub mod par;
@@ -207,10 +206,10 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     app.manage(ParJaExistia(par_ja_existia));
 
     let pasta = match pasta_efetiva(app, &config_dir) {
-        Ok(pasta) => pasta,
+        Ok(pasta) => Some(pasta),
         Err(e) => {
-            eprintln!("sem Pasta efetiva, o servidor não sobe: {e}");
-            return;
+            eprintln!("sem Pasta efetiva; o servidor subirá sem Pasta: {e}");
+            None
         }
     };
 
@@ -242,7 +241,7 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     });
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], server::PORT));
-    match server::spawn(addr, par.clone(), items, outbox, Some(pasta)) {
+    match server::spawn(addr, par.clone(), items, outbox, pasta) {
         Ok(running) => {
             println!("servidor HTTP em {}", running.addr);
             match anuncio::Anuncio::subir(par.nome_instancia(), server::PORT) {

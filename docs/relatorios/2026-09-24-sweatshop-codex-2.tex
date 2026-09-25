@@ -1,0 +1,244 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs,array,tabularx}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+\emergencystretch=2em
+
+\definecolor{luna}{HTML}{3B6EA8}
+\definecolor{sol}{HTML}{D08A1E}
+\definecolor{perda}{HTML}{C0504D}
+
+\title{Sweatshop no Codex: segunda leva\\\large gpt-6-luna (max) no stage 2, gpt-6-sol (max) no stage 3}
+\author{Foreman, sessão \texttt{sweatshop/2026-09-24-1855}}
+\date{24 de setembro de 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Resumo}
+
+Segunda execução do \texttt{sweatshop-codex.ps1}, agora com o \textbf{sol em
+max} e a regra nova do stage 3 no \texttt{ticket-flow} (revisar contra os
+critérios escritos, todos os achados numa passada, requisito novo vira
+\texttt{CLEAN-*}; Agent-Skills \texttt{2c57db6}).
+
+\begin{itemize}
+  \item \textbf{Produzido:} 4 tickets mergeados, \textbf{nenhuma reabertura}:
+        SYN-011 (Copiáveis no PC), CLEAN-007, CLEAN-008 e CLEAN-009. Os dois
+        últimos nasceram da revisão do SYN-011 e fecharam no mesmo run. PR de
+        sessão: \href{https://github.com/Laginho/SynchroNice/pull/6}{\#6}.
+  \item \textbf{Custo:} 174 min de relógio (18:56--21:50), 38,0\,M tokens de
+        entrada (96,8\,\% em cache) e 345\,k de saída (71\,\% raciocínio).
+        \textbf{24\,\% da entrada} (9,2\,M) foi gasta em estágios que não
+        produziram nada.
+  \item \textbf{Bug grave no driver, corrigido:} a sessão nova era igual à
+        \texttt{main} e contava como mergeada. A revisão do SYN-011 não a viu,
+        tomou a \texttt{main} como base e \textbf{mergeou o PR
+        \href{https://github.com/Laginho/SynchroNice/pull/5}{\#5} direto na
+        \texttt{main}}, sem passar pelo humano. Correção em Agent-Skills
+        \texttt{8ba1ce1}.
+  \item \textbf{Bloqueio que é seu:} SYN-012 precisa do Android SDK, que não
+        existe nesta máquina. Ele segura os sete tickets Android.
+  \item \textbf{Veredito provisório:} sol max com a regra nova resolveu o
+        gargalo do run anterior (0 reaberturas em 4, contra 2 em 1). O luna
+        segue correto e com TDD limpo. O desperdício agora está fora dos
+        modelos: driver, tickets mal escritos e ambiente.
+\end{itemize}
+
+\section{Linha do tempo}
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+18:56 & Lançamento. O driver cria \texttt{sweatshop/2026-09-24-1855} a partir
+        da \texttt{main}, sem commits próprios. SYN-011, implementação (37 min).\\
+19:33 & Revisão do SYN-011 (13 min): \textbf{Approve}. Sem ver a sessão, abre e
+        mergeia o PR \#5 na \texttt{main}, fecha o ticket lá e cria
+        CLEAN-008 e CLEAN-009. O driver lê o ticket na sessão, que não está
+        \texttt{done}, e registra ``reaberto''.\\
+19:46 & Duas tentativas de stage 2 no SYN-011 (5 e 3 min) acham o ticket em
+        \texttt{reviewing} na branch e param. SYN-011 fica \texttt{blocked} na
+        sessão. O foreman acha a causa e corrige o driver às 19:58.\\
+19:55 & SYN-012, implementação (40 min): parser do QR e casca Android escritos,
+        mas \texttt{blocked}: versão do Kotlin Gradle Plugin e falta do SDK.\\
+20:35 & CLEAN-007, implementação (4 min): \texttt{blocked}, o escopo de
+        \texttt{lib.rs} não deixava tirar o \texttt{mod drag} que o critério 3
+        pedia.\\
+20:39 & Driver para, PR \#6 com 0 tickets. O foreman traz a \texttt{main} para
+        a sessão (SYN-011 \texttt{done}) e o fable high decide CLEAN-007 e
+        metade do SYN-012; a outra metade (SDK) é escalada.\\
+20:45 & Relançamento. CLEAN-008 (7 + 10 min), CLEAN-007 (25 + 12 min, \emph{Needs
+        your call}) e CLEAN-009 (7 + 4 min), todos mergeados na primeira
+        revisão.\\
+21:50 & ``Nothing runnable''. PR \#6 com 4 tickets.\\
+\bottomrule
+\end{tabularx}
+
+\section{Métricas por estágio}
+
+Tokens do evento \texttt{turn.completed} do \path{codex exec --json}.
+``Cmds'' é o número de itens \texttt{command\_execution} concluídos (o Codex
+agrupa comandos; o número não é comparável com o do relatório anterior).
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}l l r r r r r X@{}}
+\toprule
+Estágio & Modelo & Min & Cmds & Entrada & Cache & Saída & Desfecho\\
+\midrule
+SYN-011 impl.      & luna & 37 & 33 & 7,67\,M & 97,2\,\% & 77,3\,k & to-review\\
+SYN-011 revisão    & sol  & 13 & 72 & 5,57\,M & 98,1\,\% & 21,7\,k & merge na \texttt{main} (bug)\\
+SYN-011 impl.\ 2--3 & luna & 8 & 25 & 0,58\,M & 85,7\,\% & 17,4\,k & leitura velha, blocked\\
+SYN-012 impl.      & luna & 40 & 44 & 7,99\,M & 96,8\,\% & 87,7\,k & blocked (SDK)\\
+CLEAN-007 impl.\ 1 & luna &  4 & 24 & 0,60\,M & 88,6\,\% & 11,1\,k & blocked (escopo)\\
+CLEAN-008 impl.    & luna &  7 & 23 & 1,43\,M & 95,1\,\% & 12,5\,k & to-review\\
+CLEAN-008 revisão  & sol  & 10 & 35 & 1,72\,M & 96,5\,\% &  9,1\,k & mergeado\\
+CLEAN-007 impl.\ 2 & luna & 25 & 44 & 6,18\,M & 97,2\,\% & 65,3\,k & to-review\\
+CLEAN-007 revisão  & sol  & 12 & 79 & 4,51\,M & 97,9\,\% & 24,2\,k & mergeado, Needs your call\\
+CLEAN-009 impl.    & luna &  7 & 15 & 0,76\,M & 93,0\,\% & 11,6\,k & to-review\\
+CLEAN-009 revisão  & sol  &  4 & 35 & 1,01\,M & 94,8\,\% &  7,0\,k & mergeado\\
+\midrule
+\multicolumn{2}{@{}l}{Total} & 167 & 429 & 38,02\,M & 96,8\,\% & 344,9\,k & \\
+\multicolumn{2}{@{}l}{Perdido} & 52 & 93 & 9,17\,M & & 116,2\,k & 4 estágios sem produto\\
+\bottomrule
+\end{tabularx}}
+
+\bigskip
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar stacked, bar width=11pt, width=\linewidth, height=6.2cm,
+  ylabel={Tokens de entrada (M)}, ymin=0,
+  symbolic x coords={11 I,11 R,11 I',12 I,C7 I,C8 I,C8 R,C7 I',C7 R,C9 I,C9 R},
+  xtick=data, x tick label style={font=\scriptsize},
+  legend style={at={(0.98,0.95)},anchor=north east,draw=none},
+  axis lines*=left, ymajorgrids, grid style={gray!25}]
+\addplot[fill=luna,draw=none] coordinates
+  {(11 I,7.67) (11 R,5.57) (11 I',0) (12 I,0) (C7 I,0) (C8 I,1.43) (C8 R,1.72) (C7 I',6.18) (C7 R,4.51) (C9 I,0.76) (C9 R,1.01)};
+\addplot[fill=perda,draw=none] coordinates
+  {(11 I,0) (11 R,0) (11 I',0.58) (12 I,7.99) (C7 I,0.60) (C8 I,0) (C8 R,0) (C7 I',0) (C7 R,0) (C9 I,0) (C9 R,0)};
+\legend{produziu, perdido}
+\end{axis}
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Onde foi o custo.} Os 9,2\,M perdidos têm três causas, nenhuma de
+modelo: o bug da sessão (SYN-011, 0,6\,M e 8 min), a premissa falsa do SYN-012
+(8,0\,M e 40 min, o luna escreveu a casca inteira antes de descobrir que não
+podia compilá-la) e o deslize de escopo do CLEAN-007 (0,6\,M e 4 min). Por
+ticket mergeado: SYN-011 13,2\,M, CLEAN-007 10,7\,M, CLEAN-008 3,2\,M, CLEAN-009
+1,8\,M.
+
+\section{Comparação}
+
+Claude: os 13 tickets dos runs anteriores com Sonnet 5 e Opus 5.5
+(\texttt{run-log.md}), sem contagem de tokens. Codex 1: SYN-010, sol high.
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}X r r r@{}}
+\toprule
+& Claude (13) & Codex 1 (1) & Codex 2 (4)\\
+\midrule
+Minutos por ticket mergeado, mediana (faixa) & 42 (7--89) & 95 & 29 (11--50)\\
+Tickets reabertos & 5 de 13 & 1 de 1 & 0 de 4\\
+Minutos por implementação que chegou a \texttt{to-review}, média & 14,7 & 26,3 & 19,0\\
+Minutos por revisão, média & 9,2 & 5,3 & 9,8\\
+Entrada por revisão (M) & --- & 0,7--2,3 & 1,0--5,6\\
+Saída por revisão (k) & --- & 5,5--7,0 & 7,0--24,2\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+O sol max custa perto do dobro por revisão (tempo e tokens), mas uma reabertura
+no run anterior custava um ciclo de uns 20 min e 3--4\,M. Ressalva forte: três
+dos quatro tickets são \texttt{CLEAN-*} pequenos; só o SYN-011 é comparável ao
+SYN-010 em tamanho. Com $n=4$ a tendência é boa, não conclusiva.
+
+\section{Observações sobre os modelos}
+
+\subsection*{gpt-6-luna (max), implementação}
+\begin{itemize}
+  \item \textbf{TDD limpo nos quatro tickets:} commit só de teste antes do
+        código, e nenhum commit de código mexe em teste (conferido por
+        \texttt{git show --stat}). A infração do run anterior não se repetiu.
+  \item \textbf{Parou para perguntar quando devia:} CLEAN-007 e SYN-012
+        pararam com a pergunta certa, em vez de ampliar o escopo por conta
+        própria. No SYN-012, porém, só descobriu o bloqueio depois de 40 min de
+        código; checar o SDK antes de escrever teria custado 1 min.
+\end{itemize}
+
+\subsection*{gpt-6-sol (max), revisão}
+\begin{itemize}
+  \item \textbf{A regra nova funcionou:} a revisão do SYN-011 aprovou e mandou
+        os dois achados fora dos critérios para CLEAN-008 (e-mail inválido) e
+        CLEAN-009 (estado persistido no ADR), em vez de reabrir. Os dois
+        fecharam no mesmo run, com 30 min somados.
+  \item \textbf{Achados numa passada só:} nenhum ticket voltou ao stage 2.
+  \item \textbf{Honesto sobre o que não verificou:} o CLEAN-007 saiu com
+        \emph{Needs your call} porque o critério 4 (verificação visual) não
+        pôde ser feito, em vez de um Approve.
+\end{itemize}
+
+\section{Integração com o Codex e o driver}
+\begin{itemize}
+  \item \textbf{Sessão igual à base conta como mergeada.} Tanto a busca do
+        driver quanto a do \texttt{ticket-flow} usam \texttt{--no-merged}. No
+        run anterior não apareceu porque commits de tentativa falha já tinham
+        adiantado a sessão. Corrigido com um commit vazio na abertura
+        (\texttt{8ba1ce1}). Efeito colateral: o SYN-011 está na \texttt{main}
+        desde o PR \#5, antes do PR de sessão.
+  \item \textbf{Computer Use continua falhando} nas sessões do Codex:
+        \texttt{SetIs\allowbreak Border\allowbreak Required failed: No such
+        interface supported (0x80004002)}, e no SYN-011 também
+        \emph{coordinate input geometry is unavailable}. Acha a janela, não
+        captura. Três tickets tentaram, nenhum conseguiu.
+  \item \textbf{Branch do ticket some quando o estágio para para perguntar.}
+        O driver apaga a branch criada na tentativa
+        (\texttt{Reset-Tree -DropBranch}). Os dois commits do SYN-012 ficaram
+        sem ref; o foreman os guardou na tag local \texttt{keep/syn-012}
+        (\texttt{eb57837}).
+  \item \textbf{Sem proxy no Codex.} Toda pergunta vira \texttt{blocked} e
+        para o driver; o foreman responde pelo fable high e relança. Funcionou
+        (duas decisões, uma escalada, 6 min entre parada e relançamento).
+  \item \textbf{A política do Codex barra remoção recursiva} de pastas
+        temporárias da inspeção; ficaram 40\,MB em
+        \path{%TEMP%\SynchroNice-CLEAN-007-review}, removidos pelo foreman.
+\end{itemize}
+
+\section{Recomendações}
+\begin{enumerate}
+  \item \textbf{Manter sol max e a regra do stage 3.} Zero reaberturas pagam o
+        dobro do custo por revisão. Reavaliar com um ticket largo.
+  \item \textbf{Decidir o Android SDK} (instalar aqui, mover o build para outra
+        máquina ou CI, ou estacionar SYN-012). Sete tickets esperam isso.
+  \item \textbf{Consertar o Computer Use fora de um run}, ou tirar do
+        \texttt{AGENTS.md} a nota de que ele funciona: hoje ela manda cada
+        estágio tentar e falhar.
+  \item \textbf{Driver: não apagar a branch de um estágio que parou para
+        perguntar com commits}; a tentativa seguinte deve continuar dela.
+  \item \textbf{Corrigir as premissas do stage 1:} \texttt{HANDOFF.md} item 3
+        e \texttt{spec.md:250} dizem que esta máquina tem SDK; é a outra.
+  \item Pendente do relatório anterior: \textbf{arquivo de parada} no driver.
+\end{enumerate}
+
+\section{Débito humano}
+\begin{itemize}
+  \item \textbf{Revisar o PR \#5} (SYN-011), que entrou na \texttt{main} sem
+        passar por você.
+  \item SYN-011, critérios 4--8: inspeção ao vivo dos Copiáveis (destaque,
+        clique, seleção, preferência de pontuação).
+  \item SYN-010, via CLEAN-007: chat, painel, seletor nativo, tela inicial sem
+        diálogo, menu da bandeja, e a engrenagem e o painel sobre a tela de QR
+        e no chat.
+\end{itemize}
+
+\end{document}

@@ -82,6 +82,11 @@ Critérios 4 a 8 são de tela: verificação manual abrindo o app.
   de acessibilidade, mas a captura visual e o clique falharam novamente com os
   mesmos erros. O débito visual acima permanece. A validação de e-mail e UUID
   passou a usar os mesmos padrões da busca de candidatos, eliminando duplicação.
+- 2026-09-24 Foreman: a revisão mergeou pela `main` (PR #5) porque a sessão
+  `sweatshop/2026-09-24-1855` ainda era igual à `main` e contava como mergeada;
+  corrigido no driver (Agent-Skills `8ba1ce1`). As duas tentativas de stage 2
+  que se seguiram na sessão leram `reviewing` e pararam; o `blocked` delas foi
+  desfeito ao trazer a `main` para a sessão.
 
 #### Resolution (2026-09-24)
 Verdict: Approve

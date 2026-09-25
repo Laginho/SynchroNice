@@ -1,11 +1,11 @@
 # CLEAN-007: Restos da Pasta padrão (SYN-010)
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
 
 - Primary files:
-  - pc/src-tauri/src/lib.rs (só `start_server`)
+  - pc/src-tauri/src/lib.rs (só `start_server` e a linha `pub mod drag`, que sai)
   - pc/src-tauri/src/drag.rs (sai)
   - pc/src-tauri/tests/drag.rs (sai)
 
@@ -60,3 +60,23 @@ costura de teste. O lado do servidor já está coberto por
 item 2 é deleção. Diga isso no commit.
 
 ## Comments
+
+- 2026-09-24 Attempt 1 stopped to ask: `CLEAN-007` está em `blocked` na branch `clean-007`, commit `71029fb`. /  / O critério 3 exige remover `pub mod drag` de `lib.rs`, mas o escopo aprovado limita alterações nesse arquivo a `start_server`. Registrei a pergunta no [ticket](D:/Desktop/Projects/SynchroNice/.scratch/core/issues/16-CLEAN-007-restos-da-pasta-padrao.md:2). Não há proxy disponível neste runtime, então o fluxo exige parar até o escopo ser ajustado no stage 1. /  / Nenhum código foi alterado; não rodei o gate. A inspeção inicial do Computer Use não encontrou apps abertos.
+- 2026-09-24 Proxy decided: o escopo de `lib.rs` passa a ser `start_server` e a linha `pub mod drag` (dobrado em Primary files acima) — o critério 3 já exigia que `lib.rs` não declarasse `mod drag`, e sem tirar a linha o item 2 não compila depois de apagar `drag.rs`; a restrição "só `start_server`" era deslize do stage 1, não decisão. Nada mais em `lib.rs` referencia o módulo (`tauri_plugin_drag::init()` é o plugin, que fica, conforme o critério 3). A branch `clean-007` não existe mais como ref; o commit `71029fb` citado acima era só o ticket, sem código, então o stage 2 recomeça de `main` sem perder nada.
+- 2026-09-24 Stage 2 started: no new tests per the approved ticket; existing server and config tests cover the named seams, while the startup fallback remains glue in `start_server`.
+- 2026-09-24 Stage 2 verificado: `gate.ps1` passou (`cargo fmt --check`, clippy, 6 testes de config + 31 de servidor, `tsc --noEmit`, 24 testes de UI e `gradle check`). O commit de teste remove `tests/drag.rs` e atualiza o estágio; o commit de código não toca testes.
+- 2026-09-24 Computer Use no stage 2 (débito consolidado na linha da revisão, abaixo): o app iniciou e o servidor subiu, mas o Computer Use desta sessão não expôs janelas nativas (`apps: []`, sem `listApps`/`listWindows`) nem browsers. Não foi possível confirmar visualmente chat, painel, seletor nativo, tela inicial sem diálogo, menu da bandeja, ou engrenagem/painel na tela de QR e no chat.
+- 2026-09-24 Limpeza da inspeção: a entrada de autostart foi restaurada à baseline e a pasta temporária isolada foi removida. O `config.json` e o `outbox` em `%APPDATA%` já existiam; o perfil `EBWebView` em `%LOCALAPPDATA%` também existia e recebeu escritas durante a execução. Seis objetos de cache foram criados; a remoção explícita deles foi rejeitada pela política automática (`blocked by policy`), então o perfil preexistente foi preservado.
+- 2026-09-24 Débito humano: na revisão, o Computer Use encontrou a janela `SynchroNice`, mas a captura falhou duas vezes com `SetIsBorderRequired failed: No such interface supported (0x80004002)`. Chat, painel, seletor nativo, tela inicial sem diálogo, menu da bandeja e engrenagem/painel sobre QR e chat continuam sem confirmação visual.
+- 2026-09-24 Limpeza da revisão: os perfis originais em `%APPDATA%` e `%LOCALAPPDATA%` foram preservados e restaurados, assim como o valor anterior de autostart. O perfil novo e o cache da execução foram isolados em `%TEMP%\SynchroNice-CLEAN-007-review` (895 arquivos, 39.972.775 bytes). A revisão automática rejeitou duas tentativas de remoção recursiva, inclusive uma limitada a esse caminho (`blocked by policy`). Ficou pendente remover esse diretório temporário (resolvido pelo foreman, ver abaixo); os seis objetos de cache da inspeção anterior também permanecem no perfil preexistente.
+- 2026-09-24 Proxy decided: done, fica como está — critérios 1–3 atendidos e gate verde; o critério 4 é o que um agente não consegue fazer de fato (o Computer Use achou a janela `SynchroNice`, mas a captura falhou duas vezes com `SetIsBorderRequired`, a mesma falha do SYN-010 e do SYN-011), então segue como débito humano em vez de bloquear. A única linha de débito humano vigente é a da revisão, logo acima; os seis objetos de cache no perfil `EBWebView` preexistente são uso normal do WebView2, não débito.
+- 2026-09-24 Limpeza concluída: o foreman removeu à mão `%TEMP%\SynchroNice-CLEAN-007-review` (verificado ausente).
+
+#### Resolution (2026-09-24)
+
+Verdict: Needs your call: o código atende aos critérios 1–3, mas a verificação visual segue impedida pelo Computer Use e a política automática bloqueou a limpeza completa do cache temporário do critério 4.
+
+- Standards: a ordem dos comentários do ticket foi corrigida; sem achados no código alterado.
+- Spec: `start_server` passa `None` ao servidor quando a Pasta padrão falha, mantém `Some(Downloads\SynchroNice)` quando resolvida, e o módulo `drag` obsoleto saiu sem remover o plugin. O critério 4 fica registrado acima como débito humano.
+- Arquivos: `pc/src-tauri/src/lib.rs` alterado; `pc/src-tauri/src/drag.rs` e `pc/src-tauri/tests/drag.rs` removidos.
+- Prova: sem teste novo e sem nova etapa red-green, conforme a decisão explícita em `Tests stage 2 writes`. `tests/server.rs` cobre servidor sem Pasta, 503 e escolha sem reinício, e `tests/config.rs` cobre Downloads. Após rebase, `gate.ps1` passou: fmt, clippy, 6 testes de config, 31 de servidor, TypeScript, testes de UI e Gradle check. O app iniciou e informou `servidor HTTP em 0.0.0.0:47820`.

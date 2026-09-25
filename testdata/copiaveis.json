@@ -183,6 +183,34 @@
       ]
     },
     {
+      "name": "email com pontos consecutivos nao e copiavel",
+      "input": "a..b@example.com",
+      "expected": [{ "type": "text", "text": "a..b@example.com" }]
+    },
+    {
+      "name": "email com ponto inicial nao e copiavel",
+      "input": ".abc@example.com",
+      "expected": [{ "type": "text", "text": ".abc@example.com" }]
+    },
+    {
+      "name": "email com ponto final nao e copiavel",
+      "input": "abc.@example.com",
+      "expected": [{ "type": "text", "text": "abc.@example.com" }]
+    },
+    {
+      "name": "email valido com ponto interno continua copiavel",
+      "input": "first.last@example.com",
+      "expected": [
+        {
+          "type": "copyable",
+          "kind": "email",
+          "text": "first.last@example.com",
+          "copyPlain": "first.last@example.com",
+          "copyFormatted": "first.last@example.com"
+        }
+      ]
+    },
+    {
       "name": "UUID é chave PIX copiável como está",
       "input": "PIX: 550e8400-e29b-41d4-a716-446655440000",
       "expected": [
