@@ -247,7 +247,7 @@ enquanto dura um envio longo.
 
 ## Further Notes
 
-- **Build Android.** O SDK desta máquina fica em `D:\Android\Sdk`
+- **Build Android.** O SDK desta máquina fica em `D:\AppData\Local\Android\Sdk`
   (command-line tools, `platform-tools`, `platforms/android-37.0`), apontado
   por `android/local.properties` (fora do git). O AGP que aceita a API 37
   (9.2) exige Gradle 9.4.1 e traz o Kotlin 2.2.10, então o módulo cliente sobe
