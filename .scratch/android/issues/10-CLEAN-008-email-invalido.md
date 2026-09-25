@@ -1,5 +1,5 @@
 # CLEAN-008: E-mail inválido não é Copiável
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-011
 Review: agent
@@ -41,3 +41,17 @@ subtrecho. O SYN-018 usará os novos casos no Android quando for implementado.
 
 - 2026-09-24 Achado fora dos critérios numerados de SYN-011; registrado em
   ticket separado conforme a revisão de estágio 3.
+
+#### Resolution (2026-09-24)
+Verdict: Approve
+
+Standards: sem achados. Spec: critérios 1 e 2 atendidos, sem achados.
+O commit de testes `1cb4f71` alterou apenas o ticket e
+`testdata/copiaveis.json`: `gate.ps1 -TestsOnly` falhou nos três novos e-mails
+inválidos (21/24 casos Node passaram), pois todos eram classificados como
+Copiáveis. O commit de código `7a450e1` alterou apenas o ticket e
+`pc/ui/copiaveis.ts`; depois dele, o gate completo passou com 24/24 casos Node,
+39 testes Rust, `tsc --noEmit`, fmt, Clippy e `gradle check`.
+
+Arquivos: `testdata/copiaveis.json` e `pc/ui/copiaveis.ts`. Integrado à branch
+de sessão por `b91e1db`.
