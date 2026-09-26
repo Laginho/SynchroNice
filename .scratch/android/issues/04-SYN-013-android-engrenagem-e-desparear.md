@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -26,11 +26,11 @@ que o Desparear, sozinho. HTTP 503 continua sendo "tentar de novo".
 
 #### Acceptance criteria
 
-1. ❌ A fila de Pendentes do módulo cliente pode ser descartada inteira: depois do descarte, a fila fica vazia em disco e os arquivos copiados para a pasta interna somem. `File.delete()` pode falhar silenciosamente e deixar a cópia interna para trás. Falha ao excluir uma cópia não pode ser tratada como descarte concluído nem perder a referência necessária para nova limpeza.
+1. A fila de Pendentes do módulo cliente pode ser descartada inteira: depois do descarte, a fila fica vazia em disco e os arquivos copiados para a pasta interna somem. `File.delete()` pode falhar silenciosamente e deixar a cópia interna para trás. Falha ao excluir uma cópia não pode ser tratada como descarte concluído nem perder a referência necessária para nova limpeza.
 2. Um descarte que falha na escrita não deixa a memória e o disco discordando (mesma garantia do enfileirar e do desenfileirar).
 3. A engrenagem no topo do chat abre a tela de configurações, com "Desparear".
-4. ❌ "Desparear" apaga o Par, descarta os Pendentes e abre a câmera; ler um QR pareia de novo. Se apagar o Par persistido falha depois de limpar a fila, o Par é mantido mas os Pendentes já foram perdidos. Falha na gravação que apaga o Par deve manter o Par e os Pendentes antigos juntos.
-5. ❌ Com o PC re-pareado com outro aparelho, a próxima requisição do celular recebe 401, e o app desfaz o Par e abre a câmera sozinho. O `DeliveryWorker`, dono atual dos reenvios, converte 401 em `Result.retry()`. Também nele, 401 deve descartar Par/Pendentes; se o app estiver fechado, a próxima abertura vai à câmera. HTTP 503 mantém Par/Pendentes e retorna retry.
+4. "Desparear" apaga o Par, descarta os Pendentes e abre a câmera; ler um QR pareia de novo. Se apagar o Par persistido falha depois de limpar a fila, o Par é mantido mas os Pendentes já foram perdidos. Falha na gravação que apaga o Par deve manter o Par e os Pendentes antigos juntos.
+5. Com o PC re-pareado com outro aparelho, a próxima requisição do celular recebe 401, e o app desfaz o Par e abre a câmera sozinho. O `DeliveryWorker`, dono atual dos reenvios, converte 401 em `Result.retry()`. Também nele, 401 deve descartar Par/Pendentes; se o app estiver fechado, a próxima abertura vai à câmera. HTTP 503 mantém Par/Pendentes e retorna retry.
 
 #### Verification
 
@@ -83,3 +83,14 @@ Verdict: Reopen — critérios 1, 4 e 5 precisam de novos testes.
 - Red-green: `d9a3b31` registrou a falha de exclusão (1 falha em 54 testes do protocolo), corrigida em `2737d12`. `a402d3b` registrou as falhas de persistência/retomada (2 falhas em 6 testes do app), corrigidas em `f073c13`. `6733368` registrou 401 retornando Retry (1 falha em 8 testes do app; 503 verde), corrigido em `f7341c3`. Commits de implementação não alteram testes.
 - Gate completo passou: 44 testes Rust, 24 testes TS, 54 testes do protocolo e 8 testes JVM do app; zero falhas. Rust fmt/clippy, TypeScript typecheck e Android lint passaram. `assembleDebug` também passou.
 - Débito humano: validar engrenagem, Desparear, câmera/QR e agendamento real do WorkManager no aparelho. Tentativa desta sessão: emulador SynchroNice_API37 iniciado; instalação recusada por `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (assinatura diferente do app existente), sem remover seus dados. Computer Use inicializou e localizou a janela, mas negou acesso com `Computer Use was not approved to use qemu-system-x86_64`. Emulador encerrado após a tentativa. Os caminhos de estado/persistência e execução do worker foram verificados pelos testes JVM.
+
+#### Resolution (2026-09-26)
+
+Verdict: Approve
+
+- Standards: nenhuma violação documentada. Como julgamentos não bloqueantes, `MainActivity.kt` repete a decisão de desparear em quatro caminhos de HTTP 401 e repete a gravação dos três campos de `PairingInfo`; nenhuma refatoração foi incluída neste ticket.
+- Spec: critérios 1–5 implementados. O descarte preserva referências quando uma cópia não pode ser excluída; falha ao persistir a remoção mantém Par e Pendentes; HTTP 401 despareia inclusive no `DeliveryWorker`, enquanto 503 conserva a fila para retry.
+- Files: tela de configurações e fluxo de Desparear em `android/app`; descarte da fila em `PendingQueueStore`; testes JVM do estado, worker e armazenamento persistido.
+- Red-green: `8459c6e`/`0f517d0` cobrem falha ao excluir payload; `36b10d9`/`7fa1c79` cobrem persistência e retomada do Desparear; `5f57171`/`9b28a2b` cobrem 401 e 503 no worker. Os commits de implementação não alteram os testes.
+- Gate: após o rebase, `gate.ps1` passou com fmt/clippy, 44 testes Rust, typecheck, 24 testes Node, 54 testes do protocolo Android, 8 testes JVM do app, compilação e lint Android. A primeira tentativa falhou apenas porque o sandbox apontou o Android para `C:\.android`; a repetição fora dessa restrição passou.
+- Verificação visual: permanece o `Débito humano` acima para o QA conjunto no aparelho.
