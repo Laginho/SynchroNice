@@ -35,6 +35,8 @@ internal fun parseFlatJsonObject(json: String): Map<String, String> {
     }
 }
 
+private val jsonNumber = Regex("""-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?""")
+
 private fun parseJsonString(json: String, start: Int): Pair<String, Int> {
     require(json[start] == '"') { "esperava '\"': $json" }
     val sb = StringBuilder()
@@ -65,8 +67,10 @@ private fun parseJsonString(json: String, start: Int): Pair<String, Int> {
 
 private fun parseJsonNumber(json: String, start: Int): Pair<String, Int> {
     var i = start
-    while (i < json.length && (json[i].isDigit() || json[i] == '-' || json[i] == '.')) i++
-    return json.substring(start, i) to i
+    while (i < json.length && json[i] != ',' && json[i] != '}' && !json[i].isWhitespace()) i++
+    val number = json.substring(start, i)
+    require(jsonNumber.matches(number)) { "número JSON inválido" }
+    return number to i
 }
 
 private fun skipWhitespace(json: String, start: Int): Int {

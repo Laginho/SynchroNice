@@ -264,6 +264,23 @@ class ProtocolClient(
             .toList()
     }
 
+    /** Confirma a presença do cliente pela escuta GET aberta no outro lado. */
+    fun isListening(): Boolean {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = open("/listen", "HEAD").apply { readTimeout = 5_000 }
+            when (val status = connection.responseCode) {
+                HttpURLConnection.HTTP_OK -> true
+                HttpURLConnection.HTTP_UNAUTHORIZED -> throw ProtocolRejectedException(status)
+                else -> false
+            }
+        } catch (_: IOException) {
+            false
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     private fun parseItem(line: String): Item {
         val fields = parseFlatJsonObject(line)
         val id = fields.getValue("id").toLong()

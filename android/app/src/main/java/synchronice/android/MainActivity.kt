@@ -389,7 +389,25 @@ private fun ConnectionLifecycle(state: AppState) {
                 launch(Dispatchers.IO) {
                     while (isActive) {
                         try {
-                            withContext(Dispatchers.Main.immediate) { state.updateOnline(true) }
+                            val active = client.isListening()
+                            withContext(Dispatchers.Main.immediate) { state.updateOnline(active) }
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: ProtocolRejectedException) {
+                            withContext(Dispatchers.Main.immediate) {
+                                state.updateOnline(false)
+                                state.showConnectionError("O PC recusou o Par (HTTP ${error.code}).")
+                            }
+                            break
+                        } catch (_: Exception) {
+                            withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
+                        }
+                        delay(1_000)
+                    }
+                }
+                launch(Dispatchers.IO) {
+                    while (isActive) {
+                        try {
                             val items = kotlinx.coroutines.runInterruptible { client.listen() }
                             withContext(Dispatchers.Main.immediate) {
                                 state.updateOnline(false)
