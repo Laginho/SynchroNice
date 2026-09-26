@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -97,3 +97,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-25 De volta a to-implement: o humano instalou o Android SDK em `D:\AppData\Local\Android\Sdk`; `android/local.properties` (fora do git) aponta para ele. O trabalho parcial da tentativa 3 está na tag local `keep/syn-012` (`6b6f3b4` testes, `eb57837` implementação), reaproveitável.
 
 - 2026-09-25 Build Android montado em `main` antes do run (humano pediu): gate passa com `:app` compilando e lint incluso. O ticket fica com o código do app.
+
+- 2026-09-25 Attempt 3 failed: exit 0; blocked after two attempts. Log tail: [SYN-012](/C:/Users/bruno/Desktop/Pastinha/Programas/Projects/SynchroNice/.scratch/android/issues/03-SYN-012-casca-do-android.md:2) está `blocked`; commit `1262762` na branch `syn-012` guarda os casos do parser QR. /  / Os 37 testes Rust e 24 Node passaram. Os testes Android não iniciaram porque o download do Gradle 9.4.1 expirou; retome quando a distribuição estiver disponível ou o acesso a `services.gradle.org` funcionar.
