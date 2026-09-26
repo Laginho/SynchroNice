@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -81,7 +82,7 @@ class SynchroNiceApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         state = AppState(this)
-        if (state.pairing != null && state.hasPending()) scheduleDelivery(this)
+        if (state.hasPending()) scheduleDelivery(this)
     }
 }
 
@@ -146,7 +147,16 @@ internal class AppState(context: Context) {
             return false
         }
 
+        if (pairingPreferences.getBoolean("discard-pending", false)) {
+            try {
+                queueStore.clear()
+            } catch (error: IOException) {
+                pairingError = "Não foi possível limpar os Pendentes do Par anterior: ${error.message}"
+                return false
+            }
+        }
         pairingPreferences.edit()
+            .remove("discard-pending")
             .putString("instance-name", newPair.instanceName)
             .putInt("port", newPair.port)
             .putString("token", newPair.token)
@@ -163,27 +173,41 @@ internal class AppState(context: Context) {
     }
 
     suspend fun unpair(expected: PairingInfo? = pairing) {
-        val currentPair = expected ?: return
+        val currentPair = expected
         try {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + NonCancellable) {
                 outboundMutex.withLock {
                     if (withContext(Dispatchers.Main.immediate) { pairing != currentPair }) return@withLock
-                    queueStore.clear()
-                    withContext(Dispatchers.Main.immediate) {
-                        protocolClient?.closeListen()
-                        if (!pairingPreferences.edit().clear().commit()) {
-                            throw IOException("não foi possível apagar o Par")
+                    val removal = pairingPreferences.edit()
+                    removal.clear()
+                    removal.putBoolean("discard-pending", true)
+                    if (currentPair != null && !removal.commit()) {
+                        // SharedPreferences also changes its memory cache when commit fails.
+                        pairingPreferences.edit()
+                            .remove("discard-pending")
+                            .putString("instance-name", currentPair.instanceName)
+                            .putInt("port", currentPair.port)
+                            .putString("token", currentPair.token)
+                            .apply()
+                        throw IOException("não foi possível apagar o Par")
+                    }
+                    try {
+                        queueStore.clear()
+                        pairingPreferences.edit().remove("discard-pending").apply()
+                    } finally {
+                        withContext(Dispatchers.Main.immediate) {
+                            protocolClient?.closeListen()
+                            networkPreferences.edit().remove("last-address").apply()
+                            protocolClient = null
+                            clientFor = null
+                            pairing = null
+                            online = false
+                            pairingError = null
+                            connectionError = null
+                            messages.clear()
+                            submitted.clear()
+                            receivedIds.clear()
                         }
-                        networkPreferences.edit().remove("last-address").apply()
-                        protocolClient = null
-                        clientFor = null
-                        pairing = null
-                        online = false
-                        pairingError = null
-                        connectionError = null
-                        messages.clear()
-                        submitted.clear()
-                        receivedIds.clear()
                     }
                 }
             }
@@ -298,7 +322,7 @@ internal class AppState(context: Context) {
         onFileProgress: (Int) -> Unit = {},
         onFileStart: (Long) -> Unit = {},
     ) {
-        val currentClient = client() ?: return
+        val currentClient = client() ?: run { unpair(); return }
         outboundMutex.withLock {
             if (currentClient !== protocolClient) return@withLock
             try {
