@@ -124,6 +124,9 @@ struct AppState {
     /// Ids que este processo já aceitou do remetente. A Sessão é em memória,
     /// portanto a deduplicação tem o mesmo ciclo de vida dos Itens visíveis.
     accepted_item_ids: Arc<Mutex<HashSet<String>>>,
+    /// ponytail: um lock global basta para os uploads com id; particionar por
+    /// id se envios paralelos do mesmo celular virarem gargalo mensurável.
+    file_item_id_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
@@ -271,6 +274,7 @@ pub fn spawn(
                     leases: Arc::new(Mutex::new(HashSet::new())),
                     received_files: received_files_da_thread,
                     accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
+                    file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
                 });
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
@@ -347,6 +351,11 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     let item_id = match item_id(request.headers()) {
         Ok(id) => id,
         Err(status) => return status,
+    };
+    let _item_id_lock = if item_id.is_some() {
+        Some(state.file_item_id_lock.lock().await)
+    } else {
+        None
     };
     if item_id.as_ref().is_some_and(|id| {
         state

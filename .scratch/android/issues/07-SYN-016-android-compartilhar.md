@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -230,3 +230,14 @@ Verdict: Reopen — critérios 1/8 falham em upload lento e critério 2 tem uma 
 - Sem alterações de produção, merge ou entrada no ledger. Os achados exigem
   testes novos e retornam ao stage 2 conforme `ticket-flow`. O débito humano
   previamente registrado permanece.
+
+- 2026-09-26 Stage 2 (terceira reabertura): o commit de testes `d82ee65`
+  reproduziu upload saudável acima de 30 segundos permanecendo Pendente,
+  escrita bloqueada sem devolver o worker e dois POSTs simultâneos com o mesmo
+  id criando dois Itens/arquivos. A escrita do socket agora tem timeout próprio,
+  sem limitar a duração total do upload, e falha de leitura fecha o socket; o
+  servidor serializa uploads identificados até o primeiro aceitar ou liberar o
+  id após falha.
+- Gate completo verde: `cargo fmt --check`, `cargo clippy`, 42 testes Rust,
+  `tsc --noEmit`, 24 testes Node, 51 testes do cliente Android, 3 testes do app
+  Android e lint.

@@ -12,6 +12,7 @@ import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -178,10 +179,12 @@ class ProtocolClient(
         onFileStart: (Long) -> Unit = {},
     ): SendOutcome {
         val socket = Socket()
+        val writes = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "synchronice-upload-writer").apply { isDaemon = true }
+        }
         return try {
             val address = currentAddress()
             socket.connect(InetSocketAddress(address, pairing.port), 5_000)
-            socket.soTimeout = 30_000
             val total = file.length()
             val encodedName = URLEncoder.encode(displayName, Charsets.UTF_8).replace("+", "%20")
             val output = socket.getOutputStream()
@@ -198,26 +201,48 @@ class ProtocolClient(
             output.flush()
 
             val response = FutureTask {
-                val reader = socket.getInputStream().bufferedReader(Charsets.US_ASCII)
-                var code: Int
-                do {
-                    code = reader.readLine()?.split(' ')?.getOrNull(1)?.toIntOrNull()
-                        ?: throw IOException("resposta HTTP inválida")
-                    while (reader.readLine()?.isNotEmpty() == true) Unit
-                } while (code < 200)
                 try {
-                    socket.shutdownOutput()
-                } catch (_: IOException) {
+                    val reader = socket.getInputStream().bufferedReader(Charsets.US_ASCII)
+                    var code: Int
+                    do {
+                        code = reader.readLine()?.split(' ')?.getOrNull(1)?.toIntOrNull()
+                            ?: throw IOException("resposta HTTP inválida")
+                        while (reader.readLine()?.isNotEmpty() == true) Unit
+                    } while (code < 200)
+                    try {
+                        socket.shutdownOutput()
+                    } catch (_: IOException) {
+                    }
+                    code
+                } catch (e: Exception) {
+                    socket.close()
+                    throw e
                 }
-                code
             }
             Thread(response, "synchronice-upload-response").apply { isDaemon = true }.start()
+
+            fun timedWrite(action: () -> Unit) {
+                try {
+                    writes.submit(action).get(30, TimeUnit.SECONDS)
+                } catch (_: TimeoutException) {
+                    socket.close()
+                    throw IOException("escrita do upload excedeu 30 segundos")
+                } catch (e: ExecutionException) {
+                    throw (e.cause as? IOException ?: IOException("falha ao escrever upload", e.cause))
+                }
+            }
+            val timedOutput = object : OutputStream() {
+                override fun write(byte: Int) = timedWrite { output.write(byte) }
+                override fun write(bytes: ByteArray, offset: Int, length: Int) =
+                    timedWrite { output.write(bytes, offset, length) }
+                override fun flush() = timedWrite { output.flush() }
+            }
             try {
                 file.inputStream().use { input ->
                     onFileStart(total)
-                    pump(input, output, total, onProgress)
+                    pump(input, timedOutput, total, onProgress)
                 }
-                output.flush()
+                timedOutput.flush()
             } catch (_: IOException) {
             }
             val code = response.get(30, TimeUnit.SECONDS)
@@ -236,6 +261,7 @@ class ProtocolClient(
         } catch (_: TimeoutException) {
             SendOutcome.Unreachable
         } finally {
+            writes.shutdownNow()
             socket.close()
         }
     }
