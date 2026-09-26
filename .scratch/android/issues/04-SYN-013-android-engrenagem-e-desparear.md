@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -26,11 +26,11 @@ que o Desparear, sozinho. HTTP 503 continua sendo "tentar de novo".
 
 #### Acceptance criteria
 
-1. A fila de Pendentes do módulo cliente pode ser descartada inteira: depois do descarte, a fila fica vazia em disco e os arquivos copiados para a pasta interna somem.
+1. A fila de Pendentes do módulo cliente pode ser descartada inteira: depois do descarte, a fila fica vazia em disco e os arquivos copiados para a pasta interna somem. Falha ao excluir uma cópia não pode ser tratada como descarte concluído nem perder a referência necessária para nova limpeza.
 2. Um descarte que falha na escrita não deixa a memória e o disco discordando (mesma garantia do enfileirar e do desenfileirar).
 3. A engrenagem no topo do chat abre a tela de configurações, com "Desparear".
-4. "Desparear" apaga o Par, descarta os Pendentes e abre a câmera; ler um QR pareia de novo.
-5. Com o PC re-pareado com outro aparelho, a próxima requisição do celular recebe 401, e o app desfaz o Par e abre a câmera sozinho.
+4. "Desparear" apaga o Par, descarta os Pendentes e abre a câmera; ler um QR pareia de novo. Se a gravação que apaga o Par falhar, o Par e os Pendentes antigos permanecem juntos, sem perda parcial.
+5. Com o PC re-pareado com outro aparelho, a próxima requisição do celular, inclusive pelo `DeliveryWorker`, recebe 401 e desfaz o Par e os Pendentes. Se o app estiver aberto, volta à câmera; se estiver fechado, a próxima abertura vai à câmera. HTTP 503 mantém Par e Pendentes para retry.
 
 #### Verification
 
@@ -42,9 +42,20 @@ Critérios 3 a 5 são no aparelho: verificação manual.
 
 - `android/protocol-client/src/test/kotlin/`: descartar a fila persistida (fila
   vazia ao recarregar, pasta de cargas vazia), e a falha de escrita no descarte
-  sem divergência entre memória e disco. Red porque o descarte não existe.
+  sem divergência entre memória e disco; falha ao excluir uma cópia interna
+  não pode produzir sucesso silencioso com arquivo órfão.
+- `android/app/src/test/java/` (JVM local/Robolectric): exercitar o caminho real
+  de `AppState.unpair` com Par e Pendentes persistidos. Após sucesso, Par, fila
+  e cópias internas somem e novo QR pode parear; se a persistência do Par falhar,
+  o Par e os Pendentes antigos permanecem juntos. Contra servidor HTTP falso,
+  exercitar o caminho usado por `DeliveryWorker`: 401 descarta Par/Pendentes e
+  deixa a próxima abertura na câmera, enquanto 503 conserva ambos e retorna
+  retry. A verificação manual continua cobrindo câmera, interface e agendamento
+  real do WorkManager no aparelho.
 
 ## Comments
+
+- 2026-09-26 Proxy decidiu: aprovar a costura de testes JVM locais do app para Desparear e para a política HTTP do `DeliveryWorker`. Esses casos provam os critérios 1, 4 e 5 já exigidos pela spec; não ampliam o produto para testar câmera ou agendamento do WorkManager no aparelho. Falhas de exclusão ou persistência não podem deixar o Par antigo com fila perdida nem declarar sucesso com payload órfão. Stage 2 retoma na branch SYN-013 com teste vermelho em commit próprio antes da correção.
 
 - 2026-09-26 Review anterior parou antes do veredito por autoidentificação incorreta do modelo; o comando CLI usou gpt-5.6-sol high. Retomar stage 3 da branch SYN-013.
 
