@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -189,3 +189,44 @@ Verdict: Reopen — critério 9 tem uma corrida e a prova do critério 2 ainda n
 
 - 2026-09-26 Stage 2 (segunda reabertura): o commit de teste `95304fe` substituiu apenas o cenário de texto por um servidor TCP de conexão única. O vermelho reproduziu o arquivo grande permanecendo Pendente após 201 antecipado e a bolha de arquivo permanecendo Pendente depois de a fila esvaziar. O retry de arquivo agora lê a resposta HTTP em paralelo ao stream, portanto um 201 idempotente interrompe o reenvio sem confundir queda real com sucesso; `queueFile` registra fila e bolha sob o mesmo `outboundMutex` da reconciliação.
 - Gate completo verde: `cargo fmt --check`, `cargo clippy`, 41 testes Rust, `tsc --noEmit`, 24 testes Node, 49 testes do cliente Android, 3 testes do app Android e lint.
+
+#### Review (2026-09-26, terceira revisão)
+
+Verdict: Reopen — critérios 1/8 falham em upload lento e critério 2 tem uma corrida de idempotência.
+
+- Standards: nenhuma violação documentada. Um julgamento não bloqueante de
+  manutenção permanece: `AppState.hasPending`/`hasLargePending` interpretam a
+  fila do cliente (possível Feature Envy). Não refatorar neste ticket.
+- ❌ **Critérios 1 e 8:** `ProtocolClient.kt:184,200-223` começa a ler a
+  resposta com timeout de 30 segundos antes de terminar o upload. O servidor
+  normalmente só responde depois do corpo completo; uma transferência saudável
+  mais longa perde a leitura do 201 e deixa o Item e a cópia interna Pendentes.
+  Reprodução contra o JAR de produção atual: servidor HTTP local lê o corpo
+  inteiro e responde 201; `enqueueFile` de 1 MiB seguido de `retryPending`,
+  pausando 32 segundos só na primeira callback de progresso para simular envio
+  lento. Resultado: `PC accepted full body: true; pending after 201: true`.
+  Além disso, por inspeção, quando a leitura falha ela não fecha o socket:
+  `shutdownOutput` só ocorre após resposta válida e `response.get` só é alcançado
+  após `pump`. Se a escrita ficar bloqueada, esse timeout não libera o worker.
+  Stage 2: teste vermelho de transferência lenta que termina com 201 e esvazia
+  a fila, além de interrupção com escrita bloqueada que devolve o controle para
+  retry; preservar a confirmação antecipada de id já aceito.
+- ❌ **Critério 2:** `server.rs:350-359,419,507-512` verifica o id antes do
+  stream e só o registra depois do rename. Duas requisições sobrepostas podem
+  passar pela consulta antes de qualquer registro e criar duas bolhas e dois
+  arquivos. Isso também deixa uma janela para um retry enquanto a tarefa
+  destacada de flush/rename da tentativa anterior ainda termina. Contraria
+  a spec raiz: "reenvio nunca duplica bolha nem arquivo". Achado por inspeção,
+  sem reprodução nesta revisão. Stage 2: teste vermelho com dois POSTs de
+  arquivo sobrepostos usando o mesmo id, garantindo apenas um Item/arquivo;
+  manter o teste de envio incompleto que permite repetir o id.
+- As correções anteriores estão presentes: `queueFile` registra fila e bolha
+  sob o mesmo mutex da reconciliação; o teste TCP de texto prova a perda de
+  resposta; o teste de arquivo grande cobre o 201 antecipado no retry.
+- Gate completo passou: fmt, clippy, 41 testes Rust, typecheck, 24 testes Node,
+  49 testes do cliente Android, 3 testes do app e lint. Gradle reutilizou
+  resultados atualizados. A primeira execução falhou apenas no acesso do
+  sandbox a `C:\.android`; a repetição com acesso ampliado passou.
+- Sem alterações de produção, merge ou entrada no ledger. Os achados exigem
+  testes novos e retornam ao stage 2 conforme `ticket-flow`. O débito humano
+  previamente registrado permanece.
