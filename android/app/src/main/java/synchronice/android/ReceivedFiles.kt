@@ -64,8 +64,8 @@ internal class ReceivedFiles(context: Context) {
                 if (tree == null && resolver.update(uri, ContentValues().apply {
                     put(MediaStore.MediaColumns.IS_PENDING, 0)
                 }, null, null) != 1) throw IOException("não foi possível publicar o arquivo")
-                saved = true
                 onSaved(uri)
+                saved = true
             }, onProgress = onProgress)
         } catch (error: Exception) {
             if (!saved) {

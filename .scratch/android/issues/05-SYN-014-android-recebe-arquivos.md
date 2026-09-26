@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -112,3 +112,7 @@ continua limpa: `47eeb37` contém só ticket + testes e `0a39464` não toca test
 #### Retomada Stage 2 (2026-09-26)
 
 - Red: `ReceivedFileRestartTest` usa AppState e cliente HTTP reais, servidor falso e provedor Android de teste com bytes em disco. Após publicação e ACK 503, recria AppState com as mesmas preferências; falha porque fez 2 GETs em vez de 1. `gate.ps1 -TestsOnly`: 9 testes do app, 1 falha; 44 Rust e 24 TS passaram, protocolo sem alterações. A primeira execução no sandbox não alcançou o Android por acesso a `C:\.android`; execução autorizada confirmou a falha comportamental.
+- Correção: `MainActivity.kt` grava sincronicamente a URI do Item nas preferências do Par antes de enviar o ACK, indexada por token e id. Uma nova AppState recupera essa URI quando o PC reanuncia o Item e repete apenas o ACK. O recibo é removido após sucesso; trocar/desfazer o Par descarta os recibos, e uma falha ao desfazer restaura os recibos junto do Par. A Sessão continua descartável.
+- `ReceivedFiles.kt` só considera a gravação concluída depois de aceitar o recibo: falha ao persistir impede o ACK e aciona a limpeza do destino.
+- Green: o teste de `4c89124`, sem alterações, passou com 2 ACKs, 1 GET e 1 cópia; a AppState recriada começa sem histórico. Gate completo passou: 44 Rust, 24 TS, 56 protocolo e 9 app, zero falhas; fmt/clippy, typecheck e lint passaram. Commit de implementação não altera testes.
+- O débito visual anterior permanece; esta retomada verifica automaticamente o critério 3 reaberto, sem nova alegação de verificação no aparelho.

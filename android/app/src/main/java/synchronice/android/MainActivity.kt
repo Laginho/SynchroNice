@@ -182,6 +182,10 @@ internal class AppState(context: Context) {
             }
         }
         pairingPreferences.edit()
+            .also { editor ->
+                if (newPair != pairing) pairingPreferences.all.keys
+                    .filter { it.startsWith("received-file:") }.forEach(editor::remove)
+            }
             .remove("discard-pending")
             .putString("instance-name", newPair.instanceName)
             .putInt("port", newPair.port)
@@ -205,12 +209,14 @@ internal class AppState(context: Context) {
             withContext(Dispatchers.IO + NonCancellable) {
                 outboundMutex.withLock {
                     if (withContext(Dispatchers.Main.immediate) { pairing != currentPair }) return@withLock
+                    val receipts = pairingPreferences.all.filterKeys { it.startsWith("received-file:") }
                     val removal = pairingPreferences.edit()
                     removal.clear()
                     removal.putBoolean("discard-pending", true)
                     if (currentPair != null && !removal.commit()) {
                         // SharedPreferences also changes its memory cache when commit fails.
                         pairingPreferences.edit()
+                            .also { editor -> receipts.forEach { (key, uri) -> editor.putString(key, uri as String) } }
                             .remove("discard-pending")
                             .putString("instance-name", currentPair.instanceName)
                             .putInt("port", currentPair.port)
@@ -383,9 +389,11 @@ internal class AppState(context: Context) {
 
     suspend fun receiveFile(item: Item.FileMeta, currentClient: ProtocolClient) = withContext(Dispatchers.Main.immediate) {
         if (currentClient !== protocolClient) return@withContext
+        val receiptKey = "received-file:${pairing!!.token}:${item.id}"
+        val persistedUri = pairingPreferences.getString(receiptKey, null)?.let(Uri::parse)
         val id = receivedFiles.getOrPut(item.id) {
             val id = nextMessageId++
-            messages.add(ChatMessage(id, item.name, false, Delivery.PENDING, file = item))
+            messages.add(ChatMessage(id, item.name, false, Delivery.PENDING, file = item, uri = persistedUri))
             id
         }
         fun update(change: (ChatMessage) -> ChatMessage) {
@@ -402,6 +410,11 @@ internal class AppState(context: Context) {
                     if (savedUri != null) currentClient.acknowledgeFile(item)
                     else files.receive(currentClient, item, onSaved = { uri ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                            if (currentClient !== protocolClient) throw IOException("Par alterado durante o download")
+                            if (!pairingPreferences.edit().putString(receiptKey, uri.toString()).commit()) {
+                                pairingPreferences.edit().remove(receiptKey).commit()
+                                throw IOException("não foi possível guardar o recebimento")
+                            }
                             update { it.copy(uri = uri) }
                         }
                     }, onProgress = { progress ->
@@ -413,6 +426,8 @@ internal class AppState(context: Context) {
                             }
                         }
                     })
+                    // The receipt is only for retrying an unconfirmed delivery, not chat history.
+                    pairingPreferences.edit().remove(receiptKey).commit()
                 }
             }
             update { it.copy(delivery = Delivery.DELIVERED, progress = 100) }
