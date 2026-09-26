@@ -6,6 +6,8 @@ import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -244,12 +246,40 @@ class ProtocolClientTest {
             assertFalse(receiver.isListening())
             status.set(200)
             assertTrue(receiver.isListening())
+            status.set(204)
+            assertFalse(receiver.isListening())
             assertEquals(
-                listOf<Pair<String, String?>>("HEAD" to "Bearer $TOKEN", "HEAD" to "Bearer $TOKEN"),
+                listOf<Pair<String, String?>>(
+                    "HEAD" to "Bearer $TOKEN",
+                    "HEAD" to "Bearer $TOKEN",
+                    "HEAD" to "Bearer $TOKEN",
+                ),
                 requests,
             )
         } finally {
             server.stop(0)
+        }
+    }
+
+    @Test
+    fun `listen sem Itens nao expira depois de trinta segundos`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            try {
+                Thread.sleep(31_000)
+                exchange.sendResponseHeaders(200, -1)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<List<Item>> { client(port).listen() }
+
+            assertEquals(emptyList(), result.get(35, TimeUnit.SECONDS))
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
         }
     }
 

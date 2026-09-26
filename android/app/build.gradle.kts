@@ -37,4 +37,6 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.zxing:core:3.5.4")
+
+    testImplementation(kotlin("test-junit"))
 }
