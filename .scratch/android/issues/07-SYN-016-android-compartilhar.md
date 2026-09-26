@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -100,3 +100,7 @@ Critérios 3 a 9 são no aparelho: verificação manual.
 - 2026-09-26 Proxy decidiu: ampliar apenas a costura HTTP do PC acima. A fila Android já pertence aos Primary files e deve conservar o id do remetente entre tentativas; só o destinatário consegue confirmar um id já aceito quando o 201 se perde. A deduplicação é por id, nunca pelo conteúdo. Critérios 7 e 8 continuam reabertos para o stage 2.
 
 - 2026-09-26 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: `SYN-016` ficou `Stage: blocked` na [branch/ticket](C:/Users/bruno/Desktop/Pastinha/Programas/Projects/SynchroNice/.scratch/android/issues/07-SYN-016-android-compartilhar.md). /  / O teste HTTP comprometido permite retry automático e não prova resposta perdida. Commits: `2b6d749` e `3b0672e`; branch limpa, sem alterações de produção mantidas. /  / Próximo passo: substituir o cenário por servidor TCP de conexão única e voltar para `to-implement`.
+
+- 2026-09-26 Stage 2: `gate.ps1 -TestsOnly` ficou vermelho por `enqueueText` e `enqueueFile` ausentes; depois da implementação, `gate.ps1` passou (PC 38, Node 24, cliente Android 44, app Android 2 testes).
+- Emulador API 37: Compartilhar texto e PDF por URI entregou ao servidor local; a fila e a cópia interna ficaram vazias após confirmação. HTTP 503 deixou texto Pendente e o WorkManager o entregou uma vez no retry sem abrir o chat. As bolhas de texto e PDF apareceram à direita como Entregue. Arquivo de 12 MB ativou notificação de primeiro plano durante o envio e a removeu ao terminar.
+- Débito humano: em celular físico com o PC real, conferir foto pela galeria, vídeo e áudio na Pasta do PC, múltiplas fotos como Itens separados e a apresentação da notificação de progresso durante um envio grande.

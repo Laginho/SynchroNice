@@ -73,6 +73,12 @@ class ProtocolClient(
         )
     }
 
+    /** Persiste um Item antes de entregá-lo a um executor em segundo plano. */
+    fun enqueueText(text: String) = enqueue(PendingItem.Text(text))
+
+    /** Faz uma cópia interna antes de a URI ou o arquivo de origem desaparecer. */
+    fun enqueueFile(file: File) = enqueue(PendingItem.File(file.absolutePath, file.name))
+
     /**
      * Caminho único de envio: drena o Pendente antes, nunca fura a fila; se
      * ainda houver Pendente à frente ou o PC estiver indisponível, o Item
@@ -99,7 +105,7 @@ class ProtocolClient(
      * arquivo Pendente cujo payload sumiu é descartado em vez de travar a
      * fila para sempre.
      */
-    fun retryPending() {
+    fun retryPending(onFileProgress: (Int) -> Unit = {}) {
         while (true) {
             val next = pending.firstOrNull() ?: return
             if (next is PendingItem.File && !File(next.path).exists()) {
@@ -108,7 +114,7 @@ class ProtocolClient(
             }
             val outcome = when (next) {
                 is PendingItem.Text -> trySendText(next.text)
-                is PendingItem.File -> trySendFile(File(next.path), next.name) {}
+                is PendingItem.File -> trySendFile(File(next.path), next.name, onFileProgress)
             }
             when (outcome) {
                 SendOutcome.Success -> dequeueFirst()
@@ -118,9 +124,10 @@ class ProtocolClient(
         }
     }
 
-    private fun enqueue(item: PendingItem) {
-        val stored = queueStore.enqueue(item) ?: return
+    private fun enqueue(item: PendingItem): Boolean {
+        val stored = queueStore.enqueue(item) ?: return false
         pending.add(stored)
+        return true
     }
 
     private fun dequeueFirst() {

@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -77,6 +78,7 @@ class SynchroNiceApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         state = AppState(this)
+        if (state.pairing != null && state.hasPending()) scheduleDelivery(this)
     }
 }
 
@@ -122,9 +124,13 @@ internal class AppState(context: Context) {
     }
 
     init {
-        queueStore.load().filterIsInstance<PendingItem.Text>().forEach { pending ->
+        queueStore.load().forEach { pending ->
             val id = nextMessageId++
-            messages.add(ChatMessage(id, pending.text, true, Delivery.PENDING))
+            val label = when (pending) {
+                is PendingItem.Text -> pending.text
+                is PendingItem.File -> pending.name
+            }
+            messages.add(ChatMessage(id, label, true, Delivery.PENDING))
             submitted.addLast(id)
         }
     }
@@ -170,6 +176,46 @@ internal class AppState(context: Context) {
         return id
     }
 
+    suspend fun queueText(id: Long, text: String) {
+        val currentClient = client() ?: return
+        try {
+            withContext(Dispatchers.IO) {
+                outboundMutex.withLock {
+                    currentClient.enqueueText(text)
+                    submitted.addLast(id)
+                }
+            }
+            scheduleDelivery(appContext)
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            setDelivery(id, Delivery.FAILED)
+            connectionError = "Não foi possível guardar a mensagem: ${error.message ?: "erro de disco"}"
+        }
+    }
+
+    suspend fun queueFile(file: File) {
+        val currentClient = client() ?: return
+        val stored = withContext(Dispatchers.IO) {
+            outboundMutex.withLock { currentClient.enqueueFile(file) }
+        }
+        if (!stored) throw IOException("arquivo não disponível")
+        val id = nextMessageId++
+        messages.add(ChatMessage(id, file.name, true, Delivery.PENDING))
+        submitted.addLast(id)
+        scheduleDelivery(appContext)
+    }
+
+    fun hasPending(): Boolean = queueStore.load().isNotEmpty()
+
+    fun hasLargePending(): Boolean = queueStore.load().filterIsInstance<PendingItem.File>()
+        .any { File(it.path).length() >= 10L * 1024 * 1024 }
+
+    fun shouldAskNotificationPermission(): Boolean {
+        if (networkPreferences.getBoolean("notification-permission-asked", false)) return false
+        networkPreferences.edit().putBoolean("notification-permission-asked", true).apply()
+        return true
+    }
+
     suspend fun sendText(id: Long, text: String) {
         val currentClient = client() ?: return
         try {
@@ -182,7 +228,7 @@ internal class AppState(context: Context) {
                         submitted.remove(id)
                         throw error
                     } finally {
-                        val remaining = queueStore.load().count { it is PendingItem.Text }
+                        val remaining = queueStore.load().size
                         withContext(Dispatchers.Main.immediate) {
                             reconcilePendingDelivery(messages, submitted, remaining)
                         }
@@ -202,13 +248,13 @@ internal class AppState(context: Context) {
         }
     }
 
-    suspend fun retryPending() {
+    suspend fun retryPending(onFileProgress: (Int) -> Unit = {}) {
         val currentClient = client() ?: return
         outboundMutex.withLock {
             try {
-                currentClient.retryPending()
+                currentClient.retryPending(onFileProgress)
             } finally {
-                val remaining = queueStore.load().count { it is PendingItem.Text }
+                val remaining = queueStore.load().size
                 withContext(Dispatchers.Main.immediate) {
                     reconcilePendingDelivery(messages, submitted, remaining)
                 }
@@ -305,6 +351,16 @@ private fun PairingScreen(state: AppState) {
 
 @Composable
 private fun ChatScreen(state: AppState) {
+    val context = LocalContext.current
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            state.shouldAskNotificationPermission()
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var draft by remember { mutableStateOf("") }
@@ -349,7 +405,7 @@ private fun ChatScreen(state: AppState) {
                     val text = draft
                     val id = state.addOutgoing(text)
                     draft = ""
-                    scope.launch { state.sendText(id, text) }
+                    scope.launch { state.queueText(id, text) }
                 },
             ) { Text("Enviar") }
         }
@@ -416,7 +472,6 @@ private fun ConnectionLifecycle(state: AppState) {
                             try {
                                 val address = state.resolver.resolve(currentPair.instanceName)
                                 if (address != null) state.knownAddress.save(address)
-                                state.retryPending()
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (_: Exception) {
