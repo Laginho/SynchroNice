@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -235,3 +235,7 @@ nos relatórios), além de fmt, clippy, typecheck e lint.
   a decisão ao contrato e voltar a `Stage: to-implement`.
 
 - 2026-09-26 Proxy decidiu: não assumir que a Pasta SAF fique sem alterações externas. `createDocument` só devolve a identidade após criar, e o provedor pode alterar o nome; recuperar pelo nome comum arriscaria escrever em arquivo alheio. O marcador aleatório persistido antes da criação permite retomar somente um candidato inequívoco. Em provedores que não preservam/expõem esse marcador, falhar fechado e exigir intervenção para escolher outra Pasta ou reconciliar o Pendente; nunca adotar por nome/tamanho nem criar outra cópia às cegas. A limpeza de recibo após ACK continua no escopo. Fontes: https://developer.android.com/reference/android/provider/DocumentsProvider e https://developer.android.com/reference/android/provider/DocumentsContract.Document.
+
+#### Terceira retomada Stage 2 (2026-09-26)
+
+- Red SAF: teste no AppState real interrompe o provedor após criar, antes de devolver a URI. A retomada cria 2 documentos em vez de 1. Gate -TestsOnly: 15 testes do app, 1 falha; 44 Rust, 24 TS e 56 protocolo passaram. Primeira tentativa parou por acesso a C:\.android; repetição autorizada confirmou a falha comportamental.

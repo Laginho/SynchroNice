@@ -57,11 +57,17 @@ class ReceivedFileRestartTest {
     @Test
     fun restartingBeforeSafWriteCompletesTheSameDestinationBeforeAck() = exerciseRestart(null, safCrash = true, beforeWrite = true)
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false) = runBlocking {
+    @Test
+    fun restartingAfterSafCreationBeforeUriReturnsReusesTheMarkedDocument() =
+        exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true)
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false) = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         var rejectRemoval = failRemoval
         var crashBeforeReceipt = safCrash && !beforeWrite
-        var crashBeforeWrite = beforeWrite
+        var crashBeforeWrite = beforeWrite && !beforeUri
+        var crashBeforeUri = beforeUri
+        val names = mutableListOf<String>()
         val copies = mutableListOf<File>()
         val preferences = application.getSharedPreferences("pairing", 0)
         val context = object : ContextWrapper(application) {
@@ -111,6 +117,12 @@ class ReceivedFileRestartTest {
             override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
                 check(method == "android:createDocument")
                 copies.add(File(context.cacheDir, "received-${copies.size}.bin"))
+                copies.last().writeText("")
+                names.add(extras!!.getString(DocumentsContract.Document.COLUMN_DISPLAY_NAME)!!)
+                if (crashBeforeUri) {
+                    crashBeforeUri = false
+                    throw SimulatedProcessDeath()
+                }
                 val uri = Uri.parse("content://test.documents/document/${copies.size}")
                 published.add(uri)
                 return Bundle().apply { putParcelable("uri", uri) }
@@ -145,7 +157,17 @@ class ReceivedFileRestartTest {
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int =
                 if (copies[uri.lastPathSegment!!.toInt() - 1].delete()) 1 else 0
             override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
-                MatrixCursor(arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME))
+                MatrixCursor(projection!!).apply {
+                    names.forEachIndexed { index, name ->
+                        addRow(projection.map { column ->
+                            when (column) {
+                                DocumentsContract.Document.COLUMN_DOCUMENT_ID -> (index + 1).toString()
+                                DocumentsContract.Document.COLUMN_DISPLAY_NAME -> name
+                                else -> null
+                            }
+                        })
+                    }
+                }
             override fun getType(uri: Uri) = "application/octet-stream"
         }.apply { attachInfo(context, ProviderInfo().apply { this.authority = authority }) })
         val gets = AtomicInteger()
@@ -190,7 +212,7 @@ class ReceivedFileRestartTest {
             assertEquals(1, gets.get(), "A saved Item only needs another ACK")
             assertEquals(1, copies.size, "Restarting must not create another copy")
             assertEquals("payload", copies.single().readText())
-            assertEquals(1, published.size, "Recovery must finish publication before acknowledging")
+            assertEquals(if (beforeUri) 0 else 1, published.size, "Recovery must finish publication before acknowledging")
             assertEquals(Delivery.DELIVERED, reopened.messages.single().delivery)
             assertTrue(preferences.all.keys.none { it.startsWith("received-file:") }, "An acknowledged receipt must be removed")
         } finally {
