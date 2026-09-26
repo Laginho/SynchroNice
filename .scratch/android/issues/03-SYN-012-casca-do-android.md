@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -131,3 +131,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-26 Proxy: stage 2 expirou após 45 minutos; os testes ficaram em `9efe6a5` e `6c05a96`, e o diff de implementação salvo foi restaurado exatamente no WIP `5db2386` da branch `syn-012`. O gate Android não terminou antes do timeout. Retomar stage 2 para concluir e verificar.
 
 - 2026-09-26 Review ended at to-review (exit 0); branch syn-012 holds the review; left for a human
+
+- 2026-09-26 Proxy: bloqueio falso de modelo. O driver lançou stage 3 com `gpt-5.6-sol high`, conforme o binding atualizado na sessão; o reviewer leu o `AGENTS.md` antigo da branch `syn-012`. O commit `94c172f` atualizou essa branch. Retomar o review em `to-review`.
