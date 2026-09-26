@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -104,3 +104,30 @@ Critérios 3 a 9 são no aparelho: verificação manual.
 - 2026-09-26 Stage 2: `gate.ps1 -TestsOnly` ficou vermelho por `enqueueText` e `enqueueFile` ausentes; depois da implementação, `gate.ps1` passou (PC 38, Node 24, cliente Android 44, app Android 2 testes).
 - Emulador API 37: Compartilhar texto e PDF por URI entregou ao servidor local; a fila e a cópia interna ficaram vazias após confirmação. HTTP 503 deixou texto Pendente e o WorkManager o entregou uma vez no retry sem abrir o chat. As bolhas de texto e PDF apareceram à direita como Entregue. Arquivo de 12 MB ativou notificação de primeiro plano durante o envio e a removeu ao terminar.
 - Débito humano: em celular físico com o PC real, conferir foto pela galeria, vídeo e áudio na Pasta do PC, múltiplas fotos como Itens separados e a apresentação da notificação de progresso durante um envio grande.
+
+#### Review (2026-09-26)
+
+Verdict: Reopen — os critérios 2, 7 e 8 precisam de testes e correção.
+
+- Standards: nenhuma violação de regra documentada. Como julgamentos de
+  manutenção, `AppState.sendText` virou um caminho de envio sem chamador de
+  produção, e `AppState` voltou a interpretar a fila que pertence ao cliente do
+  protocolo; não refatorar isso neste ticket.
+- ❌ **Critério 2:** o retry não garante "sem duplicar". O cliente só tira o
+  Item da fila depois de ler o HTTP 201; se o PC persistir o Item e a resposta
+  se perder, a próxima tentativa cria outro Item. A spec raiz exige id gerado
+  pelo remetente e deduplicação pelo destinatário. A correção precisa de teste
+  novo e alcança o servidor PC, que não está nos Primary files atuais; stage 1
+  precisa autorizar essa costura antes da implementação.
+- ❌ **Critério 7:** `DeliveryWorker` chama `setForeground` para qualquer
+  Pendente grande antes de saber se o PC está acessível. Com o celular conectado
+  a uma rede sem o PC, cada tentativa pode mostrar notificação de envio a 0%,
+  contrariando a história 20 (Pendente não notifica).
+- ❌ **Critério 8:** `large` é calculado antes de adquirir o mutex usado por
+  `retryPending`. Um arquivo grande pode entrar entre essa leitura e o início do
+  dreno; o mesmo worker então o envia sem trabalho em primeiro plano. Precisa de
+  teste de concorrência novo antes da correção.
+- Gate: passou `cargo fmt --check`, `cargo clippy`, 38 testes Rust,
+  `tsc --noEmit`, 24 testes Node e `gradle check` com testes Kotlin, compilação
+  e lint. A primeira tentativa falhou apenas porque o sandbox impediu o AGP de
+  usar `C:\.android`; fora dele, o gate passou.
