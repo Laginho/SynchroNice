@@ -79,8 +79,19 @@ Critérios 3 a 9 são no aparelho: verificação manual.
   id e remove o Pendente. Corrigir primeiro o teste em commit próprio, sem
   alterar produção. Manter separado o teste de arquivo grande com 201 antecipado
   e os testes Rust de deduplicação no PC.
+- Para a janela de finalização do critério 2, acrescentar teste unitário em
+  `pc/src-tauri/src/server.rs` (somente `#[cfg(test)]`): chamar `post_file` real,
+  pausar a tarefa destacada após o rename e antes de registrar o id aceito,
+  cancelar explicitamente a future do primeiro handler e iniciar outro POST
+  com o mesmo id. Confirmar que o segundo passou pela consulta enquanto o
+  primeiro ainda finaliza; liberar a pausa e exigir um só Item e arquivo.
+  Usar sincronização de teste, sem espera arbitrária nem mudança de comportamento
+  de produção. O teste recuperado em `pc/src-tauri/tests/server.rs` continua
+  como cobertura de HTTP, mas verde sozinho não prova essa janela.
 
 ## Comments
+
+- 2026-09-26 Proxy decidiu: manter o achado da quarta revisão em `syn-016`. O lock do id pertence à future de `post_file`, mas a tarefa destacada continua entre rename e registro do id sem possuir esse lock; se o handler for cancelado nessa janela, outro POST pode passar pela consulta. O teste de socket recuperado em `923e915` fecha a conexão no progresso e não força esse cancelamento, por isso estar verde não refuta o achado. Stage 2 deve primeiro obter o vermelho determinístico descrito acima, em commit só de teste, e depois corrigir a vida útil do lock preservando retry após envio incompleto. Nenhuma mudança de produção foi feita nesta decisão.
 
 - 2026-09-26 Proxy decidiu: o `HttpServer` que fecha sem resposta permite retry transparente do POST pelo `HttpURLConnection`; receber 201 na mesma chamada não representa perda de confirmação. Substituir apenas o cenário de texto pelo servidor TCP de uma conexão descrito acima. O teste de arquivo grande continua separado. Os commits de teste e review existentes ficam preservados; stage 2 retoma a correção de produção após o teste determinístico.
 
