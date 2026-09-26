@@ -182,11 +182,15 @@ class ProtocolClient(
             }
             val total = file.length()
             connection.setFixedLengthStreamingMode(total)
-            file.inputStream().use { input ->
-                connection.outputStream.use { output ->
-                    onFileStart(total)
-                    pump(input, output, total, onProgress)
+            try {
+                file.inputStream().use { input ->
+                    connection.outputStream.use { output ->
+                        onFileStart(total)
+                        pump(input, output, total, onProgress)
+                    }
                 }
+            } catch (_: IOException) {
+                // O PC pode confirmar um id conhecido antes de consumir o corpo.
             }
             val code = connection.responseCode
             if (code == HttpURLConnection.HTTP_CREATED) {
