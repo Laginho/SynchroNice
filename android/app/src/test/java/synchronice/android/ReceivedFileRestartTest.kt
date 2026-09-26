@@ -2,6 +2,9 @@ package synchronice.android
 
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
 import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.net.Uri
@@ -21,6 +24,7 @@ import org.robolectric.shadows.ShadowContentResolver
 import synchronice.protocolclient.Item
 import synchronice.protocolclient.ProtocolRejectedException
 import java.io.File
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
@@ -41,8 +45,39 @@ class ReceivedFileRestartTest {
     @Test
     fun restartingImmediatelyAfterPublicationDoesNotCreateAnotherCopy() = exerciseRestart(true)
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?) = runBlocking {
-        val context = RuntimeEnvironment.getApplication()
+    @Test
+    fun failedReceiptRemovalIsReportedAndCanBeRetried() = exerciseRestart(null, failRemoval = true)
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false) = runBlocking {
+        val application = RuntimeEnvironment.getApplication()
+        var rejectRemoval = failRemoval
+        val preferences = application.getSharedPreferences("pairing", 0)
+        val context = object : ContextWrapper(application) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences {
+                if (name != "pairing") return super.getSharedPreferences(name, mode)
+                return object : SharedPreferences by preferences {
+                    override fun edit(): SharedPreferences.Editor {
+                        val editor = preferences.edit()
+                        var removesReceipt = false
+                        return object : SharedPreferences.Editor by editor {
+                            override fun remove(key: String): SharedPreferences.Editor {
+                                removesReceipt = key.startsWith("received-file:")
+                                editor.remove(key)
+                                return this
+                            }
+                            override fun commit(): Boolean {
+                                if (rejectRemoval && removesReceipt) {
+                                    rejectRemoval = false
+                                    return false
+                                }
+                                return editor.commit()
+                            }
+                        }
+                    }
+                }
+            }
+        }
         val copies = mutableListOf<File>()
         val published = mutableSetOf<Uri>()
         var crash = crashAfterPublication != null
@@ -83,7 +118,7 @@ class ReceivedFileRestartTest {
             exchange.close()
         }
         server.createContext("/outbox/42/ack") { exchange ->
-            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null) 503 else 204, -1)
+            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null && !failRemoval) 503 else 204, -1)
             exchange.close()
         }
         server.start()
@@ -93,7 +128,11 @@ class ReceivedFileRestartTest {
             assertTrue(state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"0123456789abcdef0123456789abcdef"}"""))
             state.knownAddress.save("127.0.0.1")
             val item = Item.FileMeta(42, 0, "received.bin", 7)
-            if (crashAfterPublication == null) {
+            if (failRemoval) {
+                assertFailsWith<IOException> { state.receiveFile(item, state.client()!!) }
+                assertTrue(state.connectionError != null, "Receipt cleanup failure must be visible")
+                assertEquals(1, acks.get())
+            } else if (crashAfterPublication == null) {
                 assertEquals(503, assertFailsWith<ProtocolRejectedException> {
                     state.receiveFile(item, state.client()!!)
                 }.code)
@@ -112,6 +151,7 @@ class ReceivedFileRestartTest {
             assertEquals(1, copies.size, "Restarting must not create another copy")
             assertEquals(1, published.size, "Recovery must finish publication before acknowledging")
             assertEquals(Delivery.DELIVERED, reopened.messages.single().delivery)
+            assertTrue(preferences.all.keys.none { it.startsWith("received-file:") }, "An acknowledged receipt must be removed")
         } finally {
             Dispatchers.resetMain()
             server.stop(0)
