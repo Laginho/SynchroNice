@@ -1,6 +1,46 @@
 {
   "cases": [
     {
+      "name": "link com porta acima do limite nao e link",
+      "input": "https://example.com:99999",
+      "expected": [{ "type": "text", "text": "https://example.com:99999" }]
+    },
+    {
+      "name": "link com porta imediatamente acima do limite nao e link",
+      "input": "https://example.com:65536",
+      "expected": [{ "type": "text", "text": "https://example.com:65536" }]
+    },
+    {
+      "name": "link com porta negativa nao e link",
+      "input": "https://example.com:-1",
+      "expected": [{ "type": "text", "text": "https://example.com:-1" }]
+    },
+    {
+      "name": "link com porta zero segue o contrato URL do PC",
+      "input": "https://example.com:0",
+      "expected": [{ "type": "link", "text": "https://example.com:0", "href": "https://example.com:0" }]
+    },
+    {
+      "name": "link com porta um e valido",
+      "input": "https://example.com:1",
+      "expected": [{ "type": "link", "text": "https://example.com:1", "href": "https://example.com:1" }]
+    },
+    {
+      "name": "link com porta maxima e valido",
+      "input": "https://example.com:65535",
+      "expected": [{ "type": "link", "text": "https://example.com:65535", "href": "https://example.com:65535" }]
+    },
+    {
+      "name": "link preserva escape percentual malformado no caminho",
+      "input": "https://example.com/%zz",
+      "expected": [{ "type": "link", "text": "https://example.com/%zz", "href": "https://example.com/%zz" }]
+    },
+    {
+      "name": "link preserva percentuais na consulta e no fragmento",
+      "input": "https://example.com/%20?q=%z#%",
+      "expected": [{ "type": "link", "text": "https://example.com/%20?q=%z#%", "href": "https://example.com/%20?q=%z#%" }]
+    },
+    {
       "name": "número comum não é copiável",
       "input": "Tenho 150 itens.",
       "expected": [{ "type": "text", "text": "Tenho 150 itens." }]
