@@ -42,6 +42,37 @@ private fun tempFile(bytes: ByteArray): File =
 class ProtocolClientTest {
 
     @Test
+    fun `enfileirar para trabalho futuro nao envia antes da tentativa e preserva arquivo`() {
+        val dir = kotlin.io.path.createTempDirectory("background-send").toFile()
+        val queue = File(dir, "pending.txt")
+        val original = File(dir, "foto.bin").apply { writeText("foto") }
+        val requests = mutableListOf<String>()
+        val port = freePort()
+        val server = fakeServer(port, "/items/") { exchange ->
+            requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port, FilePendingQueueStore(queue))
+            sender.enqueueText("texto")
+            sender.enqueueFile(original)
+            assertEquals(emptyList(), requests)
+            assertTrue(original.delete())
+
+            val restored = client(port, FilePendingQueueStore(queue))
+            restored.retryPending()
+
+            assertEquals(listOf("texto", "foto"), requests)
+            assertFalse(restored.hasPending())
+            assertEquals(emptyList(), File(dir, "pending.txt.payloads").listFiles()?.toList() ?: emptyList())
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `503 preserva texto e arquivo para retry e 401 preserva pendentes`() {
         val dir = kotlin.io.path.createTempDirectory("service-unavailable").toFile()
         val queue = File(dir, "pending.txt")
