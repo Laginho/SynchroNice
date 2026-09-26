@@ -41,3 +41,5 @@ Todos os critérios são no aparelho: verificação manual.
   registra isso no commit.
 
 ## Comments
+
+- 2026-09-26 Attempt 1 failed: exit 0. Log tail: SYN-017 ficou `blocked`: guardar fotos depende da Pasta do SYN-014, ainda bloqueado e sem implementação integrada. /  / Registro no commit `c30eacd`, branch `syn-017`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando “the ticket needs a seam it does not name”. Próximo passo: incorporar SYN-014 como dependência e integrá-lo antes de retomar.
