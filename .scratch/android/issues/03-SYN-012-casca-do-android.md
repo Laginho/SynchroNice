@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -103,3 +103,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-25 Proxy decided: o bloqueio de ambiente foi resolvido. Gradle 9.4.1 oficial está no cache temporário `C:\Users\bruno\AppData\Local\Temp\SynchroNice-gradle-home`, com SHA-256 validado; o `android/local.properties` ignorado aponta para o SDK instalado. Com `GRADLE_USER_HOME` nesse cache, `gate.ps1 -TestsOnly` passou, inclusive `:protocol-client:test` e `:app:testDebugUnitTest`. Retomar o stage 2 a partir do teste vermelho preservado em `1262762`.
 
 - 2026-09-25 Attempt 4 failed: exit 0; blocked after two attempts. Log tail: SYN-012 está em `to-implement` na branch `syn-012`; o binding atribui o stage 2 ao **gpt-6-luna max**. Como esta sessão não identifica o modelo, parei conforme o `ticket-flow`, sem rodar testes nem alterar arquivos. Reexecute com gpt-6-luna max.
+
+- 2026-09-25 Proxy decided: a tentativa 4 foi um falso bloqueio de modelo. O driver lançou `codex exec --model gpt-6-luna --config model_reasoning_effort=max`, conforme o binding; falta de autoidentificação não indica incompatibilidade. Guard do `ticket-flow` esclarecido. Retomar o stage 2 sem alterar o teste vermelho em `1262762`.
