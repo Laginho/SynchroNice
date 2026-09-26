@@ -10,6 +10,32 @@ import kotlin.test.assertTrue
 
 class PendingQueueStoreTest {
     @Test
+    fun `falha ao excluir copia preserva referencia para repetir descarte`() {
+        val dir = createTempDir(prefix = "synchronice-clear-")
+        try {
+            val queueFile = File(dir, "pending.txt")
+            val original = File(dir, "original.bin").apply { writeText("payload") }
+            val store = FilePendingQueueStore(queueFile)
+            val saved = store.enqueue(PendingItem.File(original.path, original.name)) as PendingItem.File
+            val payload = File(saved.path)
+            assertTrue(payload.delete())
+            assertTrue(payload.mkdir())
+            val blocker = File(payload, "locked").apply { writeText("block deletion") }
+
+            assertFailsWith<IOException> { store.clear() }
+            assertEquals(listOf(saved), store.load())
+            val reopened = FilePendingQueueStore(queueFile)
+            assertEquals(listOf(saved), reopened.load())
+            assertTrue(blocker.delete())
+            reopened.clear()
+            assertTrue(FilePendingQueueStore(queueFile).load().isEmpty())
+            assertFalse(payload.exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `descartar fila persiste vazio e apaga copias internas`() {
         val dir = createTempDir(prefix = "synchronice-clear-")
         try {
