@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,7 +64,7 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. ✅ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
+1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. `Char.isWhitespace()` ainda aceita separadores Unicode que JSON proíbe.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
 4. ✅ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
@@ -99,6 +99,8 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   extra; `ProtocolClientTest.kt` mantém o long-poll vazio por mais de 30 s e
   consulta presença em 204, 200 e 204; `PresenceLifecycleTest.kt` verifica o
   reset de presença ao iniciar e cancelar um ciclo RESUMED.
+- Na quinta reabertura, `PairingInfoTest.kt` rejeita whitespace fora do conjunto
+  JSON entre tokens (por exemplo U+000B), com os três campos obrigatórios válidos.
 
 ## Comments
 
@@ -208,3 +210,21 @@ Verdict: Reopen — critérios 5 e 7 precisam de testes e correção.
 - 2026-09-26 Stage 2 (quarta reabertura): `a80b1f7` contém só os testes para reconexão após GET silencioso e entrega parcial; `gate.ps1 -TestsOnly` ficou vermelho na compilação porque `reconcilePendingDelivery` ainda não existia. `9564381` limita a escuta ociosa a 35 s e concilia cada bolha enviada com o prefixo confirmado da fila, inclusive quando a próxima mensagem continua Pendente. `6afbef3` contém só o teste de fechamento imediato do GET; o mesmo gate ficou vermelho pela API `closeListen` ausente. `d197a47` desconecta o GET ao pausar/sair do chat e limpa a presença. Depois, `gate.ps1 -TestsOnly` passou com 38 testes Rust, 24 Node e 44 Kotlin (42 no cliente do protocolo, 2 no app).
 
 - Gate completo passou: `cargo fmt --check`, `cargo clippy`, 38 testes Rust, `tsc --noEmit`, 24 testes Node e `gradle check` com 44 testes Kotlin, compilação e lint Android. `git diff --check` passou. O Débito humano dos critérios 3–9 registrado acima permanece para verificação no aparelho.
+
+#### Review (2026-09-26, quinta rodada)
+
+Verdict: Reopen — o critério 1 ainda aceita whitespace inválido em JSON.
+
+- Standards: nenhuma violação documentada. Os Pendentes reaparecerem no chat
+  é exigido pela spec ("sempre, os Pendentes da fila"), apesar de a Sessão comum
+  ser descartável. `MainActivity.kt` continua um possível Divergent Change e
+  repete o tratamento de `ProtocolRejectedException`; sem refatorar neste ticket.
+- Critério 1: `skipWhitespace()` usa `Char.isWhitespace()`, que aceita caracteres
+  como U+000B entre tokens. JSON permite somente espaço, tab, CR e LF; portanto um
+  QR sintaticamente inválido ainda pode criar o Par. `PairingInfoTest.kt` precisa
+  provar o vermelho antes da correção mínima em `FlatJson.kt`.
+- Escopo: a alteração equivalente de modelos em `AGENTS.md` já está na branch
+  de sessão e será descartada pelo rebase; não é mudança funcional deste ticket.
+- Verificação: o gate completo verde do stage 2 está registrado acima;
+  `git diff --check` passou nesta revisão. O Débito humano dos critérios 3–9
+  permanece.
