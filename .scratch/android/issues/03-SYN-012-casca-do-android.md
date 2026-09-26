@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -135,3 +135,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-26 Proxy: bloqueio falso de modelo. O driver lançou stage 3 com `gpt-5.6-sol high`, conforme o binding atualizado na sessão; o reviewer leu o `AGENTS.md` antigo da branch `syn-012`. O commit `94c172f` atualizou essa branch. Retomar o review em `to-review`.
 
 - 2026-09-25 Attempt 4 stopped: escrevi os casos do parser do QR em `PairingInfoTest.kt`, mas não consegui provar o vermelho. O gate passou nos 37 testes Rust e 24 Node; o passo Android nem iniciou porque a distribuição Gradle 9.4.1 não está no cache desta sessão e o download de `services.gradle.org` expirou, inclusive com timeout de 60 segundos. Os testes Kotlin seguem sem execução. Para retomar, disponibilize Gradle 9.4.1 no `GRADLE_USER_HOME` da sessão ou restabeleça o acesso ao host e rode `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly`; então confirme o vermelho antes de implementar.
+
+- 2026-09-25 Proxy decided: ambiente destravado. Gradle 9.4.1 oficial está em `C:\Users\bruno\AppData\Local\Temp\SynchroNice-gradle-home`, com SHA-256 validado, e `android/local.properties` aponta para o SDK instalado. Com `GRADLE_USER_HOME` nesse cache, `gate.ps1 -TestsOnly` passou na base, inclusive nos testes Android. Retomar aqui em `1262762` e confirmar o vermelho dos novos casos de QR antes de implementar.
