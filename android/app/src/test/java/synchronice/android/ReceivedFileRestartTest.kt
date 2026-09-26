@@ -89,7 +89,11 @@ class ReceivedFileRestartTest {
     fun realListenLoopCleansReceiptAfterAckWithoutAnotherAnnouncement() =
         exerciseRestart(null, failRemoval = true, listenRecovery = true)
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null, listenRecovery: Boolean = false) = runBlocking {
+    @Test
+    fun uninterruptedSafCreationUsesReturnedUriEvenWhenProviderChangesMarker() =
+        exerciseRestart(null, normalSaf = true)
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null, listenRecovery: Boolean = false, normalSaf: Boolean = false) = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         var rejectRemoval = failRemoval
         var crashBeforeReceipt = safCrash && !beforeWrite
@@ -138,8 +142,8 @@ class ReceivedFileRestartTest {
         }
         val published = mutableSetOf<Uri>()
         var crash = crashAfterPublication != null
-        val authority = if (safCrash) "test.documents" else "media"
-        if (safCrash) context.getSharedPreferences("settings", 0).edit()
+        val authority = if (safCrash || normalSaf) "test.documents" else "media"
+        if (safCrash || normalSaf) context.getSharedPreferences("settings", 0).edit()
             .putString("receive-folder", "content://test.documents/tree/root").commit()
         // The system storage boundary writes real bytes; AppState and the HTTP client are real.
         ShadowContentResolver.registerProviderInternal(authority, object : ContentProvider() {
@@ -149,6 +153,7 @@ class ReceivedFileRestartTest {
                 copies.add(File(context.cacheDir, "received-${copies.size}.bin"))
                 copies.last().writeText("")
                 names.add(extras!!.getString(DocumentsContract.Document.COLUMN_DISPLAY_NAME)!!)
+                if (normalSaf) names[names.lastIndex] = "received.bin"
                 if (crashBeforeUri) {
                     crashBeforeUri = false
                     throw SimulatedProcessDeath()
@@ -162,6 +167,10 @@ class ReceivedFileRestartTest {
                 return Uri.withAppendedPath(uri, copies.size.toString())
             }
             override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+                if (normalSaf && mode != "r") assertEquals(
+                    "writing:$uri", preferences.all.entries.single { it.key.startsWith("received-file:") }.value,
+                    "The returned URI must be persisted before opening the destination",
+                )
                 val descriptor = ParcelFileDescriptor.open(copies[uri.lastPathSegment!!.toInt() - 1],
                     if (mode == "r") ParcelFileDescriptor.MODE_READ_ONLY else
                         ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_TRUNCATE)
@@ -218,7 +227,7 @@ class ReceivedFileRestartTest {
             exchange.close()
         }
         server.createContext("/outbox/42/ack") { exchange ->
-            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null && !failRemoval && !safCrash) 503 else 204, -1)
+            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null && !failRemoval && !safCrash && !normalSaf) 503 else 204, -1)
             exchange.close()
         }
         server.createContext("/listen") { exchange ->
@@ -235,6 +244,15 @@ class ReceivedFileRestartTest {
             assertTrue(state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"0123456789abcdef0123456789abcdef"}"""))
             state.knownAddress.save("127.0.0.1")
             val item = Item.FileMeta(42, 0, "received.bin", 7)
+            if (normalSaf) {
+                state.receiveFile(item, state.client()!!)
+                assertEquals(1, gets.get())
+                assertEquals(1, acks.get())
+                assertEquals("payload", copies.single().readText())
+                assertEquals(Delivery.DELIVERED, state.messages.single().delivery)
+                assertTrue(preferences.all.keys.none { it.startsWith("received-file:") })
+                return@runBlocking
+            }
             if (failRemoval) {
                 if (listenRecovery) {
                     val listening = launch { state.listen(state.pairing!!, state.client()!!) }

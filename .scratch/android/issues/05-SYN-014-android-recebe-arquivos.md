@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -84,7 +84,7 @@ Critérios 3 a 7 são no aparelho: verificação manual.
 
 #### Revisão (2026-09-26) — reaberto
 
-Verdict: Reopen — o recebimento pode duplicar um Item depois de reiniciar; `Stage: to-implement`.
+Verdict: Reopen — o recebimento pode duplicar um Item depois de reiniciar; `Stage: implementing`.
 
 **Standards:** nenhuma violação obrigatória. Os nomes genéricos e a limpeza de
 Sessão repetida são observações de cheiro, mas refatorá-los seria trabalho fora
@@ -119,7 +119,7 @@ continua limpa: `47eeb37` contém só ticket + testes e `0a39464` não toca test
 
 #### Revisão (2026-09-26) — reaberto novamente
 
-Verdict: Reopen — o critério 3 ainda cai; `Stage: to-implement`.
+Verdict: Reopen — o critério 3 ainda cai; `Stage: implementing`.
 
 **Standards.** O recibo `received-file:<token>:<id> -> URI` acrescenta estado
 persistente que o ADR-0002 ainda não documenta: sua lista hoje diz que, fora os
@@ -167,7 +167,7 @@ deles é conserto permitido no Stage 3.
 
 #### Revisão (2026-09-26) — terceira revisão
 
-Verdict: Reopen — o critério 3 ainda cai; `Stage: to-implement`.
+Verdict: Reopen — o critério 3 ainda cai; `Stage: implementing`.
 
 **Standards.** A divergência obrigatória entre os recibos persistentes e a
 lista exaustiva do ADR-0002 permanece, mas já tem dono no CLEAN-010, bloqueado
@@ -232,7 +232,7 @@ nos relatórios), além de fmt, clippy, typecheck e lint.
   `ticket-flow` determina interromper Stage 2 quando falta decisão no contrato.
 - Sem gate nesta sessão: apenas registro de bloqueio; nenhuma nova alegação
   de red-green ou validação visual. Retomar na branch `syn-014` após incorporar
-  a decisão ao contrato e voltar a `Stage: to-implement`.
+  a decisão ao contrato e voltar a `Stage: implementing`.
 
 - 2026-09-26 Proxy decidiu: não assumir que a Pasta SAF fique sem alterações externas. `createDocument` só devolve a identidade após criar, e o provedor pode alterar o nome; recuperar pelo nome comum arriscaria escrever em arquivo alheio. O marcador aleatório persistido antes da criação permite retomar somente um candidato inequívoco. Em provedores que não preservam/expõem esse marcador, falhar fechado e exigir intervenção para escolher outra Pasta ou reconciliar o Pendente; nunca adotar por nome/tamanho nem criar outra cópia às cegas. A limpeza de recibo após ACK continua no escopo. Fontes: https://developer.android.com/reference/android/provider/DocumentsProvider e https://developer.android.com/reference/android/provider/DocumentsContract.Document.
 
@@ -254,7 +254,7 @@ nos relatórios), além de fmt, clippy, typecheck e lint.
 
 #### Revisão (2026-09-26) — reaberto pela quarta vez
 
-Verdict: Reopen — o fluxo SAF normal pode ficar Pendente sem necessidade; `Stage: to-implement`.
+Verdict: Reopen — o fluxo SAF normal pode ficar Pendente sem necessidade; `Stage: implementing`.
 
 **Standards.** A persistência dos recibos ainda contradiz a lista exaustiva do
 ADR-0002, com correção já isolada no CLEAN-010. Os demais achados são cheiros
@@ -281,3 +281,7 @@ O achado exige teste novo, portanto não é conserto permitido no Stage 3.
 Nenhum arquivo de produção ou teste foi alterado nesta revisão; o gate não foi
 repetido porque a branch continua no mesmo commit de código já validado pelo
 Stage 2.
+
+#### Quarta retomada Stage 2 (2026-09-26)
+
+- Red: o teste uninterruptedSafCreationUsesReturnedUriEvenWhenProviderChangesMarker usa AppState real e provedor SAF que devolve URI válida, mas normaliza o nome. Exige recibo da URI antes de abrir o destino, bytes completos e ACK. gate -TestsOnly falhou na consulta por marcador em ReceivedFiles.kt:109: 22 testes do app, 1 falha. Log: %TEMP%/syn-014-normal-red.log.
