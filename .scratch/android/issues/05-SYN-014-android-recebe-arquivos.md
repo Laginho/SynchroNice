@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -36,7 +36,7 @@ ela.
 
 1. O módulo cliente baixa um Item de arquivo para um destino em stream, com o mesmo progresso e a mesma confirmação só depois do download completo que o download para arquivo tem hoje.
 2. Um download interrompido não confirma o Item ao PC.
-3. Um arquivo enviado pelo PC com o app aberto é gravado em `Download/SynchroNice` sem nenhum toque e aparece na galeria (se imagem) ou no gerenciador de arquivos. Após morte do processo entre a criação de um documento SAF e o retorno da URI, a retomada não pode criar outra cópia nem sobrescrever um documento alheio. Antes de criar, persistir uma intenção ligada ao Par, id do Item e Pasta, com marcador aleatório exclusivo no nome pedido ao SAF. Só retomar automaticamente quando a consulta à Pasta encontrar exatamente um documento que preserve esse marcador; persistir seu `COLUMN_DOCUMENT_ID`/URI antes de escrever. Não remover o marcador por rename automático. Nome original, tamanho ou posição na listagem não provam identidade. Se o provedor alterar/ocultar o marcador, atrasar a consulta ou houver ambiguidade, manter o Item Pendente e mostrar erro recuperável: não escrever, apagar, criar outra cópia nem confirmar ao PC automaticamente.
+3. ❌ Um arquivo enviado pelo PC com o app aberto é gravado em `Download/SynchroNice` sem nenhum toque e aparece na galeria (se imagem) ou no gerenciador de arquivos. Após morte do processo entre a criação de um documento SAF e o retorno da URI, a retomada não pode criar outra cópia nem sobrescrever um documento alheio. Antes de criar, persistir uma intenção ligada ao Par, id do Item e Pasta, com marcador aleatório exclusivo no nome pedido ao SAF. Só retomar automaticamente quando a consulta à Pasta encontrar exatamente um documento que preserve esse marcador; persistir seu `COLUMN_DOCUMENT_ID`/URI antes de escrever. Não remover o marcador por rename automático. Nome original, tamanho ou posição na listagem não provam identidade. Se o provedor alterar/ocultar o marcador, atrasar a consulta ou houver ambiguidade, manter o Item Pendente e mostrar erro recuperável: não escrever, apagar, criar outra cópia nem confirmar ao PC automaticamente.
 4. A bolha mostra progresso animado durante o download, e depois a miniatura (imagem) ou nome, tipo e tamanho (outros).
 5. Dois arquivos com o mesmo nome ficam os dois na Pasta, sem sobrescrever.
 6. Tocar na bolha abre o arquivo no app padrão.
@@ -164,3 +164,40 @@ deles é conserto permitido no Stage 3.
 - Green: os cinco testes acrescentados nesta retomada passaram, com uma cópia e um GET em cada cenário de crash. Gate completo passou: 44 Rust, 24 TS, 56 protocolo e 14 app; zero falhas nos relatórios JVM; fmt/clippy, typecheck e lint passaram. A primeira chamada do gate completo terminou com falha apesar de Android verde; a saída truncada não preservou a causa. A repetição sem alterações, com log completo, passou (`%TEMP%/syn-014-gate.log`).
 - Referência de API: [ContentResolver.openOutputStream](https://developer.android.com/reference/android/content/ContentResolver) documenta que `w` pode não truncar; a retomada usa `wt`.
 - O débito visual já registrado permanece. Esta retomada verifica falhas de processo e armazenamento automaticamente, sem nova alegação de verificação manual no aparelho. A atualização do ADR permanece no CLEAN-010, conforme a revisão anterior.
+
+#### Revisão (2026-09-26) — terceira revisão
+
+Verdict: Reopen — o critério 3 ainda cai; `Stage: to-implement`.
+
+**Standards.** A divergência obrigatória entre os recibos persistentes e a
+lista exaustiva do ADR-0002 permanece, mas já tem dono no CLEAN-010, bloqueado
+por este ticket. Os demais achados são cheiros de julgamento e não devem ser
+refatorados aqui: recibo codificado em `String`, prefixo `received-file:`
+repetido, nomes genéricos em `receivedFiles`/`files`, estado de arquivo espalhado
+por `file`/`uri`/`progress` e flags booleanas nos cenários do teste.
+
+**Spec.**
+
+1. **❌ Critério 3 — o SAF ainda tem uma janela de duplicação.**
+   `DocumentsContract.createDocument` torna o arquivo visível antes de
+   `ReceivedFiles.receive` chamar `onCreated`, que é quando `AppState` persiste
+   `writing:<URI>`. Uma morte entre o retorno do provedor e esse commit deixa um
+   arquivo sem recibo; a nova `AppState` cria outro. O teste "before SAF write"
+   interrompe dentro de `openFile`, portanto depois de `onCreated`, e não cobre
+   essa janela. A próxima rodada precisa matar o provedor logo depois de criar o
+   documento, antes de devolver a URI, e provar uma só cópia após a retomada.
+2. **A limpeza depois do ACK não é retomável no fluxo real.** Se o `ack`
+   funciona e o `commit()` que remove o recibo falha, o PC já retirou o Item e
+   `/listen` não o anuncia novamente. O teste atual mascara isso chamando
+   `receiveFile` diretamente na `AppState` reaberta. A próxima rodada deve usar
+   o laço real de escuta e provar que uma falha de remoção não deixa recibo
+   órfão nem bolha permanentemente em falha.
+
+Os dois achados exigem teste novo, portanto não são consertos permitidos no
+Stage 3. Nenhum vazamento de escopo novo foi encontrado. Os pares de commits de
+teste/código continuam separados e `git diff --check` passou.
+
+Gate completo: a primeira chamada parou apenas porque o sandbox não podia
+gravar em `C:\.android`; repetido com acesso ao ambiente Android, passou com 44
+testes Rust, 24 Node e `gradle check` verde (56 testes do protocolo e 14 do app
+nos relatórios), além de fmt, clippy, typecheck e lint.
