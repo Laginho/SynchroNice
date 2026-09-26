@@ -1,5 +1,5 @@
 # SYN-017: Android — botão de câmera
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-013, SYN-016, SYN-014
 Review: agent
@@ -53,3 +53,13 @@ Todos os critérios são no aparelho: verificação manual.
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: SYN-017 ficou `blocked`: guardar fotos depende da Pasta do SYN-014, ainda bloqueado e sem implementação integrada. /  / Registro no commit `c30eacd`, branch `syn-017`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando “the ticket needs a seam it does not name”. Próximo passo: incorporar SYN-014 como dependência e integrá-lo antes de retomar.
 
 - 2026-09-26 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: SYN-017 ficou `blocked`: guardar fotos depende da Pasta do SYN-014, ainda bloqueado e não integrado. /  / Registro: commit `711e80f`, branch `syn-017`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando falta “a seam the ticket does not name”. Próximo passo: resolver e integrar SYN-014 antes de retomar.
+
+#### Resolution (2026-09-26)
+
+Verdict: Approve
+
+- Decisão: aprovado após a correção pequena `2926ff3`, que mantém o envio da foto mesmo se a cópia opcional para a Pasta falhar.
+- Arquivos: `AndroidManifest.xml`, `MainActivity.kt`, `ReceivedFiles.kt` e `res/xml/camera_paths.xml` dentro de `android/app/`.
+- Prova red-green: não aplicável pela dispensa explícita em “Tests stage 2 writes”; câmera, MediaStore e SAF permanecem na verificação manual registrada como débito humano.
+- Gate: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` terminou com `gate: passou` (exit 0): Rust 44 testes, Node 32, Android 79 (23 app + 56 protocolo), zero falhas; fmt, clippy, typecheck e lint aprovados.
+- Review: nenhuma violação documentada de Standards; os smells de baixa severidade não justificam abstração. O único desvio da Spec foi corrigido antes da aprovação.
