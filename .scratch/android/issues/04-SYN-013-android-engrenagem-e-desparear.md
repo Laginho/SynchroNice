@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: to-review
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -47,3 +47,5 @@ Critérios 3 a 5 são no aparelho: verificação manual.
 ## Comments
 
 - 2026-09-26 Review anterior parou antes do veredito por autoidentificação incorreta do modelo; o comando CLI usou gpt-5.6-sol high. Retomar stage 3 da branch SYN-013.
+
+- 2026-09-26 Attempt 1 stopped to ask: SYN-013 ficou `blocked`, registrado no commit `cd2a42d`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando falta uma costura de teste aprovada: “a seam the ticket does not name”. Você autoriza incorporar ao contrato testes do Desparear e do HTTP 401/503 no `DeliveryWorker`?
