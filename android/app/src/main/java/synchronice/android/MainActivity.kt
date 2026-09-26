@@ -430,7 +430,9 @@ internal class AppState(context: Context) {
                         }
                     })
                     // The receipt is only for retrying an unconfirmed delivery, not chat history.
-                    pairingPreferences.edit().remove(receiptKey).commit()
+                    if (!pairingPreferences.edit().remove(receiptKey).commit()) {
+                        throw IOException("não foi possível apagar o recibo de recebimento")
+                    }
                 }
             }
             update { it.copy(delivery = Delivery.DELIVERED, progress = 100) }
