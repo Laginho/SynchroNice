@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -71,8 +71,18 @@ Critérios 3 a 9 são no aparelho: verificação manual.
   texto e arquivo com o mesmo id após o primeiro 201 cria um só Item e um só
   arquivo; ids diferentes aceitam conteúdo igual, e envio incompleto pode
   repetir o id. Testes novos em commit próprio antes da correção.
+- Para o teste de resposta 201 perdida no envio de texto, usar um `ServerSocket`
+  de conexão única: ler o corpo inteiro e `X-Item-Id`, fechar a escuta e então
+  encerrar a conexão aceita sem enviar status HTTP. A mesma chamada não pode
+  receber 201 por retry automático de `HttpURLConnection`; o Item permanece
+  Pendente. Após recriar a fila, um servidor que responde 201 confirma o mesmo
+  id e remove o Pendente. Corrigir primeiro o teste em commit próprio, sem
+  alterar produção. Manter separado o teste de arquivo grande com 201 antecipado
+  e os testes Rust de deduplicação no PC.
 
 ## Comments
+
+- 2026-09-26 Proxy decidiu: o `HttpServer` que fecha sem resposta permite retry transparente do POST pelo `HttpURLConnection`; receber 201 na mesma chamada não representa perda de confirmação. Substituir apenas o cenário de texto pelo servidor TCP de uma conexão descrito acima. O teste de arquivo grande continua separado. Os commits de teste e review existentes ficam preservados; stage 2 retoma a correção de produção após o teste determinístico.
 
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: O SYN-016 está **bloqueado** no branch `syn-016` (commit `57f3925`). A revisão exige corrigir a duplicação quando o PC grava um Item, mas a resposta HTTP se perde. Isso requer alterar e testar o servidor PC, fora dos arquivos autorizados pelo [ticket](C:/Users/bruno/Desktop/Pastinha/Programas/Projects/SynchroNice/.scratch/android/issues/07-SYN-016-android-compartilhar.md). /  / Registrei a costura necessária no ticket. A etapa 1 precisa autorizar `pc/src-tauri/src/server.rs` e `pc/src-tauri/tests/server.rs`, ou redefinir o critério 2. Os critérios 7 e 8 também seguem pendentes.
 
