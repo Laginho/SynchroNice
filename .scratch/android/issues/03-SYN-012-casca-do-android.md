@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -139,3 +139,7 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-25 Proxy decided: ambiente destravado. Gradle 9.4.1 oficial está em `C:\Users\bruno\AppData\Local\Temp\SynchroNice-gradle-home`, com SHA-256 validado, e `android/local.properties` aponta para o SDK instalado. Com `GRADLE_USER_HOME` nesse cache, `gate.ps1 -TestsOnly` passou na base, inclusive nos testes Android. Retomar aqui em `1262762` e confirmar o vermelho dos novos casos de QR antes de implementar.
 
 - 2026-09-25 Proxy decided: a tentativa 4 foi um falso bloqueio de modelo. O driver lançou `codex exec --model gpt-6-luna --config model_reasoning_effort=max`, conforme o binding; falta de autoidentificação não indica incompatibilidade. Guard do `ticket-flow` esclarecido. `Stage: to-implement` já estava preservado nesta branch; retomar e confirmar o vermelho dos testes em `1262762`.
+
+- 2026-09-25 Stage 2: o gate ficou vermelho antes do parser (`parsePairingQr` não resolvido) e passou depois da implementação. `gate.ps1 -TestsOnly` passou com 37 testes Rust, 24 Node e 34 Kotlin; o gate completo também passou, incluindo lint Android. A tag `keep/syn-012` citada acima não existe neste checkout.
+
+- Débito humano: critérios 3–9 não foram verificados no app/aparelho. O Computer Use disponível retornou apenas Chrome, sem superfície de apps nativos; por isso o APK não foi instalado/aberto no AVD e a câmera, o pareamento, mDNS, entrega de textos e reconexão continuam sem verificação manual.
