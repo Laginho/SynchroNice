@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -241,3 +241,43 @@ Verdict: Reopen — critérios 1/8 falham em upload lento e critério 2 tem uma 
 - Gate completo verde: `cargo fmt --check`, `cargo clippy`, 42 testes Rust,
   `tsc --noEmit`, 24 testes Node, 51 testes do cliente Android, 3 testes do app
   Android e lint.
+
+#### Review (2026-09-26, quarta revisão)
+
+Verdict: Reopen — critério 2 ainda tem uma janela de duplicação após desconexão.
+
+##### Standards
+
+- Nenhuma violação de padrão documentado. Sugestão não bloqueante de limpeza:
+  `AppState.sendText` conserva o caminho de envio imediato, mas só tem
+  chamadores nos testes; o composer usa `queueText`. Não refatorar neste ticket.
+
+##### Spec
+
+- ❌ **Critério 2:** a spec exige "reenvio nunca duplica bolha nem arquivo".
+  Em `pc/src-tauri/src/server.rs:354`, `_item_id_lock` pertence à future de
+  `post_file`. A tarefa destacada de flush/rename (`:488`) recebe `_lease` e
+  `fail_guard`, mas não o lock do id. Se a conexão cancelar o handler durante
+  essa finalização, o lock é liberado antes de `accepted_item_ids.insert`
+  (`:521`). Um retry pode passar pela consulta e iniciar outro Item/arquivo.
+  Esta é a janela de finalização após desconexão já citada na terceira revisão.
+  Achado por inspeção de ownership, sem reprodução executada nesta revisão.
+- O teste `envios_concorrentes_do_mesmo_id_criam_um_item_e_um_arquivo` mantém
+  ambas as conexões abertas até ler as respostas, portanto só prova a
+  sobreposição normal. Stage 2: primeiro reproduzir cancelamento do handler
+  durante a finalização e retry do mesmo id; então manter o guarda do id vivo
+  também na tarefa destacada (por exemplo, guarda proprietário transferido
+  para ela). Preservar o retry após envio incompleto.
+- As correções dos critérios 1 e 8 estão presentes: timeout por escrita,
+  sem limitar o tempo total do upload saudável, e fechamento do socket na
+  falha de leitura. Os testes de upload lento e escrita bloqueada as cobrem.
+
+- Gate completo passou: fmt, clippy, 42 testes Rust, typecheck, 24 testes Node,
+  51 testes do cliente Android, 3 testes do app e lint. Gradle reutilizou
+  resultados atualizados, com contagens conferidas nos XMLs. A primeira
+  execução falhou no acesso do sandbox a `C:\.android`; com acesso ampliado,
+  passou.
+- Totais: Standards — 0 violações e 1 sugestão não bloqueante; Spec — 1 falha
+  no critério 2. A correção exige teste novo e retorna ao stage 2 conforme
+  `ticket-flow`. Sem alteração de produção, merge ou entrada no ledger.
+  O débito humano previamente registrado permanece.
