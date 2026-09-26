@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -9,8 +9,11 @@ Review: agent
   - android/settings.gradle.kts
   - android/build.gradle.kts, android/gradle.properties (novos se precisar)
   - android/gradle/wrapper/gradle-wrapper.properties (se o plugin Android exigir Gradle mais novo)
-  - android/protocol-client/src/main/kotlin/** (só leitura do conteúdo do QR para o Par, se ainda não existir)
-  - android/protocol-client/src/test/kotlin/**
+  - android/protocol-client/src/main/kotlin/synchronice/protocolclient/FlatJson.kt, PairingInfo.kt (só validar o conteúdo do QR para o Par)
+  - android/protocol-client/src/main/kotlin/synchronice/protocolclient/ProtocolClient.kt (só o ciclo de `/listen` e a consulta autenticada da presença dessa escuta)
+  - android/protocol-client/src/test/kotlin/synchronice/protocolclient/PairingInfoTest.kt, ProtocolClientTest.kt (só contratos de QR e `/listen`)
+  - pc/src-tauri/src/server.rs (só a consulta autenticada da presença de `/listen`; preservar o GET long-poll e a revogação do Par)
+  - pc/src-tauri/tests/server.rs (só o contrato dessa consulta e a regressão do GET)
   - android/protocol-client/build.gradle.kts (só o bloco `plugins`: alinhar o Kotlin JVM à versão que o AGP escolhido traz; o módulo continua JVM puro, sem plugin Android)
   - gate.ps1 (só se o `check` do módulo Android precisar de tarefas explícitas)
   - .gitignore
@@ -33,8 +36,13 @@ implementando o resolvedor do módulo cliente). Se falhar, tenta o último IP
 conhecido, guardado nas preferências. O HTTP sem cifra é liberado na
 configuração de segurança de rede (ADR-0002).
 
-A conexão de escuta abre quando o chat aparece e fecha quando sai. Ela é o
-indicador de presença no topo. Textos do PC viram bolhas à esquerda e são
+A conexão de escuta abre quando o chat aparece e fecha quando sai. O indicador
+de presença no topo só fica "Na rede" depois de confirmar que o `/listen` está
+ativo e autenticado: resolver o IP ou começar a requisição não basta. Como o
+GET long-poll não responde enquanto a fila está vazia, uma consulta
+`HEAD /listen` com o mesmo token responde 200 se há escuta autenticada ativa, 204 se
+não há e 401 se o token é inválido. O GET e sua revogação mantêm o contrato
+atual. Textos do PC viram bolhas à esquerda e são
 confirmados ao aparecer. O composer tem campo e botão de enviar; o texto vira
 bolha à direita, Pendente até o PC confirmar e depois Entregue. O chat vazio
 diz o que fazer. O chat é memória do processo: some quando o Android mata o app.
@@ -59,7 +67,7 @@ nem move o SDK.
 1. O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. Na mesma Wi-Fi, o app encontra o PC sem digitar nada, e o indicador mostra "na rede".
+4. Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
 5. Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
 7. Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
@@ -79,6 +87,14 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   com um caso válido e casos inválidos (JSON quebrado, campo faltando, porta
   fora da faixa). Red porque essa leitura ainda não existe. Se ela já existir
   e cobrir isso, o ticket não escreve teste nesta costura e diz isso no commit.
+- Na reabertura, `PairingInfoTest.kt` cobre número JSON inválido em campo extra
+  com os três campos obrigatórios válidos. `ProtocolClientTest.kt` usa servidor
+  falso para provar que a consulta de presença envia o token, confirma a
+  escuta ativa mesmo com fila vazia e não confirma presença sem escuta, em 401 ou falha
+  de rede. `pc/src-tauri/tests/server.rs` prova `HEAD /listen` 200 só com GET
+  autenticado ativo, 204 sem escuta e 401 com token errado; o GET continua
+  entregando Itens e a rotação continua revogando a escuta. Novos testes em
+  commit próprio, vermelhos antes da correção.
 
 ## Comments
 
@@ -107,3 +123,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-25 Proxy decided: a tentativa 4 foi um falso bloqueio de modelo. O driver lançou `codex exec --model gpt-6-luna --config model_reasoning_effort=max`, conforme o binding; falta de autoidentificação não indica incompatibilidade. Guard do `ticket-flow` esclarecido. Retomar o stage 2 sem alterar o teste vermelho em `1262762`.
 
 - 2026-09-26 Attempt 5 failed: exit 0; blocked after two attempts. Log tail: SYN-012 está `Stage: blocked`, registrado no commit `ede906c`. /  / O critério 4 exige ampliar o escopo para `ProtocolClient.listen()` e seus testes. A etapa 1 precisa aprovar essa costura antes de retornar o ticket a `to-implement`. Nenhum código foi alterado nem teste executado.
+
+- 2026-09-26 Proxy decidiu: autorizar apenas a costura de presença de `/listen` no cliente, no servidor PC e em seus testes, conforme Primary files e critério 4 acima. Com fila vazia, o GET autentica e bloqueia antes de responder; portanto o Android não pode inferir autenticação por resolução mDNS, conexão TCP ou início do GET. `HEAD /listen` confirma escuta autenticada sem mudar o long-poll nem o 401 de revogação. Testes de contrato vermelhos precedem a correção; nenhum outro comportamento do protocolo entra neste ticket.
