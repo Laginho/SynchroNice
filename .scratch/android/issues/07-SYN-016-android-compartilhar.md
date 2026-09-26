@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
