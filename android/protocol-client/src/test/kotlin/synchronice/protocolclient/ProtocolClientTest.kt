@@ -39,6 +39,31 @@ private fun tempFile(bytes: ByteArray): File =
         deleteOnExit()
     }
 
+private fun serverSocket(port: Int = 0) = ServerSocket().apply {
+    reuseAddress = true
+    bind(InetSocketAddress("127.0.0.1", port))
+}
+
+private fun textRequest(server: ServerSocket, respond: Boolean): String? = server.accept().use { socket ->
+    val input = socket.getInputStream()
+    val header = StringBuilder()
+    while (!header.endsWith("\r\n\r\n")) {
+        val byte = input.read()
+        check(byte != -1) { "request ended before headers" }
+        header.append(byte.toChar())
+    }
+    val headers = header.lineSequence().drop(1).filter { it.contains(':') }.associate {
+        it.substringBefore(':').lowercase() to it.substringAfter(':').trim()
+    }
+    val body = input.readNBytes(headers.getValue("content-length").toInt())
+    assertEquals("texto", body.toString(Charsets.UTF_8))
+    server.close()
+    if (respond) {
+        socket.getOutputStream().write("HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+    }
+    headers["x-item-id"]
+}
+
 class ProtocolClientTest {
 
     @Test
@@ -46,29 +71,30 @@ class ProtocolClientTest {
         val dir = kotlin.io.path.createTempDirectory("pending-item-id").toFile()
         val queue = File(dir, "pending.txt")
         val ids = mutableListOf<String?>()
-        val attempts = java.util.concurrent.atomic.AtomicInteger()
-        val port = freePort()
-        val server = fakeServer(port, "/items/text") { exchange ->
-            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
-            exchange.requestBody.readBytes()
-            if (attempts.incrementAndGet() > 1) exchange.sendResponseHeaders(201, -1)
-            exchange.close()
-        }
+        val executor = Executors.newSingleThreadExecutor()
+        val lostResponse = serverSocket()
+        val port = lostResponse.localPort
         try {
+            val firstRequest = executor.submit<String?> { textRequest(lostResponse, respond = false) }
             val sender = client(port, FilePendingQueueStore(queue))
             sender.enqueueText("texto")
             sender.retryPending()
+            ids.add(firstRequest.get(5, TimeUnit.SECONDS))
             assertTrue(sender.hasPending())
 
+            val confirmation = serverSocket(port)
+            val secondRequest = executor.submit<String?> { textRequest(confirmation, respond = true) }
             val restored = client(port, FilePendingQueueStore(queue))
             restored.retryPending()
+            ids.add(secondRequest.get(5, TimeUnit.SECONDS))
 
             assertEquals(2, ids.size)
             assertTrue(ids.first()?.isNotBlank() == true)
             assertEquals(ids.first(), ids.last())
             assertFalse(restored.hasPending())
         } finally {
-            server.stop(0)
+            lostResponse.close()
+            executor.shutdownNow()
             dir.deleteRecursively()
         }
     }
