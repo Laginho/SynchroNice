@@ -1,5 +1,5 @@
 # SYN-018: Android — Copiáveis
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-011, SYN-013
 Review: agent
@@ -73,3 +73,13 @@ Critérios 3 a 7 são no aparelho: verificação manual.
 - Red: commit somente de testes e Stage `cb7111a`; `gate.ps1 -TestsOnly` passou nos 44 testes Rust e 32 casos Node, mas falhou no teste compartilhado do Android: `https://example.com:99999` retornou link em vez de texto (9 testes do app, 1 falha).
 - Green: `gate.ps1` passou com fmt/clippy, typecheck TS, 44 testes Rust, 32 casos Node, 54 testes do protocolo Android e 9 testes JVM do app (incluindo todos os 32 casos compartilhados), além do lint Android. Nenhum teste foi alterado na implementação.
 - Continua válido o débito humano anterior dos critérios 3–7; esta correção não foi verificada visualmente no aparelho.
+
+#### Resolution (2026-09-26)
+
+Verdict: Approve
+
+- A implementação Kotlin segue o contrato compartilhado do PC, inclusive portas `0..65535`, rejeição de portas fora da faixa e preservação de percentuais malformados.
+- Arquivos revisados: `android/app/build.gradle.kts`, `android/app/src/main/**`, `android/app/src/test/**` e `testdata/copiaveis.json`.
+- Prova red-green: `cb7111a` acrescentou oito casos compartilhados e falhou no Android para a porta `99999`; `2370e73` corrigiu validação e cor sem alterar testes.
+- Gate final: passou com 44 testes Rust, 32 casos Node, 54 testes do protocolo Android, 9 testes JVM do app e lint Android.
+- O débito humano já registrado para os critérios 3–7 permanece para o QA conjunto do app.
