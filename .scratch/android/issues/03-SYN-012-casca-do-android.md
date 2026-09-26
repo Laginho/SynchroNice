@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -68,9 +68,9 @@ nem move o SDK.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
 4. ✅ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
-5. Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
+5. ❌ Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear. O GET sem timeout pode continuar bloqueado após uma perda silenciosa da conexão e impedir nova escuta no IP resolvido.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
-7. Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
+7. ❌ Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue. Com vários Pendentes, uma bolha já entregue continua Pendente enquanto outra permanece na fila.
 8. Com o PC fora da rede, o texto digitado fica Pendente e é entregue quando o PC volta, com o app aberto.
 9. O chat vazio mostra uma instrução de uso.
 
@@ -194,3 +194,13 @@ Verdict: Reopen — critérios 1 e 4 ainda precisam de testes e correção.
 - Gate completo após rebase na branch de sessão: passou `cargo fmt --check`, `cargo clippy`, 38 testes Rust, `tsc --noEmit`, 24 Node e 41 testes Kotlin; `gradle check` passou, incluindo lint Android.
 
 - Débito humano: os critérios 3–9 ainda não foram conferidos no Android real ou emulador. O Computer Use retornou `apps=[]` e somente abas do Chrome, sem janela nativa para abrir o app.
+
+#### Review (2026-09-26, quarta rodada)
+
+Verdict: Reopen — critérios 5 e 7 precisam de testes e correção.
+
+- Standards: a regra de testes da spec pede comportamento externo, mas `PresenceLifecycleTest.kt` chama diretamente `clearPresenceDuringLifecycleCycle` com estados simulados. O teste não prova que a Activity encerra a escuta ao sair do chat. É uma costura de teste a corrigir no stage 2; a concentração de estado e UI em `MainActivity.kt` continua um possível Divergent Change, sem refatoração neste ticket.
+- Critério 5: `ProtocolClient.listen()` tem `readTimeout = 0`; `ConnectionLifecycle` só abre outro GET depois que o atual termina. Uma conexão silenciosa que permaneça aberta após a troca de IP impede a nova resolução para a escuta. Cobrir reconexão e fechamento da escuta no ciclo de vida por comportamento observável antes da correção.
+- Critério 7: `AppState.retryPending()` marca bolhas Entregue somente se toda a fila esvaziar. Se A foi confirmado e B segue Pendente, A fica com o estado errado. Cobrir entrega parcial na UI ou no estado do app antes da correção.
+- Gate completo: passou `cargo fmt --check`, `cargo clippy`, 38 testes Rust, `tsc --noEmit`, 24 testes Node e `gradle check` com compilação e lint Android. As tarefas de teste Gradle estavam atualizadas; a execução anterior registrada acima contou 41 testes Kotlin. `git diff --check` passou.
+- Verificação no aparelho: `adb devices` ainda falha ao criar `\\.android` por permissão. Permanece o Débito humano registrado acima.
