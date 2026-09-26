@@ -245,7 +245,7 @@ class ProtocolClientTest {
             status.set(200)
             assertTrue(receiver.isListening())
             assertEquals(
-                listOf("HEAD" to "Bearer $TOKEN", "HEAD" to "Bearer $TOKEN"),
+                listOf<Pair<String, String?>>("HEAD" to "Bearer $TOKEN", "HEAD" to "Bearer $TOKEN"),
                 requests,
             )
         } finally {
