@@ -175,11 +175,15 @@ fn head_listen_confirma_presenca_sem_consumir_o_long_poll() {
         .0,
         401
     );
-    outbox.enqueue_text("entrega continua no GET".into()).unwrap();
+    outbox
+        .enqueue_text("entrega continua no GET".into())
+        .unwrap();
 
     let (status, body) = done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(status, 200);
-    assert!(String::from_utf8(body).unwrap().contains("entrega continua no GET"));
+    assert!(String::from_utf8(body)
+        .unwrap()
+        .contains("entrega continua no GET"));
 }
 
 #[test]
