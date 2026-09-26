@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -251,3 +251,33 @@ nos relatórios), além de fmt, clippy, typecheck e lint.
 - Gate completo passou: 44 testes Rust, 24 TypeScript, 56 protocolo Android e 21 JVM do app (145 no total), zero falhas; fmt/clippy, typecheck e lint Android passaram. Log: `%TEMP%/syn-014-final-gate.log`. `git diff --check` passou. Os commits de implementação não alteram testes.
 - A referência para identidade e consulta SAF continua sendo DocumentsContract.Document: https://developer.android.com/reference/android/provider/DocumentsContract.Document. A intenção limita a recuperação aos provedores que expõem seu marcador; não pressupõe transação oferecida pelo Android.
 - O débito visual anteriormente registrado permanece; esta retomada validou automaticamente as falhas de processo e persistência, sem declarar nova verificação no aparelho. CLEAN-010 continua responsável pela atualização do ADR. Stage 2 encerrado; revisão é uma sessão separada.
+
+#### Revisão (2026-09-26) — reaberto pela quarta vez
+
+Verdict: Reopen — o fluxo SAF normal pode ficar Pendente sem necessidade; `Stage: to-implement`.
+
+**Standards.** A persistência dos recibos ainda contradiz a lista exaustiva do
+ADR-0002, com correção já isolada no CLEAN-010. Os demais achados são cheiros
+de julgamento, não motivos para ampliar este ticket: estados e chaves de recibo
+codificados em `String`, nomes genéricos em `receivedFiles`/`files` e
+responsabilidades acumuladas em `MainActivity.kt`.
+
+**Spec.**
+
+1. **❌ Critério 3 — a recuperação por marcador foi aplicada também à criação
+   normal.** Em `ReceivedFiles.receive`, uma chamada nova a
+   `DocumentsContract.createDocument` descarta a URI inequívoca devolvida pelo
+   provedor e sempre tenta reencontrar o documento pelo marcador. Um provedor
+   que normalize o nome ou demore a expor a listagem deixa o Item Pendente mesmo
+   sem morte do processo, embora a identidade já seja conhecida. A consulta
+   fail-closed é necessária somente ao retomar uma intenção `creating:` sem
+   URI. A próxima rodada precisa testar um recebimento SAF ininterrupto cujo
+   provedor devolve uma URI válida, mas altera/oculta o marcador na listagem, e
+   provar que essa URI é persistida antes da escrita e o download conclui. A
+   recuperação depois de crash continua exigindo consulta inequívoca pelo
+   marcador e deve permanecer fail-closed.
+
+O achado exige teste novo, portanto não é conserto permitido no Stage 3.
+Nenhum arquivo de produção ou teste foi alterado nesta revisão; o gate não foi
+repetido porque a branch continua no mesmo commit de código já validado pelo
+Stage 2.
