@@ -1,5 +1,5 @@
 # SYN-018: Android — Copiáveis
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-011, SYN-013
 Review: agent
@@ -28,12 +28,12 @@ A engrenagem ganha "Copiar com pontuação", desligada por padrão e persistente
 
 #### Acceptance criteria
 
-1. A função de trechos em Kotlin devolve, para cada caso de `testdata/copiaveis.json`, exatamente os trechos esperados.
+1. ❌ A função de trechos em Kotlin devolve, para cada caso de `testdata/copiaveis.json`, exatamente os trechos esperados. Falta cobrir e igualar ao PC links com porta fora de `1..65535` e escapes `%` malformados.
 2. `gate.ps1` roda esses testes (também com `-TestsOnly`) e falha se eles falharem.
 3. CPF, CNPJ e telefone aparecem formatados na bolha mesmo que o texto recebido não tenha pontuação.
 4. Tocar num Copiável copia só os dígitos; com "Copiar com pontuação" ligada, copia a forma formatada.
 5. Tocar num link abre o navegador, o toque longo nele copia o link, e tocar no resto da bolha copia o texto inteiro.
-6. Link é azul sublinhado e Copiável é azul sem sublinhado, iguais ao PC.
+6. ❌ Link é azul sublinhado e Copiável é azul sem sublinhado, iguais ao PC. O Android usa `#7ba7ff`; o PC usa `#1b4fa8` nesses trechos.
 7. "Copiar com pontuação" aparece na engrenagem, começa desligada e persiste.
 
 #### Verification
@@ -58,3 +58,10 @@ Critérios 3 a 7 são no aparelho: verificação manual.
 - Red: commit de testes `521cc87`; `gate.ps1 -TestsOnly` falhou em `compileDebugUnitTestKotlin` por ausência de `Trecho` e `segmentarTexto`. A primeira execução restrita falhou antes por acesso a `C:\.android`; a execução com acesso ao perfil confirmou o vermelho esperado.
 - Green: `gate.ps1` passou com fmt/clippy, 44 testes Rust, typecheck TS, 24 casos Node, 54 testes do protocolo Android, 9 testes JVM do app e lint Android. O teste novo do app percorre todos os 24 casos de `testdata/copiaveis.json`; nenhum teste foi alterado no commit de implementação.
 - Débito humano: verificar no aparelho os critérios 3–7 (formatação e cores, copiar nos dois modos, abertura e toque longo de links, cópia do restante da bolha e persistência após reiniciar). Computer Use foi inicializado e não encontrou janela de emulador; `adb devices`, pelo SDK configurado em `android/local.properties`, não encontrou aparelho conectado. A interação visual não foi verificada nesta etapa.
+
+#### Stage 3 review (2026-09-26)
+
+- Critério 1: `java.net.URI` diverge do `URL` do PC nos limites do contrato. Por exemplo, o Android aceita `https://example.com:99999`, que o PC rejeita, e rejeita `https://example.com/%zz`, que o PC aceita. O próximo commit de testes deve acrescentar ambos ao arquivo compartilhado antes de corrigir Kotlin.
+- Critério 6: a cor de destaque do Android não é a cor aplicada a links e Copiáveis no PC.
+- Standards: sem bloqueio. A preferência persistente do Android é exigida pela spec Android posterior à ADR-0002; o modelo simples de `Trecho` espelha diretamente o JSON compartilhado, sem justificar uma hierarquia selada.
+- Reaberto porque o critério 1 exige novo teste; a etapa 3 não pode escrevê-lo.
