@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -153,3 +153,7 @@ resolve `media_type` pelo MIME e a mesma linha entra também na view `Images`.
 Nenhum vazamento de escopo foi encontrado. Os caminhos normais de Desparear e
 troca de Par removem os recibos. Como os itens 1 e 2 exigem teste novo, nenhum
 deles é conserto permitido no Stage 3.
+
+#### Segunda retomada Stage 2 (2026-09-26)
+
+- Red: dois testes no AppState real interrompem a publicação imediatamente antes e depois do update do MediaStore, sem executar limpeza de exceção. Recriar AppState faz 2 GETs em vez de 1 nos dois casos. Gate -TestsOnly: 11 testes do app, 2 falhas; 44 Rust e 24 TS passaram, protocolo sem alterações.

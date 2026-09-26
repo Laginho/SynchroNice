@@ -33,10 +33,19 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReceivedFileRestartTest {
     @Test
-    fun restartingAfterFailedAckConfirmsSavedFileWithoutAnotherDownload() = runBlocking {
+    fun restartingAfterFailedAckConfirmsSavedFileWithoutAnotherDownload() = exerciseRestart(null)
+
+    @Test
+    fun restartingAtPublicationReusesTheCompletedDownload() = exerciseRestart(false)
+
+    @Test
+    fun restartingImmediatelyAfterPublicationDoesNotCreateAnotherCopy() = exerciseRestart(true)
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?) = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val copies = mutableListOf<File>()
         val published = mutableSetOf<Uri>()
+        var crash = crashAfterPublication != null
         // The system storage boundary writes real bytes; AppState and the HTTP client are real.
         ShadowContentResolver.registerProviderInternal("media", object : ContentProvider() {
             override fun onCreate() = true
@@ -48,7 +57,15 @@ class ReceivedFileRestartTest {
                 ParcelFileDescriptor.open(copies[uri.lastPathSegment!!.toInt() - 1],
                     ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_TRUNCATE)
             override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int {
+                if (crash && crashAfterPublication == false) {
+                    crash = false
+                    throw SimulatedProcessDeath()
+                }
                 if (values?.getAsInteger(MediaStore.MediaColumns.IS_PENDING) == 0) published.add(uri)
+                if (crash) {
+                    crash = false
+                    throw SimulatedProcessDeath()
+                }
                 return 1
             }
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int =
@@ -66,7 +83,7 @@ class ReceivedFileRestartTest {
             exchange.close()
         }
         server.createContext("/outbox/42/ack") { exchange ->
-            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1) 503 else 204, -1)
+            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null) 503 else 204, -1)
             exchange.close()
         }
         server.start()
@@ -76,22 +93,30 @@ class ReceivedFileRestartTest {
             assertTrue(state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"0123456789abcdef0123456789abcdef"}"""))
             state.knownAddress.save("127.0.0.1")
             val item = Item.FileMeta(42, 0, "received.bin", 7)
-            assertEquals(503, assertFailsWith<ProtocolRejectedException> {
-                state.receiveFile(item, state.client()!!)
-            }.code)
-            assertEquals(1, published.size)
+            if (crashAfterPublication == null) {
+                assertEquals(503, assertFailsWith<ProtocolRejectedException> {
+                    state.receiveFile(item, state.client()!!)
+                }.code)
+            } else {
+                // Error bypasses normal exception cleanup, like a killed process.
+                assertFailsWith<SimulatedProcessDeath> { state.receiveFile(item, state.client()!!) }
+                assertEquals(0, acks.get())
+            }
             assertEquals("payload", copies.single().readText())
 
             val reopened = AppState(context)
             assertTrue(reopened.messages.isEmpty(), "The chat session must remain disposable")
             reopened.receiveFile(item, reopened.client()!!)
-            assertEquals(2, acks.get())
+            assertEquals(if (crashAfterPublication == null) 2 else 1, acks.get())
             assertEquals(1, gets.get(), "A saved Item only needs another ACK")
             assertEquals(1, copies.size, "Restarting must not create another copy")
+            assertEquals(1, published.size, "Recovery must finish publication before acknowledging")
             assertEquals(Delivery.DELIVERED, reopened.messages.single().delivery)
         } finally {
             Dispatchers.resetMain()
             server.stop(0)
         }
     }
+
+    private class SimulatedProcessDeath : Error("process killed at publication")
 }
