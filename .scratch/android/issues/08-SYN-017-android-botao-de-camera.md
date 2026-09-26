@@ -1,7 +1,7 @@
 # SYN-017: Android — botão de câmera
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
-Blocked by: SYN-013, SYN-016
+Blocked by: SYN-013, SYN-016, SYN-014
 Review: agent
 
 - Primary files:
@@ -41,6 +41,8 @@ Todos os critérios são no aparelho: verificação manual.
   registra isso no commit.
 
 ## Comments
+
+- 2026-09-26 Proxy decidiu: a opção "Guardar fotos tiradas" usa a Pasta entregue pelo SYN-014. A dependência agora está em `Blocked by`; aguardar SYN-014 chegar a `done` na branch da sessão antes do stage 2 deste ticket. Nenhuma costura nova é necessária: o envio continua pelo SYN-016 e o destino pela Pasta do SYN-014.
 
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: SYN-017 ficou `blocked`: guardar fotos depende da Pasta do SYN-014, ainda bloqueado e sem implementação integrada. /  / Registro no commit `c30eacd`, branch `syn-017`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando “the ticket needs a seam it does not name”. Próximo passo: incorporar SYN-014 como dependência e integrá-lo antes de retomar.
 
