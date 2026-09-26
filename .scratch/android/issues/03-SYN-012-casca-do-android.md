@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,13 +64,13 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. `Char.isWhitespace()` ainda aceita separadores Unicode que JSON proíbe.
+1. ✅ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. ✅ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
-5. ❌ Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear. O GET sem timeout pode continuar bloqueado após uma perda silenciosa da conexão e impedir nova escuta no IP resolvido.
+4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. A prova de lifecycle chama um helper interno, não o comportamento observável da Activity.
+5. ❌ Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear. A implementação limita e fecha a escuta, mas a prova de lifecycle ainda chama um helper interno em vez da costura observável.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
-7. ❌ Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue. Com vários Pendentes, uma bolha já entregue continua Pendente enquanto outra permanece na fila.
+7. ❌ Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue. A implementação concilia cada bolha, mas o teste da entrega parcial chama diretamente o helper interno e não prova o estado observável do app.
 8. Com o PC fora da rede, o texto digitado fica Pendente e é entregue quando o PC volta, com o app aberto.
 9. O chat vazio mostra uma instrução de uso.
 
@@ -231,3 +231,29 @@ Verdict: Reopen — o critério 1 ainda aceita whitespace inválido em JSON.
 - Verificação: o gate completo verde do stage 2 está registrado acima;
   `git diff --check` passou nesta revisão. O Débito humano dos critérios 3–9
   permanece.
+
+#### Review (2026-09-26, sexta rodada)
+
+Verdict: Reopen — a prova automatizada dos critérios 4, 5 e 7 usa funções
+internas em vez do comportamento observável.
+
+- Standards: `PendingDeliveryTest.kt` chama `reconcilePendingDelivery()` e
+  `PresenceLifecycleTest.kt` chama `clearPresenceDuringLifecycleCycle()`.
+  Isso viola a decisão de testes da spec: "Um teste bom exercita comportamento
+  externo" e "Nunca funções internas". O segundo ainda simula lifecycle, que a
+  mesma seção deixa fora do teste automático. A correção precisa substituir
+  essas provas por uma costura observável autorizada; como exige teste novo,
+  volta ao stage 2.
+- Spec: nenhuma falha estática nova nos critérios 1–9. Os critérios 3–9
+  continuam com o `Débito humano` de verificação no aparelho. A alteração
+  de modelos em `AGENTS.md` aparece no diff de três pontos porque a branch
+  divergiu antes do commit equivalente em `main`; o conteúdo atual dos dois
+  arquivos é idêntico, portanto não há mudança ali a levar ao merge.
+- Smells (julgamento, sem refatorar neste ticket): possível Divergent Change em
+  `MainActivity.kt`; `clearPresenceDuringLifecycleCycle()` é Speculative
+  Generality criada para o teste interno; `submitted` é um Mysterious Name.
+- Gate completo verde com JDK 17 e o diretório de usuário Android temporário:
+  38 testes Rust, 24 Node e `gradle check` (testes Kotlin, compilação e lint).
+  `git diff --check` passou. O primeiro gate sem essas variáveis falhou apenas
+  porque o AGP tentou usar `C:\.android`; a segunda tentativa encontrou a mesma
+  limitação de ambiente para autodetectar o JDK 17.
