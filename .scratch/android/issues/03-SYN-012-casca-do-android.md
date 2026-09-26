@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,7 +64,7 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. ✅ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
+1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. Um número malformado em campo extra ainda é aceito; falta teste vermelho.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
 4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. A revisão anterior flagou o indicador ligado só por mDNS e a presença derivada do último IP conhecido.
@@ -156,3 +156,14 @@ Verdict: Reopen — critérios 1 e 4 falharam.
 - Spec: `FlatJson.kt` aceita um escape JSON inválido em campo extra e `parsePairingQr` cria o Par; o teste novo deve falhar por esse motivo. O teste existente de porta fora da faixa usa token inválido, então não isola a porta. `MainActivity.kt` usa resolução mDNS como presença, embora o ticket exija a conexão de escuta.
 - Gate: PC fmt/clippy, 24 testes Node e Android `:app:check` passaram; Android `:protocol-client:test` passou com 34 testes (4 QR, 30 cliente). O gate completo falhou em `pc/src-tauri/tests/server.rs::escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar` por conexão abortada (Windows 10053) em duas execuções; o mesmo teste havia passado na primeira execução. Sem mudança nesse código neste ticket.
 - Verificação visual: Computer Use listou apps Windows, sem emulador ou app Android para inspecionar; o Débito humano acima permanece.
+
+#### Review (2026-09-26, segunda rodada)
+
+Verdict: Reopen — critérios 1 e 4 ainda falham.
+
+- Standards: nenhuma violação documentada. Possível Divergent Change em `MainActivity.kt` (Par, rede e UI no mesmo arquivo); não refatorar neste ticket.
+- Critério 1: `parseFlatJsonObject` aceita `"extra":1-2` como número; com os três campos obrigatórios válidos, `parsePairingQr` cria o Par a partir de JSON inválido. Exige teste novo vermelho antes da correção.
+- Critério 4: `MainActivity.kt` marca `online = true` antes de `client.listen()` resolver o endereço, conectar e autenticar. O indicador pode afirmar "Na rede" com o PC indisponível. Para refletir a conexão de `/listen`, a costura de `ProtocolClient.listen()` precisa entrar em Primary files pela stage 1 antes da implementação.
+- O tratamento de HTTP 401 que esquece o Par está coberto por SYN-013, critério 5; não é achado deste ticket.
+- Gate completo: passou `cargo fmt --check`, `cargo clippy`, 37 testes Rust, `tsc --noEmit`, 24 testes Node, 35 testes Kotlin e `:app:check` (incluindo lint). `git diff --check` passou.
+- Verificação no aparelho: `adb devices` não iniciou por falta de permissão para criar `\\.android`; permanece o Débito humano acima.
