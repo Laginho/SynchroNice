@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -69,3 +69,5 @@ Verdict: Reopen — critérios 1, 4 e 5 precisam de novos testes.
 - Spec: testar falha de exclusão do payload, falha entre as duas persistências do Desparear e HTTP 401 no `DeliveryWorker`; 503 continua sendo retry.
 - Standards: remover o tratamento morto de 401 no loop que agora só resolve DNS e concentrar a política no caminho que realmente executa cada requisição.
 - O Computer Use não encontrou app nem emulador aberto; o débito humano acima permanece.
+
+- 2026-09-26 Stage 2 bloqueado: a revisão pede testes de persistência do Desparear e de HTTP 401/503 no DeliveryWorker, mas a seção Tests stage 2 writes autoriza somente a costura do módulo cliente. A spec também deixa WorkManager fora de teste automático. Decisão necessária de stage 1: aprovar explicitamente a costura de testes do estado do app/DeliveryWorker e incorporar os cenários da revisão ao contrato (Tests stage 2 writes e critérios), antes de retomar a implementação. Nenhum código ou teste alterado nesta tentativa.
