@@ -208,7 +208,7 @@ internal class AppState(context: Context) {
     fun hasPending(): Boolean = queueStore.load().isNotEmpty()
 
     fun hasLargePending(): Boolean = queueStore.load().filterIsInstance<PendingItem.File>()
-        .any { File(it.path).length() >= 10L * 1024 * 1024 }
+        .any { File(it.path).length() >= LARGE_FILE_BYTES }
 
     fun shouldAskNotificationPermission(): Boolean {
         if (networkPreferences.getBoolean("notification-permission-asked", false)) return false
@@ -248,11 +248,14 @@ internal class AppState(context: Context) {
         }
     }
 
-    suspend fun retryPending(onFileProgress: (Int) -> Unit = {}) {
+    suspend fun retryPending(
+        onFileProgress: (Int) -> Unit = {},
+        onFileStart: (Long) -> Unit = {},
+    ) {
         val currentClient = client() ?: return
         outboundMutex.withLock {
             try {
-                currentClient.retryPending(onFileProgress)
+                currentClient.retryPending(onFileProgress, onFileStart)
             } finally {
                 val remaining = queueStore.load().size
                 withContext(Dispatchers.Main.immediate) {

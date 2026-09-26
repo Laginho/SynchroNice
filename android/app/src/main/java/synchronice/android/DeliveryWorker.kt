@@ -21,6 +21,8 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
+internal const val LARGE_FILE_BYTES = 10L * 1024 * 1024
+
 internal fun scheduleDelivery(context: Context) {
     val request = OneTimeWorkRequestBuilder<DeliveryWorker>()
         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -39,18 +41,25 @@ internal class DeliveryWorker(context: Context, parameters: WorkerParameters) : 
     override suspend fun doWork(): Result {
         val state = (applicationContext as SynchroNiceApplication).state
         if (!state.hasPending()) return Result.success()
-        val large = state.hasLargePending()
-        if (large) setForeground(foregroundInfo(0))
+        var foreground = false
         var lastPercent = -1
         return try {
-            state.retryPending { percent ->
-                if (large && percent != lastPercent) {
-                    lastPercent = percent
-                    if (Build.VERSION.SDK_INT < 33 || applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-                        manager().notify(1, notification(percent))
+            state.retryPending(
+                onFileProgress = { percent ->
+                    if (foreground && percent != lastPercent) {
+                        lastPercent = percent
+                        if (Build.VERSION.SDK_INT < 33 || applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                            manager().notify(1, notification(percent))
+                        }
                     }
-                }
-            }
+                },
+                onFileStart = { size ->
+                    if (size >= LARGE_FILE_BYTES && !foreground) {
+                        setForegroundAsync(foregroundInfo(0)).get()
+                        foreground = true
+                    }
+                },
+            )
             if (state.hasPending()) Result.retry() else Result.success()
         } catch (error: CancellationException) {
             throw error

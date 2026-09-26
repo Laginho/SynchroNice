@@ -105,7 +105,10 @@ class ProtocolClient(
      * arquivo Pendente cujo payload sumiu é descartado em vez de travar a
      * fila para sempre.
      */
-    fun retryPending(onFileProgress: (Int) -> Unit = {}) {
+    fun retryPending(
+        onFileProgress: (Int) -> Unit = {},
+        onFileStart: (Long) -> Unit = {},
+    ) {
         while (true) {
             val next = pending.firstOrNull() ?: return
             if (next is PendingItem.File && !File(next.path).exists()) {
@@ -113,8 +116,14 @@ class ProtocolClient(
                 continue
             }
             val outcome = when (next) {
-                is PendingItem.Text -> trySendText(next.text)
-                is PendingItem.File -> trySendFile(File(next.path), next.name, onFileProgress)
+                is PendingItem.Text -> trySendText(next.text, next.id)
+                is PendingItem.File -> trySendFile(
+                    File(next.path),
+                    next.name,
+                    onFileProgress,
+                    next.id,
+                    onFileStart,
+                )
             }
             when (outcome) {
                 SendOutcome.Success -> dequeueFirst()
@@ -135,11 +144,12 @@ class ProtocolClient(
         pending.removeAt(0)
     }
 
-    private fun trySendText(text: String): SendOutcome {
+    private fun trySendText(text: String, itemId: String? = null): SendOutcome {
         var connection: HttpURLConnection? = null
         return try {
             connection = open("/items/text", "POST")
             connection.doOutput = true
+            itemId?.let { connection.setRequestProperty("X-Item-Id", it) }
             connection.outputStream.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             when (code) {
@@ -154,11 +164,18 @@ class ProtocolClient(
         }
     }
 
-    private fun trySendFile(file: File, displayName: String, onProgress: (Int) -> Unit): SendOutcome {
+    private fun trySendFile(
+        file: File,
+        displayName: String,
+        onProgress: (Int) -> Unit,
+        itemId: String? = null,
+        onFileStart: (Long) -> Unit = {},
+    ): SendOutcome {
         var connection: HttpURLConnection? = null
         return try {
             connection = open("/items/file", "POST")
             connection.doOutput = true
+            itemId?.let { connection.setRequestProperty("X-Item-Id", it) }
             connection.setRequestProperty("X-File-Name-Utf8", URLEncoder.encode(displayName, Charsets.UTF_8).replace("+", "%20"))
             if (displayName.all { it in ' '..'~' }) {
                 connection.setRequestProperty("X-File-Name", displayName)
@@ -166,7 +183,10 @@ class ProtocolClient(
             val total = file.length()
             connection.setFixedLengthStreamingMode(total)
             file.inputStream().use { input ->
-                connection.outputStream.use { output -> pump(input, output, total, onProgress) }
+                connection.outputStream.use { output ->
+                    onFileStart(total)
+                    pump(input, output, total, onProgress)
+                }
             }
             val code = connection.responseCode
             if (code == HttpURLConnection.HTTP_CREATED) {

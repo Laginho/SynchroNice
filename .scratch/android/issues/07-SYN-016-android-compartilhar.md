@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -135,3 +135,17 @@ Verdict: Reopen — os critérios 2, 7 e 8 precisam de testes e correção.
   usar `C:\.android`; fora dele, o gate passou.
 
 - 2026-09-26 Proxy decidiu: ampliar apenas a costura HTTP do PC para deduplicar pelo id do remetente. Critérios 7 e 8 continuam reabertos para o stage 2.
+
+- 2026-09-26 Stage 2 (reabertura): commit de testes `808d766`, vermelho por
+  reenvios com o mesmo `X-Item-Id` criarem três Itens/arquivos em vez de dois
+  e pela callback de início real do upload ainda não existir. Cada Pendente
+  agora guarda um UUID no disco e o repete em toda tentativa; o servidor PC
+  responde 201 a ids já aceitos sem criar outra bolha ou arquivo, e só marca
+  arquivo como aceito depois do rename terminar. Upload cortado pode repetir o
+  id. O WorkManager entra em primeiro plano a partir do tamanho do arquivo que
+  realmente abriu a conexão, sob o dreno serializado: PC inalcançável não
+  notifica, e arquivo grande intercalado depois da leitura inicial ainda entra
+  em primeiro plano.
+- Gate completo verde: `cargo fmt --check`, `cargo clippy`, 41 testes Rust,
+  `tsc --noEmit`, 24 testes Node, 48 testes do cliente Android, 2 testes do app
+  Android e lint.

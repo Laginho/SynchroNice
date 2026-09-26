@@ -3,11 +3,13 @@
 //! Protocolo (SYN-002):
 //!   POST /items/text        corpo: o texto, UTF-8
 //!   Authorization: Bearer <token>
+//!   X-Item-Id: <id gerado pelo remetente> (opcional para clientes antigos)
 //!   201 sem corpo ao criar o Item; 401 sem token ou com token errado.
 //!
 //! Protocolo (SYN-003):
 //!   POST /items/file        corpo: os bytes do arquivo, em stream
 //!   Authorization: Bearer <token>
+//!   X-Item-Id: <id gerado pelo remetente> (opcional para clientes antigos)
 //!   X-File-Name-Utf8: <nome UTF-8 percent-encoded, espaço = %20>
 //!   X-File-Name: <nome ASCII>       fallback legado; '%' é literal aqui
 //!   X-File-Size: <tamanho em bytes>    (só quando o corpo vier chunked, sem
@@ -119,6 +121,9 @@ struct AppState {
     /// Caminho de cada arquivo recebido que terminou de gravar, indexado pelo
     /// id do Item para que Itens antigos continuem apontando à Pasta original.
     received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
+    /// Ids que este processo já aceitou do remetente. A Sessão é em memória,
+    /// portanto a deduplicação tem o mesmo ciclo de vida dos Itens visíveis.
+    accepted_item_ids: Arc<Mutex<HashSet<String>>>,
 }
 
 /// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
@@ -265,6 +270,7 @@ pub fn spawn(
                     pasta: pasta_da_thread,
                     leases: Arc::new(Mutex::new(HashSet::new())),
                     received_files: received_files_da_thread,
+                    accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
                 });
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
@@ -301,17 +307,55 @@ fn authorized(headers: &HeaderMap, token: &TokenCell) -> bool {
         .is_some_and(|t| t.trim() == token.get())
 }
 
+fn item_id(headers: &HeaderMap) -> Result<Option<String>, StatusCode> {
+    let Some(value) = headers.get("x-item-id") else {
+        return Ok(None);
+    };
+    let id = value.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
+    if id.is_empty() || id.len() > 128 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(Some(id.to_string()))
+}
+
 async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: String) -> StatusCode {
     if !authorized(&headers, &state.token) {
         return StatusCode::UNAUTHORIZED;
     }
+    let item_id = match item_id(&headers) {
+        Ok(id) => id,
+        Err(status) => return status,
+    };
+    let mut accepted = state
+        .accepted_item_ids
+        .lock()
+        .expect("ids aceitos sem panic");
+    if item_id.as_ref().is_some_and(|id| accepted.contains(id)) {
+        return StatusCode::CREATED;
+    }
     state.items.push_text(body);
+    if let Some(id) = item_id {
+        accepted.insert(id);
+    }
     StatusCode::CREATED
 }
 
 async fn post_file(State(state): State<AppState>, request: Request) -> StatusCode {
     if !authorized(request.headers(), &state.token) {
         return StatusCode::UNAUTHORIZED;
+    }
+    let item_id = match item_id(request.headers()) {
+        Ok(id) => id,
+        Err(status) => return status,
+    };
+    if item_id.as_ref().is_some_and(|id| {
+        state
+            .accepted_item_ids
+            .lock()
+            .expect("ids aceitos sem panic")
+            .contains(id)
+    }) {
+        return StatusCode::CREATED;
     }
     let Some(pasta) = state.pasta.lock().expect("Pasta sem panic").clone() else {
         return StatusCode::SERVICE_UNAVAILABLE;
@@ -427,6 +471,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     // já podiam ter acontecido pela metade e o aviso de fim nunca sair.
     let items = state.items.clone();
     let received_files = state.received_files.clone();
+    let accepted_item_ids = state.accepted_item_ids.clone();
     let final_path_bg = final_path.clone();
     let temp_path_bg = temp_path.clone();
     let concluido = tokio::spawn(async move {
@@ -460,6 +505,12 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                     .expect("arquivos recebidos sem panic")
                     .insert(item.id, final_path_bg.clone());
                 items.file_done(item.id);
+                if let Some(id) = item_id {
+                    accepted_item_ids
+                        .lock()
+                        .expect("ids aceitos sem panic")
+                        .insert(id);
+                }
                 true
             }
             Err(e) => {

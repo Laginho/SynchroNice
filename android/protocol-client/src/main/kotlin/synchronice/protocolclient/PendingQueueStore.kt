@@ -130,8 +130,8 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     }
 
     private fun encodeLine(item: PendingItem): String = when (item) {
-        is PendingItem.Text -> "T\t${escape(item.text)}"
-        is PendingItem.File -> "F\t${escape(item.path)}\t${escape(item.name)}"
+        is PendingItem.Text -> "T\t${escape(item.id)}\t${escape(item.text)}"
+        is PendingItem.File -> "F\t${escape(item.id)}\t${escape(item.path)}\t${escape(item.name)}"
     }
 
     /**
@@ -149,7 +149,9 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     private fun decodeLineOrNull(line: String): PendingItem? {
         val fields = line.split("\t").map(::unescape)
         return when {
+            fields.size >= 3 && fields[0] == "T" -> PendingItem.Text(fields[2], fields[1])
             fields.size >= 2 && fields[0] == "T" -> PendingItem.Text(fields[1])
+            fields.size >= 4 && fields[0] == "F" -> PendingItem.File(fields[2], fields[3], fields[1])
             fields.size >= 3 && fields[0] == "F" -> PendingItem.File(fields[1], fields[2])
             else -> null
         }
