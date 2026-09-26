@@ -24,6 +24,32 @@ internal class ReceivedFiles(context: Context) {
 
     fun folder(): Uri? = preferences.getString("receive-folder", null)?.let(Uri::parse)
 
+    fun savePhoto(file: java.io.File) {
+        val tree = folder()
+        val uri = if (tree == null) {
+            resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/SynchroNice")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            })
+        } else {
+            val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+            DocumentsContract.createDocument(resolver, parent, "image/jpeg", file.name)
+        } ?: throw IOException("não foi possível criar a foto na Pasta")
+        try {
+            val output = resolver.openOutputStream(uri, "wt") ?: throw IOException("não foi possível abrir a Pasta")
+            output.use { destination -> file.inputStream().use { it.copyTo(destination) } }
+            publish(uri)
+        } catch (error: Exception) {
+            try {
+                if (tree == null) resolver.delete(uri, null, null)
+                else DocumentsContract.deleteDocument(resolver, uri)
+            } catch (cleanup: Exception) { error.addSuppressed(cleanup) }
+            throw error
+        }
+    }
+
     fun chooseFolder(uri: Uri) {
         resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         if (!preferences.edit().putString("receive-folder", uri.toString()).commit()) {
