@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -45,3 +45,5 @@ Critérios 3 a 5 são no aparelho: verificação manual.
   sem divergência entre memória e disco. Red porque o descarte não existe.
 
 ## Comments
+
+- 2026-09-26 Review ended at to-review (exit 0); branch SYN-013 holds the review; left for a human
