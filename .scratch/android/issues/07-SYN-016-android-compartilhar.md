@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -186,3 +186,6 @@ Verdict: Reopen — critério 9 tem uma corrida e a prova do critério 2 ainda n
   feita nesta revisão. O débito humano registrado acima permanece.
 
 - 2026-09-26 Stage 2 bloqueado: o teste comprometido `texto aceito sem resposta mantem id ate confirmacao no retry` se provou incorreto. Ao fechar o `HttpServer` sem resposta, `HttpURLConnection` pode repetir o POST automaticamente, receber o 201 na mesma chamada e remover corretamente o Pendente; o teste exige que ele permaneça na fila. Substituir a primeira tentativa por um servidor TCP de uma conexão, que lê o corpo e derruba o socket antes da resposta, prova a perda real sem confundir o retry interno. O teste de arquivo grande continua válido: no retry, o PC responde 201 ao id conhecido sem consumir o corpo e o cliente ainda deixa o Item Pendente. Nenhuma correção de produção foi mantida neste bloqueio.
+
+- 2026-09-26 Stage 2 (segunda reabertura): o commit de teste `95304fe` substituiu apenas o cenário de texto por um servidor TCP de conexão única. O vermelho reproduziu o arquivo grande permanecendo Pendente após 201 antecipado e a bolha de arquivo permanecendo Pendente depois de a fila esvaziar. O retry de arquivo agora lê a resposta HTTP em paralelo ao stream, portanto um 201 idempotente interrompe o reenvio sem confundir queda real com sucesso; `queueFile` registra fila e bolha sob o mesmo `outboundMutex` da reconciliação.
+- Gate completo verde: `cargo fmt --check`, `cargo clippy`, 41 testes Rust, `tsc --noEmit`, 24 testes Node, 49 testes do cliente Android, 3 testes do app Android e lint.

@@ -196,12 +196,17 @@ internal class AppState(context: Context) {
     suspend fun queueFile(file: File) {
         val currentClient = client() ?: return
         val stored = withContext(Dispatchers.IO) {
-            outboundMutex.withLock { currentClient.enqueueFile(file) }
+            outboundMutex.withLock {
+                val stored = currentClient.enqueueFile(file)
+                if (stored) withContext(Dispatchers.Main.immediate) {
+                    val id = nextMessageId++
+                    messages.add(ChatMessage(id, file.name, true, Delivery.PENDING))
+                    submitted.addLast(id)
+                }
+                stored
+            }
         }
         if (!stored) throw IOException("arquivo não disponível")
-        val id = nextMessageId++
-        messages.add(ChatMessage(id, file.name, true, Delivery.PENDING))
-        submitted.addLast(id)
         scheduleDelivery(appContext)
     }
 
