@@ -392,7 +392,8 @@ internal class AppState(context: Context) {
         val receiptKey = "received-file:${pairing!!.token}:${item.id}"
         val receipt = pairingPreferences.getString(receiptKey, null)
         val incompleteUri = receipt?.takeIf { it.startsWith("writing:") }?.removePrefix("writing:")?.let(Uri::parse)
-        val persistedUri = receipt?.takeUnless { it.startsWith("writing:") }?.let(Uri::parse)
+        val creationIntent = receipt?.takeIf { it.startsWith("creating:") }?.removePrefix("creating:")
+        val persistedUri = receipt?.takeIf { it.startsWith("content:") }?.let(Uri::parse)
         val id = receivedFiles.getOrPut(item.id) {
             val id = nextMessageId++
             messages.add(ChatMessage(id, item.name, false, Delivery.PENDING, file = item, uri = persistedUri))
@@ -421,7 +422,11 @@ internal class AppState(context: Context) {
                         files.publish(savedUri)
                         currentClient.acknowledgeFile(item)
                     }
-                    else files.receive(currentClient, item, existingUri = incompleteUri, onCreated = { uri ->
+                    else files.receive(currentClient, item, existingUri = incompleteUri, creationIntent = creationIntent, onCreating = { intent ->
+                        kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                            saveReceipt("creating:$intent")
+                        }
+                    }, onCreated = { uri ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
                             saveReceipt("writing:$uri")
                         }

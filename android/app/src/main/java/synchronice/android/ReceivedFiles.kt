@@ -11,6 +11,8 @@ import android.webkit.MimeTypeMap
 import synchronice.protocolclient.Item
 import synchronice.protocolclient.ProtocolClient
 import java.io.IOException
+import java.util.UUID
+import org.json.JSONObject
 
 internal fun fileMimeType(name: String): String =
     MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
@@ -29,12 +31,12 @@ internal class ReceivedFiles(context: Context) {
         }
     }
 
-    fun receive(client: ProtocolClient, item: Item.FileMeta, existingUri: Uri?, onCreated: (Uri) -> Unit, onSaved: (Uri) -> Unit, onProgress: (Int) -> Unit) {
+    fun receive(client: ProtocolClient, item: Item.FileMeta, existingUri: Uri?, creationIntent: String?, onCreating: (String) -> Unit, onCreated: (Uri) -> Unit, onSaved: (Uri) -> Unit, onProgress: (Int) -> Unit) {
         val tree = folder()
         val mime = fileMimeType(item.name)
         val name = item.name.substringAfterLast('/').substringAfterLast('\\')
             .filter { it >= ' ' }.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "arquivo"
-        val uri = existingUri ?: if (tree == null) {
+        val uri = existingUri ?: if (tree == null && creationIntent == null) {
             // MediaStore allocates a unique filename atomically, including for repeated names.
             resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -43,21 +45,23 @@ internal class ReceivedFiles(context: Context) {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             })
         } else {
-            val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
-            val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
-            val names = mutableSetOf<String>()
-            (resolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
-                ?: throw IOException("não foi possível ler a Pasta")).use { cursor ->
-                while (cursor.moveToNext()) names.add(cursor.getString(0))
+            val intent = creationIntent?.let(::JSONObject) ?: JSONObject().apply {
+                put("tree", tree.toString())
+                put("marker", "[syn-${UUID.randomUUID()}]")
             }
-            val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
-            var unique = name
-            var suffix = 1
-            while (unique in names) unique = "${name.take(dot)} (${suffix++})${name.substring(dot)}"
-            DocumentsContract.createDocument(resolver, parent, mime, unique)
+            val targetTree = Uri.parse(intent.getString("tree"))
+            if (creationIntent == null) {
+                onCreating(intent.toString())
+                val parent = DocumentsContract.buildDocumentUriUsingTree(targetTree, DocumentsContract.getTreeDocumentId(targetTree))
+                val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+                val markedName = "${name.take(dot)} ${intent.getString("marker")}${name.substring(dot)}"
+                DocumentsContract.createDocument(resolver, parent, mime, markedName)
+                    ?: throw IOException("não foi possível criar o arquivo na Pasta")
+            }
+            recoverCreatedDocument(targetTree, intent.getString("marker"))
         } ?: throw IOException("não foi possível criar o arquivo na Pasta")
 
-        var tracked = existingUri != null
+        var tracked = existingUri != null || tree != null || creationIntent != null
         try {
             onCreated(uri)
             // Keep interrupted destinations so a restart writes to the same file, including SAF.
@@ -86,6 +90,24 @@ internal class ReceivedFiles(context: Context) {
             }
             throw error
         }
+    }
+
+    private fun recoverCreatedDocument(tree: Uri, marker: String): Uri {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val columns = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        val candidates = mutableListOf<String>()
+        (resolver.query(children, columns, null, null, null)
+            ?: throw IOException("não foi possível consultar o recebimento na Pasta; tente novamente")).use { cursor ->
+            if (cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING)) {
+                throw IOException("a Pasta ainda está carregando; tente novamente")
+            }
+            while (cursor.moveToNext()) {
+                if (cursor.getString(1)?.contains(marker) == true) candidates.add(cursor.getString(0))
+            }
+        }
+        val documentId = candidates.singleOrNull()
+            ?: throw IOException("não foi possível identificar o arquivo recebido na Pasta; verifique o provedor e tente novamente")
+        return DocumentsContract.buildDocumentUriUsingTree(tree, documentId)
     }
 
     private fun hasCompleteContent(uri: Uri, size: Long): Boolean {
