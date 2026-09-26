@@ -9,6 +9,7 @@ import java.net.URI
 import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.atomic.AtomicReference
 
 /** O PC recusou a requisição (ex.: token errado) — não é indisponibilidade. */
 class ProtocolRejectedException(val code: Int) : Exception("PC recusou a requisição: HTTP $code")
@@ -39,6 +40,7 @@ class ProtocolClient(
     private val queueStore: PendingQueueStore,
 ) {
     private val pending: MutableList<PendingItem> = queueStore.load().toMutableList()
+    private val activeListen = AtomicReference<HttpURLConnection?>()
 
     /**
      * Manda um Item de texto ao PC. Ao detectar o outro lado, drena o
@@ -252,17 +254,24 @@ class ProtocolClient(
     fun listen(): List<Item> {
         // ponytail: a 35s idle timeout bounds reconnection after a silent IP change; a network callback could shorten it.
         val connection = open("/listen", "GET").apply { readTimeout = 35_000 }
+        activeListen.set(connection)
         val body = try {
             val code = connection.responseCode
             if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)
             connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
         } finally {
+            activeListen.compareAndSet(connection, null)
             connection.disconnect()
         }
         return body.lineSequence()
             .filter { it.isNotBlank() }
             .map(::parseItem)
             .toList()
+    }
+
+    /** Fecha imediatamente a escuta ao sair do chat. */
+    fun closeListen() {
+        activeListen.getAndSet(null)?.disconnect()
     }
 
     /** Confirma a presença do cliente pela escuta GET aberta no outro lado. */
