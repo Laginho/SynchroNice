@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -167,3 +167,5 @@ Verdict: Reopen — critérios 1 e 4 ainda falham.
 - O tratamento de HTTP 401 que esquece o Par está coberto por SYN-013, critério 5; não é achado deste ticket.
 - Gate completo: passou `cargo fmt --check`, `cargo clippy`, 37 testes Rust, `tsc --noEmit`, 24 testes Node, 35 testes Kotlin e `:app:check` (incluindo lint). `git diff --check` passou.
 - Verificação no aparelho: `adb devices` não iniciou por falta de permissão para criar `\\.android`; permanece o Débito humano acima.
+
+- 2026-09-26 Stage 2 bloqueado: o critério 4 exige que a presença acompanhe o ciclo autenticado de `/listen`, mas `ProtocolClient.listen()` e os testes desse ciclo não estão autorizados em `Primary files` (o escopo atual do cliente é só a leitura do QR). Stage 2 não pode ampliar a costura. Stage 1 deve autorizar o ciclo de `listen()` e definir seus testes de contrato antes de voltar a `to-implement`. Nenhum código ou teste foi alterado.
