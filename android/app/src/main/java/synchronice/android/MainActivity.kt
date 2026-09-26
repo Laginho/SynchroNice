@@ -61,6 +61,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -118,6 +120,13 @@ internal class AppState(context: Context) {
     private val preferences = appContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
     var copyFormatted by mutableStateOf(preferences.getBoolean("copy-formatted", false))
         private set
+    var keepPhotos by mutableStateOf(preferences.getBoolean("keep-photos", false))
+        private set
+
+    fun setKeepCameraPhotos(value: Boolean) {
+        preferences.edit().putBoolean("keep-photos", value).apply()
+        keepPhotos = value
+    }
 
     fun setCopyWithPunctuation(value: Boolean) {
         preferences.edit().putBoolean("copy-formatted", value).apply()
@@ -560,8 +569,66 @@ internal fun reconcilePendingDelivery(
 }
 
 class MainActivity : ComponentActivity() {
+    private var photoName: String? = null
+    private val state get() = (application as SynchroNiceApplication).state
+    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { confirmed ->
+        val file = photoName?.let { File(filesDir, "camera/$it") } ?: return@registerForActivityResult
+        photoName = null
+        lifecycleScope.launch(NonCancellable) {
+            try {
+                if (confirmed) {
+                    if (file.length() == 0L) throw IOException("a câmera não gravou a foto")
+                    if (state.keepPhotos) try {
+                        withContext(Dispatchers.IO) { state.files.savePhoto(file) }
+                    } catch (error: Exception) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "A foto será enviada, mas não foi possível guardá-la na Pasta: ${error.message}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    if (state.pairing == null) throw IOException("pareie com o PC antes de enviar")
+                    state.queueFile(file)
+                }
+                withContext(Dispatchers.IO) {
+                    if (file.exists() && !file.delete()) throw IOException("não foi possível remover a foto temporária")
+                }
+            } catch (error: Exception) {
+                Toast.makeText(this@MainActivity, "Não foi possível concluir a foto: ${error.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) openCamera()
+        else Toast.makeText(this, "Permita a câmera para tirar uma foto.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun openCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            cameraPermission.launch(Manifest.permission.CAMERA)
+            return
+        }
+        var file: File? = null
+        try {
+            val directory = File(filesDir, "camera").apply { mkdirs() }
+            file = File.createTempFile("Foto-", ".jpg", directory)
+            photoName = file.name
+            takePicture.launch(FileProvider.getUriForFile(this, "$packageName.camera", file))
+        } catch (error: Exception) {
+            file?.delete()
+            photoName = null
+            Toast.makeText(this, "Não foi possível abrir a câmera: ${error.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("camera-photo", photoName)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        photoName = savedInstanceState?.getString("camera-photo")
         val state = (application as SynchroNiceApplication).state
         setContent {
             MaterialTheme {
@@ -569,7 +636,7 @@ class MainActivity : ComponentActivity() {
                     var showSettings by remember(state.pairing) { mutableStateOf(false) }
                     if (state.pairing == null) PairingScreen(state)
                     else if (showSettings) SettingsScreen(state, onBack = { showSettings = false })
-                    else ChatScreen(state, onSettings = { showSettings = true })
+                    else ChatScreen(state, onSettings = { showSettings = true }, onCamera = ::openCamera)
                 }
             }
         }
@@ -610,7 +677,7 @@ private fun PairingScreen(state: AppState) {
 }
 
 @Composable
-private fun ChatScreen(state: AppState, onSettings: () -> Unit) {
+private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> Unit) {
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) {
@@ -657,6 +724,9 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit) {
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onCamera, modifier = Modifier.semantics { contentDescription = "Tirar foto" }) {
+                Text("📷")
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
@@ -709,6 +779,17 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
         ) {
             Checkbox(checked = state.copyFormatted, onCheckedChange = null)
             Text("Copiar com pontuação", Modifier.padding(start = 8.dp))
+        }
+        Row(
+            Modifier.fillMaxWidth().toggleable(
+                value = state.keepPhotos,
+                role = Role.Checkbox,
+                onValueChange = state::setKeepCameraPhotos,
+            ).padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = state.keepPhotos, onCheckedChange = null)
+            Text("Guardar fotos tiradas", Modifier.padding(start = 8.dp))
         }
         Button(onClick = { scope.launch { state.unpair() } }, modifier = Modifier.padding(top = 24.dp)) {
             Text("Desparear")

@@ -1,5 +1,5 @@
 # SYN-017: Android — botão de câmera
-Stage: to-implement
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-013, SYN-016, SYN-014
 Review: agent
@@ -41,6 +41,12 @@ Todos os critérios são no aparelho: verificação manual.
   registra isso no commit.
 
 ## Comments
+
+- 2026-09-26 Stage 2 concluído na branch `syn-017`: botão Tirar foto usa `ActivityResultContracts.TakePicture`, com FileProvider limitado à pasta interna `camera/`, permissão e nome temporário restaurado na recriação da Activity. Confirmar reutiliza `AppState.queueFile`; cancelar apaga o temporário sem enfileirar. A opção persistente `keep-photos` começa desligada; ligada, grava também via MediaStore/SAF na Pasta. O temporário é removido após enfileirar e a cópia da fila é removida pela entrega existente. Falha de gravação/envio mostra erro e preserva a captura interna.
+- Validação: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` terminou `gate: passou` (exit 0): Rust 44 testes, Node 32, Android 79 (23 app + 56 protocolo), zero falhas nos relatórios; fmt, clippy, typecheck e lint aprovados. Primeira execução esbarrou no SDK no sandbox; execução elevada compilou/testou Android, mas retornou falha agregada anterior sem causa preservada na saída truncada; repetição completa com log passou. Sem prova red-green nova, conforme dispensa explícita deste ticket.
+- Débito humano: validar no aparelho os critérios 1–5 (layout do composer, confirmar/cancelar na câmera, preferência persistente e retenção na Pasta versus limpeza após entrega). Computer Use foi inicializado e consultado, sem emulador/espelhamento disponível; `adb devices` no SDK configurado retornou lista vazia. Compilação, lint e testes existentes não comprovam esses comportamentos no aparelho.
+
+- 2026-09-26 Stage 2: dependências SYN-013, SYN-014 e SYN-016 em done na sessão. Sem novos testes, conforme a seção "Tests stage 2 writes": câmera/interface usam verificação no aparelho; envio reutiliza queueFile e a fila já testada.
 
 - 2026-09-26 Proxy decidiu: a opção "Guardar fotos tiradas" usa a Pasta entregue pelo SYN-014. A dependência agora está em `Blocked by`; aguardar SYN-014 chegar a `done` na branch da sessão antes do stage 2 deste ticket. Nenhuma costura nova é necessária: o envio continua pelo SYN-016 e o destino pela Pasta do SYN-014.
 
