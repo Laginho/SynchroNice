@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -283,3 +283,5 @@ Verdict: Reopen — critério 2 ainda tem uma janela de duplicação após desco
   O débito humano previamente registrado permanece.
 
 - 2026-09-26 Stage 2 interrompido: o CLI recebeu bloqueio de conteúdo da API às 16:00. O driver descartou as mudanças sem commit; os ajustes de teste foram recuperados do transcript no commit `923e915`. `gate.ps1 -TestsOnly` passou no ambiente completo, mas o teste corrigido ficou verde sem mudança de produção. A prova vermelha anterior fechava a conexão cedo demais e não reproduzia a corrida de finalização. É preciso obter uma reprodução vermelha válida ou revisar o achado antes de voltar a `to-implement`.
+
+- 2026-09-26 Proxy decidiu: manter o achado da quarta revisão. O lock do id pertence à future de `post_file`, mas a tarefa destacada continua entre rename e registro do id sem possuir esse lock; se o handler for cancelado nessa janela, outro POST pode passar pela consulta. O teste de socket recuperado fecha a conexão no progresso e não força esse cancelamento, por isso estar verde não refuta o achado. Stage 2 deve primeiro obter o vermelho determinístico descrito acima, em commit só de teste, e depois corrigir a vida útil do lock preservando retry após envio incompleto. Nenhuma mudança de produção foi feita nesta decisão.
