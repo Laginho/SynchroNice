@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -67,10 +67,10 @@ nem move o SDK.
 1. ✅ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. A prova de lifecycle chama um helper interno, não o comportamento observável da Activity.
-5. ❌ Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear. A implementação limita e fecha a escuta, mas a prova de lifecycle ainda chama um helper interno em vez da costura observável.
+4. ✅ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
+5. ✅ Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
-7. ❌ Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue. A implementação concilia cada bolha, mas o teste da entrega parcial chama diretamente o helper interno e não prova o estado observável do app.
+7. ✅ Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
 8. Com o PC fora da rede, o texto digitado fica Pendente e é entregue quando o PC volta, com o app aberto.
 9. O chat vazio mostra uma instrução de uso.
 
@@ -261,3 +261,14 @@ internas em vez do comportamento observável.
   `git diff --check` passou. O primeiro gate sem essas variáveis falhou apenas
   porque o AGP tentou usar `C:\.android`; a segunda tentativa encontrou a mesma
   limitação de ambiente para autodetectar o JDK 17.
+
+#### Resolution (2026-09-26)
+
+Verdict: Approve
+
+- Standards: nenhuma violação documentada. `MainActivity.kt` ainda concentra estado, rede, lifecycle e UI (possível Divergent Change); `submitted` tem nome pouco explícito e o tratamento de `ProtocolRejectedException` se repete. São julgamentos de manutenção, sem refatoração neste ticket.
+- Spec: critérios 1–9 implementados. Os testes finais atravessam a Activity real e o `AppState` com HTTP falso, sem chamar os helpers internos rejeitados na rodada anterior. O falso scope creep de `AGENTS.md` desapareceu no rebase porque o arquivo já era idêntico na branch de sessão.
+- Files: casca Compose/câmera/mDNS e chat Android; parser e cliente do protocolo; presença autenticada `HEAD /listen` no servidor PC; testes Android/JVM/Rust correspondentes.
+- Red-green: `20b9ffb` substituiu as provas internas e deixou vermelho o reset de presença ao retomar; `19d2981` limpou a presença no `ON_RESUME`. As rodadas anteriores do ticket registram os vermelhos do parser JSON, presença autenticada, reconexão da escuta e entrega parcial.
+- Gate: após o rebase, `gate.ps1` passou com fmt, clippy, 38 testes Rust, typecheck, 24 testes Node e Gradle `check` com testes Kotlin, compilação e lint. A primeira tentativa falhou apenas porque o AGP tentou gravar `C:\.android`; a repetição usou o diretório Android temporário já documentado.
+- Verificação visual: Computer Use retornou `apps=[]`, sem emulador ou app Android acessível. O `Débito humano` dos critérios 3–9 permanece para o QA conjunto.
