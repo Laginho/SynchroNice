@@ -3,6 +3,7 @@ package synchronice.protocolclient
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -1097,6 +1098,77 @@ class ProtocolClientTest {
         } finally {
             server.stop(0)
             destination.delete()
+        }
+    }
+
+    @Test
+    fun `download em stream fecha e publica bytes completos antes de confirmar`() {
+        val port = freePort()
+        val content = ByteArray(50_000) { (it % 256).toByte() }
+        var closed = false
+        var published = false
+        val destination = object : ByteArrayOutputStream() {
+            override fun close() { closed = true; super.close() }
+        }
+        val ackSawSaved = AtomicBoolean(false)
+        val server = fakeServer(port, "/outbox/42/file") { exchange ->
+            exchange.sendResponseHeaders(200, content.size.toLong())
+            exchange.responseBody.use { it.write(content) }
+        }
+        server.createContext("/outbox/42/ack") { exchange ->
+            ackSawSaved.set(closed && published && destination.toByteArray().contentEquals(content))
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        try {
+            val progress = mutableListOf<Int>()
+            client(port).downloadFile(
+                Item.FileMeta(42, 100, "foto.png", content.size.toLong()),
+                destination,
+                onSaved = { published = true },
+                onProgress = { progress.add(it) },
+            )
+            assertTrue(ackSawSaved.get())
+            assertEquals(content.toList(), destination.toByteArray().toList())
+            assertEquals(progress.sorted(), progress)
+            assertEquals(100, progress.last())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `stream incompleto ou falha ao fechar ou publicar nao confirma`() {
+        for (failure in listOf("incomplete", "close", "publish")) {
+            val port = freePort()
+            val acked = AtomicBoolean(false)
+            val server = fakeServer(port, "/outbox/42/file") { exchange ->
+                exchange.sendResponseHeaders(200, 3)
+                exchange.responseBody.use { it.write(byteArrayOf(1, 2, 3)) }
+            }
+            server.createContext("/outbox/42/ack") { exchange ->
+                acked.set(true)
+                exchange.sendResponseHeaders(204, -1)
+                exchange.close()
+            }
+            val destination = object : ByteArrayOutputStream() {
+                override fun close() {
+                    if (failure == "close") throw IOException("disco cheio")
+                    super.close()
+                }
+            }
+            try {
+                assertFailsWith<IOException> {
+                    client(port).downloadFile(
+                        Item.FileMeta(42, 100, "foto.png", if (failure == "incomplete") 10 else 3),
+                        destination,
+                        onSaved = { if (failure == "publish") throw IOException("publicação falhou") },
+                    )
+                }
+                assertFalse(acked.get(), failure)
+            } finally {
+                server.stop(0)
+            }
         }
     }
 
