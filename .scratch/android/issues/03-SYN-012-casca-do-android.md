@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: implementing
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -172,3 +172,5 @@ Verdict: Reopen — critérios 1 e 4 ainda falham.
 
 - 2026-09-26 Proxy decidiu: autorizar apenas a costura de presença de `/listen` no cliente, no servidor PC e em seus testes, conforme Primary files e critério 4 acima. Com fila vazia, o GET autentica e bloqueia antes de responder; portanto o Android não pode inferir autenticação por resolução mDNS, conexão TCP ou início do GET. `HEAD /listen` confirma escuta autenticada sem mudar o long-poll nem o 401 de revogação. Testes de contrato vermelhos precedem a correção; nenhum outro comportamento do protocolo entra neste ticket.
 - 2026-09-26 Stage 2 test-only: adicionado o caso de número JSON inválido em campo extra e os contratos de presença. `gate.ps1 -TestsOnly`: Rust 37 passaram e o novo teste HEAD falhou por timeout (sem rota HEAD, a requisição cai no GET long-poll); Node 24 passaram. O Android não compilou: este ambiente só tem JDK 25/26, sem a toolchain 17 exigida pelo Gradle.
+
+- 2026-09-26 Proxy: stage 2 expirou após 45 minutos. Os testes ficaram nos commits `9efe6a5` e `6c05a96`; o diff de implementação não commitado foi salvo em `.scratch/run-log/SYN-012-rescue-20260926-1032.patch` e restaurado sem alterações no commit WIP `5db2386`. O gate Android estava em execução no timeout, portanto o verde desse diff ainda não foi comprovado. Retomar a implementação e a verificação a partir desses commits.
