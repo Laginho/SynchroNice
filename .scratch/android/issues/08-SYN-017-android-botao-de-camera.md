@@ -1,5 +1,5 @@
 # SYN-017: Android — botão de câmera
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-013, SYN-016
 Review: agent
@@ -43,3 +43,5 @@ Todos os critérios são no aparelho: verificação manual.
 ## Comments
 
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: SYN-017 ficou `blocked`: guardar fotos depende da Pasta do SYN-014, ainda bloqueado e sem implementação integrada. /  / Registro no commit `c30eacd`, branch `syn-017`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando “the ticket needs a seam it does not name”. Próximo passo: incorporar SYN-014 como dependência e integrá-lo antes de retomar.
+
+- 2026-09-26 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: SYN-017 ficou `blocked`: guardar fotos depende da Pasta do SYN-014, ainda bloqueado e não integrado. /  / Registro: commit `711e80f`, branch `syn-017`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando falta “a seam the ticket does not name”. Próximo passo: resolver e integrar SYN-014 antes de retomar.
