@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -116,3 +116,40 @@ continua limpa: `47eeb37` contém só ticket + testes e `0a39464` não toca test
 - `ReceivedFiles.kt` só considera a gravação concluída depois de aceitar o recibo: falha ao persistir impede o ACK e aciona a limpeza do destino.
 - Green: o teste de `4c89124`, sem alterações, passou com 2 ACKs, 1 GET e 1 cópia; a AppState recriada começa sem histórico. Gate completo passou: 44 Rust, 24 TS, 56 protocolo e 9 app, zero falhas; fmt/clippy, typecheck e lint passaram. Commit de implementação não altera testes.
 - O débito visual anterior permanece; esta retomada verifica automaticamente o critério 3 reaberto, sem nova alegação de verificação no aparelho.
+
+#### Revisão (2026-09-26) — reaberto novamente
+
+Verdict: Reopen — o critério 3 ainda cai; `Stage: to-implement`.
+
+**Standards.** O recibo `received-file:<token>:<id> -> URI` acrescenta estado
+persistente que o ADR-0002 ainda não documenta: sua lista hoje diz que, fora os
+arquivos comuns, persistem apenas Par, Pasta, preferência de cópia e Pendentes.
+A persistência é exigida por este ticket; a correção documental fica no
+`CLEAN-010`, fora dos Primary files daqui. Os demais achados são cheiros de julgamento
+e não reabrem sozinhos: `receivedFiles`/`files` têm nomes pouco específicos; o
+prefixo cru `received-file:` se repete; `file`/`uri`/`progress` formam estado
+implícito; e `MainActivity.kt` acumula persistência, download e UI. Não
+refatorar esses cheiros neste ticket sem que o conserto abaixo exija.
+
+**Spec.**
+
+1. **❌ Critério 3 — a deduplicação ainda tem uma janela de crash.** O
+   contrato reaberto exige que uma morte depois da publicação e antes ou
+   durante o `ack` retome apenas a confirmação. No caminho MediaStore,
+   `ReceivedFiles.receive` limpa `IS_PENDING` antes de o callback de
+   `AppState.receiveFile` commitar o recibo. Se o processo morrer entre as duas
+   operações, o arquivo já existe e a próxima abertura faz outro GET e outra
+   cópia. No SAF, o destino fica visível ainda mais cedo. O teste de
+   `4c89124` cobre ACK 503 depois do commit, não essa janela. A próxima rodada
+   precisa de um teste no app real que interrompa exatamente essa transição e
+   prove uma cópia/um GET após recriar `AppState`.
+2. **Limpeza do recibo.** Depois de ACK bem-sucedido, o retorno `false` de
+   `commit()` ao remover o recibo é ignorado. A próxima rodada deve provar que
+   sucesso não deixa recibo persistente silenciosamente.
+
+O uso de `MediaStore.Downloads` para imagens não é achado: o MediaProvider
+resolve `media_type` pelo MIME e a mesma linha entra também na view `Images`.
+
+Nenhum vazamento de escopo foi encontrado. Os caminhos normais de Desparear e
+troca de Par removem os recibos. Como os itens 1 e 2 exigem teste novo, nenhum
+deles é conserto permitido no Stage 3.
