@@ -241,3 +241,6 @@ nos relatórios), além de fmt, clippy, typecheck e lint.
 - Red SAF: teste no AppState real interrompe o provedor após criar, antes de devolver a URI. A retomada cria 2 documentos em vez de 1. Gate -TestsOnly: 15 testes do app, 1 falha; 44 Rust, 24 TS e 56 protocolo passaram. Primeira tentativa parou por acesso a C:\.android; repetição autorizada confirmou a falha comportamental.
 
 - Red SAF ampliado: 20 testes do app, 6 falhas contra o código anterior. Marcador alterado/oculto/ambíguo e consulta carregando não interrompem a recuperação; consulta indisponível não preserva intenção; mudar a preferência de Pasta faz consultar o lugar errado. Os testes incluem documento alheio com nome original igual.
+
+- Green SAF: 20 testes do app passaram com a intenção persistida antes da criação e consulta por marcador na Pasta original. Testes cdc1ebe/5b9103e; código 9501a89, sem alteração de testes.
+- Red da escuta: o novo teste exige executar o laço real via AppState.listen; o gate falha na compilação porque esse laço ainda está embutido no Composable. O servidor deixa de anunciar o Item após ACK; a falha de remoção também reproduz a alteração do cache de SharedPreferences antes de retornar false.

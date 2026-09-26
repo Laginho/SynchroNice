@@ -17,6 +17,10 @@ import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.runner.RunWith
@@ -81,7 +85,11 @@ class ReceivedFileRestartTest {
     fun unavailableSafQueryKeepsItsCreationIntent() =
         exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "unavailable")
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null) = runBlocking {
+    @Test
+    fun realListenLoopCleansReceiptAfterAckWithoutAnotherAnnouncement() =
+        exerciseRestart(null, failRemoval = true, listenRecovery = true)
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null, listenRecovery: Boolean = false) = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         var rejectRemoval = failRemoval
         var crashBeforeReceipt = safCrash && !beforeWrite
@@ -118,6 +126,7 @@ class ReceivedFileRestartTest {
                                 }
                                 if (rejectRemoval && removesReceipt) {
                                     rejectRemoval = false
+                                    if (listenRecovery) editor.commit() // Android changes its memory cache even on disk failure.
                                     return false
                                 }
                                 return editor.commit()
@@ -200,6 +209,7 @@ class ReceivedFileRestartTest {
         }.apply { attachInfo(context, ProviderInfo().apply { this.authority = authority }) })
         val gets = AtomicInteger()
         val acks = AtomicInteger()
+        val listens = AtomicInteger()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/outbox/42/file") { exchange ->
             gets.incrementAndGet()
@@ -211,6 +221,13 @@ class ReceivedFileRestartTest {
             exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null && !failRemoval && !safCrash) 503 else 204, -1)
             exchange.close()
         }
+        server.createContext("/listen") { exchange ->
+            listens.incrementAndGet()
+            val body = if (acks.get() == 0) """{"kind":"file","id":42,"at_ms":0,"name":"received.bin","size":7}""" else ""
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.use { it.write(body.toByteArray()) }
+            exchange.close()
+        }
         server.start()
         Dispatchers.setMain(Dispatchers.Unconfined)
         try {
@@ -219,7 +236,14 @@ class ReceivedFileRestartTest {
             state.knownAddress.save("127.0.0.1")
             val item = Item.FileMeta(42, 0, "received.bin", 7)
             if (failRemoval) {
-                assertFailsWith<IOException> { state.receiveFile(item, state.client()!!) }
+                if (listenRecovery) {
+                    val listening = launch { state.listen(state.pairing!!, state.client()!!) }
+                    try {
+                        withTimeout(5_000) { while (state.connectionError == null) delay(10) }
+                    } finally { listening.cancelAndJoin() }
+                    assertEquals(Delivery.DELIVERED, state.messages.single().delivery, "A successful ACK means delivered even if receipt cleanup fails")
+                    assertTrue(preferences.all.keys.any { it.startsWith("received-file:") }, "Failed removal must remain retryable")
+                } else assertFailsWith<IOException> { state.receiveFile(item, state.client()!!) }
                 assertTrue(state.connectionError != null, "Receipt cleanup failure must be visible")
                 assertEquals(1, acks.get())
             } else if (crashAfterPublication == null && !safCrash) {
@@ -254,6 +278,18 @@ class ReceivedFileRestartTest {
                 assertEquals("", copies.first().readText())
                 assertEquals("foreign", copies.last().readText())
                 assertTrue(preferences.all.keys.any { it.startsWith("received-file:") })
+                return@runBlocking
+            }
+            if (listenRecovery) {
+                val listening = launch { reopened.listen(reopened.pairing!!, reopened.client()!!) }
+                try {
+                    withTimeout(5_000) { while (listens.get() < 2) delay(10) }
+                    assertTrue(preferences.all.keys.none { it.startsWith("received-file:") }, "Cleanup cannot depend on another file announcement")
+                    assertTrue(reopened.messages.isEmpty(), "Receipt recovery must not restore chat history")
+                    assertEquals(1, gets.get())
+                    assertEquals(1, copies.size)
+                    assertEquals("payload", copies.single().readText())
+                } finally { listening.cancelAndJoin() }
                 return@runBlocking
             }
             reopened.receiveFile(item, reopened.client()!!)
