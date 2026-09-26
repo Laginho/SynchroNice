@@ -7,8 +7,11 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.content.pm.ProviderInfo
 import android.database.Cursor
+import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.Dispatchers
@@ -48,9 +51,18 @@ class ReceivedFileRestartTest {
     @Test
     fun failedReceiptRemovalIsReportedAndCanBeRetried() = exerciseRestart(null, failRemoval = true)
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false) = runBlocking {
+    @Test
+    fun restartingAfterSafWriteBeforeReceiptReusesTheVisibleFile() = exerciseRestart(null, safCrash = true)
+
+    @Test
+    fun restartingBeforeSafWriteCompletesTheSameDestinationBeforeAck() = exerciseRestart(null, safCrash = true, beforeWrite = true)
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false) = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         var rejectRemoval = failRemoval
+        var crashBeforeReceipt = safCrash && !beforeWrite
+        var crashBeforeWrite = beforeWrite
+        val copies = mutableListOf<File>()
         val preferences = application.getSharedPreferences("pairing", 0)
         val context = object : ContextWrapper(application) {
             override fun getApplicationContext(): Context = this
@@ -60,13 +72,23 @@ class ReceivedFileRestartTest {
                     override fun edit(): SharedPreferences.Editor {
                         val editor = preferences.edit()
                         var removesReceipt = false
+                        var writesReceipt = false
                         return object : SharedPreferences.Editor by editor {
+                            override fun putString(key: String, value: String?): SharedPreferences.Editor {
+                                writesReceipt = key.startsWith("received-file:")
+                                editor.putString(key, value)
+                                return this
+                            }
                             override fun remove(key: String): SharedPreferences.Editor {
                                 removesReceipt = key.startsWith("received-file:")
                                 editor.remove(key)
                                 return this
                             }
                             override fun commit(): Boolean {
+                                if (crashBeforeReceipt && writesReceipt && copies.singleOrNull()?.length() == 7L) {
+                                    crashBeforeReceipt = false
+                                    throw SimulatedProcessDeath()
+                                }
                                 if (rejectRemoval && removesReceipt) {
                                     rejectRemoval = false
                                     return false
@@ -78,19 +100,36 @@ class ReceivedFileRestartTest {
                 }
             }
         }
-        val copies = mutableListOf<File>()
         val published = mutableSetOf<Uri>()
         var crash = crashAfterPublication != null
+        val authority = if (safCrash) "test.documents" else "media"
+        if (safCrash) context.getSharedPreferences("settings", 0).edit()
+            .putString("receive-folder", "content://test.documents/tree/root").commit()
         // The system storage boundary writes real bytes; AppState and the HTTP client are real.
-        ShadowContentResolver.registerProviderInternal("media", object : ContentProvider() {
+        ShadowContentResolver.registerProviderInternal(authority, object : ContentProvider() {
             override fun onCreate() = true
+            override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+                check(method == "android:createDocument")
+                copies.add(File(context.cacheDir, "received-${copies.size}.bin"))
+                val uri = Uri.parse("content://test.documents/document/${copies.size}")
+                published.add(uri)
+                return Bundle().apply { putParcelable("uri", uri) }
+            }
             override fun insert(uri: Uri, values: ContentValues?): Uri {
                 copies.add(File(context.cacheDir, "received-${copies.size}.bin"))
                 return Uri.withAppendedPath(uri, copies.size.toString())
             }
-            override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
-                ParcelFileDescriptor.open(copies[uri.lastPathSegment!!.toInt() - 1],
-                    ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_TRUNCATE)
+            override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+                val descriptor = ParcelFileDescriptor.open(copies[uri.lastPathSegment!!.toInt() - 1],
+                    if (mode == "r") ParcelFileDescriptor.MODE_READ_ONLY else
+                        ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_TRUNCATE)
+                if (crashBeforeWrite) {
+                    crashBeforeWrite = false
+                    descriptor.close()
+                    throw SimulatedProcessDeath()
+                }
+                return descriptor
+            }
             override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int {
                 if (crash && crashAfterPublication == false) {
                     crash = false
@@ -105,9 +144,10 @@ class ReceivedFileRestartTest {
             }
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int =
                 if (copies[uri.lastPathSegment!!.toInt() - 1].delete()) 1 else 0
-            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
+            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
+                MatrixCursor(arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME))
             override fun getType(uri: Uri) = "application/octet-stream"
-        }.apply { attachInfo(context, ProviderInfo().apply { authority = "media" }) })
+        }.apply { attachInfo(context, ProviderInfo().apply { this.authority = authority }) })
         val gets = AtomicInteger()
         val acks = AtomicInteger()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -118,7 +158,7 @@ class ReceivedFileRestartTest {
             exchange.close()
         }
         server.createContext("/outbox/42/ack") { exchange ->
-            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null && !failRemoval) 503 else 204, -1)
+            exchange.sendResponseHeaders(if (acks.incrementAndGet() == 1 && crashAfterPublication == null && !failRemoval && !safCrash) 503 else 204, -1)
             exchange.close()
         }
         server.start()
@@ -132,7 +172,7 @@ class ReceivedFileRestartTest {
                 assertFailsWith<IOException> { state.receiveFile(item, state.client()!!) }
                 assertTrue(state.connectionError != null, "Receipt cleanup failure must be visible")
                 assertEquals(1, acks.get())
-            } else if (crashAfterPublication == null) {
+            } else if (crashAfterPublication == null && !safCrash) {
                 assertEquals(503, assertFailsWith<ProtocolRejectedException> {
                     state.receiveFile(item, state.client()!!)
                 }.code)
@@ -141,14 +181,15 @@ class ReceivedFileRestartTest {
                 assertFailsWith<SimulatedProcessDeath> { state.receiveFile(item, state.client()!!) }
                 assertEquals(0, acks.get())
             }
-            assertEquals("payload", copies.single().readText())
+            assertEquals(if (beforeWrite) "" else "payload", copies.single().readText())
 
             val reopened = AppState(context)
             assertTrue(reopened.messages.isEmpty(), "The chat session must remain disposable")
             reopened.receiveFile(item, reopened.client()!!)
-            assertEquals(if (crashAfterPublication == null) 2 else 1, acks.get())
+            assertEquals(if (crashAfterPublication == null && !safCrash) 2 else 1, acks.get())
             assertEquals(1, gets.get(), "A saved Item only needs another ACK")
             assertEquals(1, copies.size, "Restarting must not create another copy")
+            assertEquals("payload", copies.single().readText())
             assertEquals(1, published.size, "Recovery must finish publication before acknowledging")
             assertEquals(Delivery.DELIVERED, reopened.messages.single().delivery)
             assertTrue(preferences.all.keys.none { it.startsWith("received-file:") }, "An acknowledged receipt must be removed")
