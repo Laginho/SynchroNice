@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -36,7 +36,7 @@ ela.
 
 1. O módulo cliente baixa um Item de arquivo para um destino em stream, com o mesmo progresso e a mesma confirmação só depois do download completo que o download para arquivo tem hoje.
 2. Um download interrompido não confirma o Item ao PC.
-3. ❌ Um arquivo enviado pelo PC com o app aberto é gravado em `Download/SynchroNice` sem nenhum toque e aparece na galeria (se imagem) ou no gerenciador de arquivos. Falha na revisão: no SAF, o destino fica visível antes de seu primeiro recibo; se o processo morrer nesse intervalo, a retomada cria outra cópia. Após morte entre a criação SAF e o retorno da URI, a retomada não pode criar outra cópia nem sobrescrever um documento alheio. Antes de criar, persistir uma intenção ligada ao Par, id do Item e Pasta, com marcador aleatório exclusivo no nome pedido ao SAF. Só retomar automaticamente quando a consulta à Pasta encontrar exatamente um documento que preserve esse marcador; persistir seu `COLUMN_DOCUMENT_ID`/URI antes de escrever. Não remover o marcador por rename automático. Nome original, tamanho ou posição na listagem não provam identidade. Se o provedor alterar/ocultar o marcador, atrasar a consulta ou houver ambiguidade, manter o Item Pendente e mostrar erro recuperável: não escrever, apagar, criar outra cópia nem confirmar ao PC automaticamente.
+3. ✅ Um arquivo enviado pelo PC com o app aberto é gravado em `Download/SynchroNice` sem nenhum toque e aparece na galeria (se imagem) ou no gerenciador de arquivos. No SAF, o destino fica visível antes de seu primeiro recibo; se o processo morrer nesse intervalo, a retomada não pode criar outra cópia nem sobrescrever um documento alheio. Antes de criar, persistir uma intenção ligada ao Par, id do Item e Pasta, com marcador aleatório exclusivo no nome pedido ao SAF. Só retomar automaticamente quando a consulta à Pasta encontrar exatamente um documento que preserve esse marcador; persistir seu `COLUMN_DOCUMENT_ID`/URI antes de escrever. Não remover o marcador por rename automático. Nome original, tamanho ou posição na listagem não provam identidade. Se o provedor alterar/ocultar o marcador, atrasar a consulta ou houver ambiguidade, manter o Item Pendente e mostrar erro recuperável: não escrever, apagar, criar outra cópia nem confirmar ao PC automaticamente.
 4. A bolha mostra progresso animado durante o download, e depois a miniatura (imagem) ou nome, tipo e tamanho (outros).
 5. Dois arquivos com o mesmo nome ficam os dois na Pasta, sem sobrescrever.
 6. Tocar na bolha abre o arquivo no app padrão.
@@ -289,3 +289,28 @@ Stage 2.
 - Green: criação SAF normal usa diretamente a URI retornada por createDocument; apenas uma intenção creating: recuperada sem URI consulta o marcador. O callback existente persiste writing:URI antes da abertura do stream. Teste vermelho no commit 595dbf4, sem alterações no commit de código.
 - Gate completo passou: 44 Rust, 24 TypeScript, 56 protocolo Android e 22 app (146 testes), zero falhas; fmt/clippy, typecheck e lint passaram. Recuperação após crash e consultas ambíguas continuam cobertas. Log: %TEMP%/syn-014-normal-green.log. git diff --check passou.
 - Os débitos visuais anteriores permanecem; esta rodada corrige apenas o achado da quarta revisão. Stage 2 encerrado em to-review; revisão em sessão separada.
+
+#### Resolution (2026-09-26)
+
+Verdict: Approve
+
+- **Standards:** a persistência transitória dos recibos ainda não consta na
+  lista exaustiva do ADR-0002; o achado está isolado no `CLEAN-010`, fora dos
+  Primary files deste ticket. Nenhuma outra violação documentada. Os nomes
+  genéricos, estados codificados em `String`, helper de teste parametrizado e a
+  concentração de responsabilidades em `MainActivity.kt` são cheiros de
+  julgamento e não justificam refatoração aqui.
+- **Spec:** nenhum achado. A criação SAF normal usa a URI devolvida e persiste
+  `writing:<URI>` antes de abrir o stream; somente a retomada de `creating:`
+  consulta o marcador e permanece fail-closed para zero/múltiplos candidatos,
+  consulta carregando ou indisponível. Os sete critérios estão implementados.
+- **Red-green:** `9687784` prova que um provedor que normaliza o nome ainda deve
+  concluir a criação normal; o teste falhou na consulta indevida do marcador.
+  `5bc2762` passou a usar diretamente a URI retornada, sem alterar testes. As
+  rodadas anteriores registram as provas de stream, interrupção, crash,
+  deduplicação SAF e limpeza de recibos pelo laço real de escuta.
+- **Gate:** após rebase e integração com os Copiáveis da branch de sessão,
+  `gate.ps1` passou: fmt/clippy, 44 testes Rust, typecheck, 32 testes Node, 56
+  testes do protocolo Android e 23 do app, compilação e lint; zero falhas.
+- **Verificação visual:** permanece o `Débito humano` dos critérios 3–7 para
+  o QA conjunto no aparelho, conforme a regra do repositório.
