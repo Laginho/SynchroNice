@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -108,3 +108,7 @@ mostra a extensão (`PDF`) em vez do MIME cru (`application/pdf`). O gate comple
 passou depois dessa correção: 44 testes Rust, 24 TS, 56 do protocolo Android e 8
 JVM do app; fmt/clippy, typecheck e lint Android passaram. A separação original
 continua limpa: `47eeb37` contém só ticket + testes e `0a39464` não toca testes.
+
+#### Retomada Stage 2 (2026-09-26)
+
+- Red: `ReceivedFileRestartTest` usa AppState e cliente HTTP reais, servidor falso e provedor Android de teste com bytes em disco. Após publicação e ACK 503, recria AppState com as mesmas preferências; falha porque fez 2 GETs em vez de 1. `gate.ps1 -TestsOnly`: 9 testes do app, 1 falha; 44 Rust e 24 TS passaram, protocolo sem alterações. A primeira execução no sandbox não alcançou o Android por acesso a `C:\.android`; execução autorizada confirmou a falha comportamental.
