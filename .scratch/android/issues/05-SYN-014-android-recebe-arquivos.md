@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: reviewing
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -81,3 +81,30 @@ Critérios 3 a 7 são no aparelho: verificação manual.
 - Gate completo passou após a última alteração: 44 testes Rust, 24 TS, 56 do protocolo Android e 8 JVM do app; zero falhas. fmt/clippy, typecheck e lint Android passaram.
 - Referência de armazenamento: https://developer.android.com/training/data-storage/shared/media (publicação com IS_PENDING) e https://developer.android.com/reference/android/provider/DocumentsContract (SAF).
 - Débito humano: verificar critérios 3–7 no aparelho: presença na galeria/gerenciador, progresso e miniatura, nomes repetidos, abertura externa e troca/persistência da Pasta. Não havia aparelho conectado. O emulador SynchroNice_API37 foi iniciado, mas Computer Use recusou a inspeção com `Computer Use was not approved to use qemu-system-x86_64`; nenhuma validação visual foi declarada. Emulador encerrado após a tentativa.
+
+#### Revisão (2026-09-26) — reaberto
+
+Verdict: Reopen — o recebimento pode duplicar um Item depois de reiniciar; `Stage: to-implement`.
+
+**Standards:** nenhuma violação obrigatória. Os nomes genéricos e a limpeza de
+Sessão repetida são observações de cheiro, mas refatorá-los seria trabalho fora
+do critério que caiu.
+
+**Spec:** o fluxo publica o arquivo e guarda `item.id`/URI apenas na Sessão, em
+`ChatMessage` e `receivedFiles`. Se o Android matar o processo depois da
+publicação e antes ou durante o `ack`, a Sessão some, o Item continua Pendente no
+PC e a próxima abertura baixa outra cópia. Isso contraria a regra retomada de
+SYN-009: só o `ack` remove o Item, então um id já gravado precisa ser ignorado.
+
+**❌ Critério 3:** persistir o estado mínimo do Item recebido até o `ack` ter
+sucesso, ligado ao Par, para que uma nova `AppState` repita só a confirmação e
+não crie outro arquivo. O teste novo deve usar o app real com servidor falso:
+publicar o arquivo, falhar o primeiro `ack`, recriar `AppState` com o mesmo
+armazenamento e provar que a retomada manda o `ack` sem novo GET nem segunda
+cópia. Como exige teste novo, não é conserto de Stage 3.
+
+O achado pequeno do tipo de arquivo foi corrigido em `cc59aa9`: a bolha agora
+mostra a extensão (`PDF`) em vez do MIME cru (`application/pdf`). O gate completo
+passou depois dessa correção: 44 testes Rust, 24 TS, 56 do protocolo Android e 8
+JVM do app; fmt/clippy, typecheck e lint Android passaram. A separação original
+continua limpa: `47eeb37` contém só ticket + testes e `0a39464` não toca testes.
