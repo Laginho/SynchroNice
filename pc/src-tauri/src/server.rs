@@ -127,6 +127,26 @@ struct AppState {
     /// ponytail: um lock global basta para os uploads com id; particionar por
     /// id se envios paralelos do mesmo celular virarem gargalo mensurável.
     file_item_id_lock: Arc<tokio::sync::Mutex<()>>,
+    #[cfg(test)]
+    before_file_item_id_lock: Arc<Mutex<Option<TestPause>>>,
+    #[cfg(test)]
+    after_file_rename: Arc<Mutex<Option<TestPause>>>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestPause {
+    reached: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+async fn pause_once(slot: &Mutex<Option<TestPause>>) {
+    let pause = slot.lock().expect("pausa de teste sem panic").take();
+    if let Some(pause) = pause {
+        pause.reached.notify_one();
+        pause.resume.notified().await;
+    }
 }
 
 /// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
@@ -275,6 +295,10 @@ pub fn spawn(
                     received_files: received_files_da_thread,
                     accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
                     file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+                    #[cfg(test)]
+                    before_file_item_id_lock: Arc::new(Mutex::new(None)),
+                    #[cfg(test)]
+                    after_file_rename: Arc::new(Mutex::new(None)),
                 });
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
@@ -352,6 +376,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         Ok(id) => id,
         Err(status) => return status,
     };
+    #[cfg(test)]
+    pause_once(&state.before_file_item_id_lock).await;
     let _item_id_lock = if item_id.is_some() {
         Some(state.file_item_id_lock.lock().await)
     } else {
@@ -506,6 +532,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 
         match tokio::fs::rename(&temp_path_bg, &final_path_bg).await {
             Ok(()) => {
+                #[cfg(test)]
+                pause_once(&state.after_file_rename).await;
                 // Só agora o arquivo existe com o nome final: o sinal de fim
                 // não pode vir antes disso, ou a UI tentaria ler um caminho
                 // que ainda não existe.
@@ -736,4 +764,87 @@ fn random_suffix() -> String {
     let mut bytes = [0u8; 8];
     let _ = getrandom::fill(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+
+    fn file_request(id: &str, name: &str, body: &'static [u8]) -> Request {
+        Request::builder()
+            .method("POST")
+            .uri("/items/file")
+            .header("authorization", "Bearer segredo-de-teste")
+            .header("x-item-id", id)
+            .header("x-file-name", name)
+            .header("content-length", body.len())
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    fn test_pause() -> TestPause {
+        TestPause {
+            reached: Arc::new(tokio::sync::Notify::new()),
+            resume: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    #[test]
+    fn retry_espera_id_ser_registrado_apos_cancelar_handler() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let root = tempfile::tempdir().unwrap();
+            let pasta = root.path().join("pasta");
+            let finalization = test_pause();
+            let state = AppState {
+                token: TOKEN_FOR_TEST.to_string().into(),
+                items: Items::new(),
+                outbox: Outbox::new(root.path().join("outbox")).unwrap(),
+                presence: Presence::default(),
+                pasta: Arc::new(Mutex::new(Some(pasta.clone()))),
+                leases: Arc::new(Mutex::new(HashSet::new())),
+                received_files: Arc::new(Mutex::new(HashMap::new())),
+                accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
+                file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+                before_file_item_id_lock: Arc::new(Mutex::new(None)),
+                after_file_rename: Arc::new(Mutex::new(Some(finalization.clone()))),
+            };
+
+            let first = tokio::spawn(post_file(
+                State(state.clone()),
+                file_request("mesmo-id", "arquivo.bin", b"primeiro"),
+            ));
+            finalization.reached.notified().await;
+            first.abort();
+            assert!(first.await.unwrap_err().is_cancelled());
+
+            let before_retry_lock = test_pause();
+            *state
+                .before_file_item_id_lock
+                .lock()
+                .expect("pausa de teste sem panic") = Some(before_retry_lock.clone());
+            let retry = tokio::spawn(post_file(
+                State(state.clone()),
+                file_request("mesmo-id", "arquivo.bin", b"retry"),
+            ));
+            before_retry_lock.reached.notified().await;
+
+            assert!(
+                state.file_item_id_lock.try_lock().is_err(),
+                "a finalização deve manter o id reservado após cancelar o handler"
+            );
+            before_retry_lock.resume.notify_one();
+            finalization.resume.notify_one();
+
+            assert_eq!(retry.await.unwrap(), StatusCode::CREATED);
+            assert_eq!(state.items.snapshot().len(), 1);
+            assert_eq!(std::fs::read_dir(pasta).unwrap().count(), 1);
+        });
+    }
+
+    const TOKEN_FOR_TEST: &str = "segredo-de-teste";
 }
