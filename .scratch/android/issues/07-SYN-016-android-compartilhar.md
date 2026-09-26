@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -133,3 +133,5 @@ Verdict: Reopen — os critérios 2, 7 e 8 precisam de testes e correção.
   `tsc --noEmit`, 24 testes Node e `gradle check` com testes Kotlin, compilação
   e lint. A primeira tentativa falhou apenas porque o sandbox impediu o AGP de
   usar `C:\.android`; fora dele, o gate passou.
+
+- 2026-09-26 Proxy decidiu: ampliar apenas a costura HTTP do PC para deduplicar pelo id do remetente. Critérios 7 e 8 continuam reabertos para o stage 2.
