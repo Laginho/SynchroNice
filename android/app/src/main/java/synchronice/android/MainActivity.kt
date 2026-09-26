@@ -3,6 +3,10 @@ package synchronice.android
 import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.util.Size
+import android.widget.Toast
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
@@ -10,7 +14,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +37,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
@@ -45,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -69,6 +77,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import synchronice.protocolclient.FilePendingQueueStore
 import synchronice.protocolclient.Item
+import synchronice.protocolclient.ItemGoneException
 import synchronice.protocolclient.KnownAddressStore
 import synchronice.protocolclient.PairingInfo
 import synchronice.protocolclient.PendingItem
@@ -97,6 +106,9 @@ internal data class ChatMessage(
     val text: String,
     val outgoing: Boolean,
     val delivery: Delivery,
+    val file: Item.FileMeta? = null,
+    val uri: Uri? = null,
+    val progress: Int = 0,
 )
 
 internal class AppState(context: Context) {
@@ -115,6 +127,8 @@ internal class AppState(context: Context) {
     private var queueStore = FilePendingQueueStore(queueFile)
     private val outboundMutex = Mutex()
     private val receivedIds = mutableSetOf<Long>()
+    private val receivedFiles = mutableMapOf<Long, Long>()
+    internal val files = ReceivedFiles(appContext)
     private var nextMessageId = 1L
     private var clientFor: PairingInfo? = null
     private var protocolClient: ProtocolClient? = null
@@ -179,6 +193,7 @@ internal class AppState(context: Context) {
         online = false
         messages.clear()
         receivedIds.clear()
+        receivedFiles.clear()
         protocolClient = null
         clientFor = null
         return true
@@ -219,6 +234,7 @@ internal class AppState(context: Context) {
                             messages.clear()
                             submitted.clear()
                             receivedIds.clear()
+                            receivedFiles.clear()
                         }
                     }
                 }
@@ -363,6 +379,53 @@ internal class AppState(context: Context) {
 
     fun updateOnline(value: Boolean) {
         online = value
+    }
+
+    suspend fun receiveFile(item: Item.FileMeta, currentClient: ProtocolClient) = withContext(Dispatchers.Main.immediate) {
+        if (currentClient !== protocolClient) return@withContext
+        val id = receivedFiles.getOrPut(item.id) {
+            val id = nextMessageId++
+            messages.add(ChatMessage(id, item.name, false, Delivery.PENDING, file = item))
+            id
+        }
+        fun update(change: (ChatMessage) -> ChatMessage) {
+            if (currentClient !== protocolClient) throw IOException("Par alterado durante o download")
+            val index = messages.indexOfFirst { it.localId == id }
+            if (index >= 0) messages[index] = change(messages[index])
+        }
+        val savedUri = messages.firstOrNull { it.localId == id }?.uri
+        update { it.copy(delivery = Delivery.PENDING, progress = 0) }
+        try {
+            withContext(Dispatchers.IO) {
+                kotlinx.coroutines.runInterruptible {
+                    var lastProgress = -1
+                    if (savedUri != null) currentClient.acknowledgeFile(item)
+                    else files.receive(currentClient, item, onSaved = { uri ->
+                        kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                            update { it.copy(uri = uri) }
+                        }
+                    }, onProgress = { progress ->
+                        if (Thread.currentThread().isInterrupted) throw IOException("download interrompido")
+                        if (progress != lastProgress) {
+                            lastProgress = progress
+                            kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                                update { it.copy(progress = progress.coerceIn(0, 100)) }
+                            }
+                        }
+                    })
+                }
+            }
+            update { it.copy(delivery = Delivery.DELIVERED, progress = 100) }
+            connectionError = null
+        } catch (error: ItemGoneException) {
+            update { it.copy(delivery = if (it.uri != null) Delivery.DELIVERED else Delivery.FAILED) }
+        } catch (error: Exception) {
+            if (currentClient === protocolClient) {
+                update { it.copy(delivery = Delivery.FAILED) }
+                if (error !is CancellationException) connectionError = "Não foi possível receber ${item.name}: ${error.message}"
+            }
+            throw error
+        }
     }
 
     private fun setDelivery(id: Long, delivery: Delivery) {
@@ -511,9 +574,25 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit) {
 @Composable
 private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
+    var folder by remember { mutableStateOf(state.files.folder()) }
+    var folderError by remember { mutableStateOf<String?>(null) }
+    val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                state.files.chooseFolder(uri)
+                folder = uri
+                folderError = null
+            } catch (error: Exception) {
+                folderError = "Não foi possível mudar a Pasta: ${error.message}"
+            }
+        }
+    }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         TextButton(onClick = onBack) { Text("Voltar") }
         Text("Configurações", style = MaterialTheme.typography.headlineSmall)
+        Text(folder?.lastPathSegment ?: "Download/SynchroNice", modifier = Modifier.padding(top = 16.dp))
+        TextButton(onClick = { chooseFolder.launch(folder) }) { Text("Mudar pasta…") }
+        folderError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row(
             Modifier.fillMaxWidth().toggleable(
                 value = state.copyFormatted,
@@ -535,13 +614,38 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
 @Composable
 private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean) {
     val context = LocalContext.current
+    val file = message.file
+    val uri = message.uri
+    val animatedProgress by animateFloatAsState(message.progress / 100f, label = "download")
+    var thumbnail by remember(uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(uri) {
+        if (uri != null && file != null && fileMimeType(file.name).startsWith("image/")) {
+            thumbnail = withContext(Dispatchers.IO) {
+                try { context.contentResolver.loadThumbnail(uri, Size(480, 480), null) }
+                catch (_: IOException) { null }
+                catch (_: SecurityException) { null }
+            }
+        }
+    }
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.outgoing) Arrangement.End else Arrangement.Start,
     ) {
         Card(
-            modifier = Modifier.sizeIn(maxWidth = 320.dp).clickable(onClickLabel = "Copiar texto inteiro") {
-                copyText(context, message.text)
+            modifier = Modifier.sizeIn(maxWidth = 320.dp).clickable(
+                onClickLabel = if (uri == null) "Copiar texto inteiro" else "Abrir arquivo",
+            ) {
+                if (uri == null) copyText(context, message.text)
+                else try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, fileMimeType(message.text))
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    })
+                } catch (_: android.content.ActivityNotFoundException) {
+                    Toast.makeText(context, "Nenhum app pode abrir este arquivo.", Toast.LENGTH_LONG).show()
+                } catch (_: SecurityException) {
+                    Toast.makeText(context, "Não foi possível acessar este arquivo.", Toast.LENGTH_LONG).show()
+                }
             },
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(
@@ -549,7 +653,18 @@ private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean) {
             ),
         ) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                CopyableText(message.text, copyFormatted)
+                if (file == null) CopyableText(message.text, copyFormatted)
+                else {
+                    Text(message.text)
+                    thumbnail?.let { Image(it.asImageBitmap(), contentDescription = file.name, modifier = Modifier.sizeIn(maxWidth = 240.dp, maxHeight = 240.dp)) }
+                    Text("${fileMimeType(file.name)} · ${android.text.format.Formatter.formatFileSize(context, file.size)}", style = MaterialTheme.typography.labelSmall)
+                    if (message.delivery == Delivery.PENDING) {
+                        LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth())
+                        Text("Recebendo ${message.progress}%", style = MaterialTheme.typography.labelSmall)
+                    } else if (message.delivery == Delivery.FAILED) {
+                        Text("Falha ao receber; tentando novamente", color = MaterialTheme.colorScheme.error)
+                    }
+                }
                 if (message.outgoing) {
                     val label = when (message.delivery) {
                         Delivery.PENDING -> "Pendente"
@@ -631,7 +746,8 @@ private fun ConnectionLifecycle(state: AppState) {
                                     items.filterIsInstance<Item.Text>().forEach(state::receive)
                                 }
                                 items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }
-                                if (items.none { it is Item.Text }) delay(1_500)
+                                items.filterIsInstance<Item.FileMeta>().forEach { state.receiveFile(it, client) }
+                                if (items.isEmpty()) delay(1_500)
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (_: SocketTimeoutException) {

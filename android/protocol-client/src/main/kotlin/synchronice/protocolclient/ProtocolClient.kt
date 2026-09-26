@@ -283,15 +283,34 @@ class ProtocolClient(
      * resolvido.
      */
     fun downloadFile(item: Item.FileMeta, destination: File, onProgress: (Int) -> Unit = {}) {
-        val connection = open("/outbox/${item.id}/file", "GET")
         val partial = File(destination.absoluteFile.parentFile, "${destination.name}.part")
         try {
+            downloadFile(item, partial.outputStream(), onSaved = {
+                Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }, onProgress = onProgress)
+        } catch (e: Exception) {
+            partial.delete()
+            throw e
+        }
+    }
+
+    /** Fecha o stream e executa [onSaved] (publicação do destino) antes do ack.
+     * O chamador remove o destino parcial se a gravação falhar.
+     */
+    fun downloadFile(
+        item: Item.FileMeta,
+        destination: OutputStream,
+        onSaved: () -> Unit = {},
+        onProgress: (Int) -> Unit = {},
+    ) {
+        destination.use { output ->
+            val connection = open("/outbox/${item.id}/file", "GET")
             try {
                 val code = connection.responseCode
                 if (code == HttpURLConnection.HTTP_NOT_FOUND) throw ItemGoneException(item.id)
                 if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)
                 val received = connection.inputStream.use { input ->
-                    partial.outputStream().use { output -> pump(input, output, item.size, onProgress) }
+                    pump(input, output, item.size, onProgress)
                 }
                 if (received != item.size) {
                     throw IOException("download incompleto: esperado ${item.size} bytes, recebido $received")
@@ -299,14 +318,14 @@ class ProtocolClient(
             } finally {
                 connection.disconnect()
             }
-            Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            onProgress(100)
-        } catch (e: Exception) {
-            partial.delete()
-            throw e
         }
+        onSaved()
+        onProgress(100)
         ack(item.id)
     }
+
+    /** Repete apenas a confirmação de um arquivo já gravado, sem baixar outra cópia. */
+    fun acknowledgeFile(item: Item.FileMeta) = ack(item.id)
 
     /** Copia [input] para [output] em blocos de 8 KB, reportando o percentual de [total] a [onProgress]. */
     private fun pump(input: InputStream, output: OutputStream, total: Long, onProgress: (Int) -> Unit): Long {

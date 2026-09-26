@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -71,3 +71,13 @@ Critérios 3 a 7 são no aparelho: verificação manual.
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: SYN-014 ficou `blocked`, commit `5ea7fd9`, sem alterações de código. /  / Falta definir como identificar com segurança o arquivo SAF após crash, antes de receber sua URI. A proposta está no ticket. /  / Interrompi conforme [ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md): “Stage 2 that needs a decision […] sets `Stage: blocked`”.
 
 - 2026-09-26 Red: gate -TestsOnly falhou na compilação dos dois testes novos porque downloadFile só aceita File e não tem onSaved. Os 44 testes Rust e 24 testes TS passaram; testes JVM existentes do app estavam up-to-date. Primeira tentativa no sandbox falhou por C:\.android; repetição com acesso ao ambiente Android confirmou o red esperado.
+
+#### Stage 2 (2026-09-26)
+
+- Implementado download para OutputStream com fechamento, validação do tamanho e publicação antes do ACK. O caminho File reutiliza essa implementação e mantém o temporário; falhas não confirmam o Item. O app guarda a URI na Sessão após publicar para repetir só o ACK quando necessário.
+- Arquivos anunciados são recebidos automaticamente via MediaStore em Download/SynchroNice ou via SAF na Pasta escolhida. Destinos incompletos são removidos após falha; nomes repetidos preservam os arquivos existentes. A escolha da Pasta e a permissão persistente ficam fora do Par.
+- Bolhas recebidas mostram progresso animado, miniatura quando imagem, nome/tipo/tamanho e abrem via ACTION_VIEW com acesso temporário de leitura. A engrenagem oferece Mudar pasta….
+- Red-green: commit de testes `47eeb37` falha porque a API de stream ainda não existe; com a implementação, os dois testes passam, incluindo interrupção e falhas de fechamento/publicação sem ACK. Nenhum teste foi alterado no commit de implementação.
+- Gate completo passou após a última alteração: 44 testes Rust, 24 TS, 56 do protocolo Android e 8 JVM do app; zero falhas. fmt/clippy, typecheck e lint Android passaram.
+- Referência de armazenamento: https://developer.android.com/training/data-storage/shared/media (publicação com IS_PENDING) e https://developer.android.com/reference/android/provider/DocumentsContract (SAF).
+- Débito humano: verificar critérios 3–7 no aparelho: presença na galeria/gerenciador, progresso e miniatura, nomes repetidos, abertura externa e troca/persistência da Pasta. Não havia aparelho conectado. O emulador SynchroNice_API37 foi iniciado, mas Computer Use recusou a inspeção com `Computer Use was not approved to use qemu-system-x86_64`; nenhuma validação visual foi declarada. Emulador encerrado após a tentativa.
