@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -171,3 +171,4 @@ Verdict: Reopen — critérios 1 e 4 ainda falham.
 - 2026-09-26 Stage 2 bloqueado: o critério 4 exige que a presença acompanhe o ciclo autenticado de `/listen`, mas `ProtocolClient.listen()` e os testes desse ciclo não estão autorizados em `Primary files` (o escopo atual do cliente é só a leitura do QR). Stage 2 não pode ampliar a costura. Stage 1 deve autorizar o ciclo de `listen()` e definir seus testes de contrato antes de voltar a `to-implement`. Nenhum código ou teste foi alterado.
 
 - 2026-09-26 Proxy decidiu: autorizar apenas a costura de presença de `/listen` no cliente, no servidor PC e em seus testes, conforme Primary files e critério 4 acima. Com fila vazia, o GET autentica e bloqueia antes de responder; portanto o Android não pode inferir autenticação por resolução mDNS, conexão TCP ou início do GET. `HEAD /listen` confirma escuta autenticada sem mudar o long-poll nem o 401 de revogação. Testes de contrato vermelhos precedem a correção; nenhum outro comportamento do protocolo entra neste ticket.
+- 2026-09-26 Stage 2 test-only: adicionado o caso de número JSON inválido em campo extra e os contratos de presença. `gate.ps1 -TestsOnly`: Rust 37 passaram e o novo teste HEAD falhou por timeout (sem rota HEAD, a requisição cai no GET long-poll); Node 24 passaram. O Android não compilou: este ambiente só tem JDK 25/26, sem a toolchain 17 exigida pelo Gradle.

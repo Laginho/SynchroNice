@@ -94,6 +94,95 @@ fn rotacionar_descarta_pendentes_e_revoga_escuta_aberta() {
 }
 
 #[test]
+fn head_listen_confirma_presenca_sem_consumir_o_long_poll() {
+    let raiz = tempfile::tempdir().unwrap();
+    let par = Par::load_or_create(raiz.path()).unwrap();
+    let token = par.token();
+    let outbox = Outbox::new(raiz.path().join("outbox")).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        par,
+        Items::new(),
+        outbox.clone(),
+        None,
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        204
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some("token-errado"),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        401
+    );
+
+    let (online_tx, online_rx) = std::sync::mpsc::channel();
+    running.presence.on_change(move |online| {
+        if online {
+            let _ = online_tx.send(());
+        }
+    });
+    let listen_base = base.clone();
+    let listen_token = token.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        done_tx
+            .send(requisicao_crua(
+                &listen_base,
+                "GET",
+                "/listen",
+                Some(&listen_token),
+            ))
+            .unwrap();
+    });
+
+    online_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        200
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some("token-errado"),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        401
+    );
+    outbox.enqueue_text("entrega continua no GET".into()).unwrap();
+
+    let (status, body) = done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(status, 200);
+    assert!(String::from_utf8(body).unwrap().contains("entrega continua no GET"));
+}
+
+#[test]
 fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
     let raiz = tempfile::tempdir().unwrap();
     let pasta = raiz.path().join("pasta");
@@ -277,8 +366,23 @@ fn post_arquivo_sem_x_file_size(base: &str, nome: &str, bytes: &[u8]) -> u16 {
 /// lugar — cobre tanto o corpo simples de `/listen` quanto os bytes crus de
 /// `/outbox/{id}/file`.
 fn requisicao_crua(base: &str, metodo: &str, path: &str, token: Option<&str>) -> (u16, Vec<u8>) {
+    requisicao_crua_com_timeout(base, metodo, path, token, None)
+}
+
+fn requisicao_crua_com_timeout(
+    base: &str,
+    metodo: &str,
+    path: &str,
+    token: Option<&str>,
+    timeout: Option<Duration>,
+) -> (u16, Vec<u8>) {
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
     let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    if timeout.is_some() {
+        stream
+            .set_read_timeout(timeout)
+            .expect("configura timeout da resposta");
+    }
     let auth = token
         .map(|t| format!("Authorization: Bearer {t}\r\n"))
         .unwrap_or_default();

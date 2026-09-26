@@ -230,6 +230,45 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `consulta presenca de listen usa HEAD autenticado e so confirma 200`() {
+        val port = freePort()
+        val status = java.util.concurrent.atomic.AtomicInteger(204)
+        val requests = mutableListOf<Pair<String, String?>>()
+        val server = fakeServer(port, "/listen") { exchange ->
+            requests.add(exchange.requestMethod to exchange.requestHeaders.getFirst("Authorization"))
+            exchange.sendResponseHeaders(status.get(), -1)
+            exchange.close()
+        }
+        try {
+            val receiver = client(port)
+            assertFalse(receiver.isListening())
+            status.set(200)
+            assertTrue(receiver.isListening())
+            assertEquals(
+                listOf("HEAD" to "Bearer $TOKEN", "HEAD" to "Bearer $TOKEN"),
+                requests,
+            )
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `presenca de listen nao e confirmada em 401 ou falha de rede`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        try {
+            assertEquals(401, assertFailsWith<ProtocolRejectedException> { client(port).isListening() }.code)
+        } finally {
+            server.stop(0)
+        }
+        assertFalse(client(freePort()).isListening())
+    }
+
+    @Test
     fun `servidor indisponivel deixa o Item Pendente e envia ao reconectar`() {
         val port = freePort()
         val client = client(port)
