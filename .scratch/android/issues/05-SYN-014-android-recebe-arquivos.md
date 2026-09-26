@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -201,3 +201,35 @@ Gate completo: a primeira chamada parou apenas porque o sandbox não podia
 gravar em `C:\.android`; repetido com acesso ao ambiente Android, passou com 44
 testes Rust, 24 Node e `gradle check` verde (56 testes do protocolo e 14 do app
 nos relatórios), além de fmt, clippy, typecheck e lint.
+
+#### Stage 2 (2026-09-26) — decisão necessária sobre recuperação SAF
+
+- Inspeção: `ReceivedFiles.receive` cria o documento antes de `onCreated`;
+  `AppState.receiveFile` só então persiste sua URI. A terceira revisão identifica
+  corretamente essa janela. Ainda não houve alteração de código ou testes.
+- A API `DocumentsContract.createDocument` recebe Pasta, MIME e nome, e só
+  devolve a identidade atribuída pelo provedor depois da criação. Não oferece
+  chave de idempotência nem transação conjunta com as preferências do app.
+  `COLUMN_DISPLAY_NAME` é um título; a identidade é `COLUMN_DOCUMENT_ID`.
+  Referências: https://developer.android.com/reference/android/provider/DocumentsContract
+  e https://developer.android.com/reference/android/provider/DocumentsContract.Document.
+- Inferência: uma intenção persistida antes da chamada permite procurar o
+  nome escolhido depois do crash, mas não prova que um documento com esse nome
+  foi criado por esta tentativa. Outro escritor pode criá-lo no intervalo;
+  retomá-lo com `wt` pode sobrescrever um arquivo alheio. Um marcador no nome
+  diminui essa ambiguidade, mas altera a convenção de nomes e precisa de um
+  contrato para provedores que ajustam nomes. Renomear também pode trocar a URI.
+- **Pergunta para Stage 1:** podemos limitar a recuperação automática SAF a
+  provedores que preservam o nome solicitado e tornam a criação imediatamente
+  consultável, assumindo ausência de alterações externas na Pasta durante essa
+  operação? Nesse contrato, a solução mínima é persistir Pasta/nome reservado
+  antes de criar, recuperar sua URI por consulta e retomar o mesmo destino.
+  Se não, definir a identidade recuperável permitida (por exemplo, marcador
+  visível no nome) e o comportamento diante de recuperação ambígua, sem
+  sobrescrever nem confirmar um arquivo que não se pode identificar.
+- A limpeza após ACK segue pendente e deve ser coberta pelo laço real de
+  escuta, como exigido na terceira revisão. Não foi corrigida nesta sessão:
+  `ticket-flow` determina interromper Stage 2 quando falta decisão no contrato.
+- Sem gate nesta sessão: apenas registro de bloqueio; nenhuma nova alegação
+  de red-green ou validação visual. Retomar na branch `syn-014` após incorporar
+  a decisão ao contrato e voltar a `Stage: to-implement`.
