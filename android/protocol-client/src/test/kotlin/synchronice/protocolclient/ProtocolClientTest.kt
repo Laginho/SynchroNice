@@ -6,6 +6,9 @@ import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -227,6 +230,126 @@ class ProtocolClientTest {
         } finally {
             server.stop(0)
         }
+    }
+
+    @Test
+    fun `consulta presenca de listen usa HEAD autenticado e so confirma 200`() {
+        val port = freePort()
+        val status = java.util.concurrent.atomic.AtomicInteger(204)
+        val requests = mutableListOf<Pair<String, String?>>()
+        val server = fakeServer(port, "/listen") { exchange ->
+            requests.add(exchange.requestMethod to exchange.requestHeaders.getFirst("Authorization"))
+            exchange.sendResponseHeaders(status.get(), -1)
+            exchange.close()
+        }
+        try {
+            val receiver = client(port)
+            assertFalse(receiver.isListening())
+            status.set(200)
+            assertTrue(receiver.isListening())
+            status.set(204)
+            assertFalse(receiver.isListening())
+            assertEquals(
+                listOf<Pair<String, String?>>(
+                    "HEAD" to "Bearer $TOKEN",
+                    "HEAD" to "Bearer $TOKEN",
+                    "HEAD" to "Bearer $TOKEN",
+                ),
+                requests,
+            )
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `listen sem Itens nao expira depois de trinta segundos`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            try {
+                Thread.sleep(31_000)
+                exchange.sendResponseHeaders(200, -1)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<List<Item>> { client(port).listen() }
+
+            assertEquals(emptyList(), result.get(35, TimeUnit.SECONDS))
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `listen abandona uma conexao silenciosa para poder resolver o PC novamente`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            try {
+                Thread.sleep(42_000)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<List<Item>> { client(port).listen() }
+            val failure = assertFailsWith<java.util.concurrent.ExecutionException> {
+                result.get(40, TimeUnit.SECONDS)
+            }
+            assertTrue(failure.cause is java.net.SocketTimeoutException)
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `fechar escuta encerra GET ativo sem esperar timeout`() {
+        val port = freePort()
+        val entered = CountDownLatch(1)
+        val server = fakeServer(port, "/listen") { exchange ->
+            entered.countDown()
+            try {
+                Thread.sleep(10_000)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val receiver = client(port)
+            val result = executor.submit<List<Item>> { receiver.listen() }
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+
+            receiver.closeListen()
+
+            val failure = assertFailsWith<java.util.concurrent.ExecutionException> {
+                result.get(3, TimeUnit.SECONDS)
+            }
+            assertTrue(failure.cause is IOException)
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `presenca de listen nao e confirmada em 401 ou falha de rede`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        try {
+            assertEquals(401, assertFailsWith<ProtocolRejectedException> { client(port).isListening() }.code)
+        } finally {
+            server.stop(0)
+        }
+        assertFalse(client(freePort()).isListening())
     }
 
     @Test

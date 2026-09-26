@@ -64,13 +64,13 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
+1. ✅ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
-5. Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
+4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. A prova de lifecycle chama um helper interno, não o comportamento observável da Activity.
+5. ❌ Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear. A implementação limita e fecha a escuta, mas a prova de lifecycle ainda chama um helper interno em vez da costura observável.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
-7. Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
+7. ❌ Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue. A implementação concilia cada bolha, mas o teste da entrega parcial chama diretamente o helper interno e não prova o estado observável do app.
 8. Com o PC fora da rede, o texto digitado fica Pendente e é entregue quando o PC volta, com o app aberto.
 9. O chat vazio mostra uma instrução de uso.
 
@@ -95,8 +95,21 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   autenticado ativo, 204 sem escuta e 401 com token errado; o GET continua
   entregando Itens e a rotação continua revogando a escuta. Novos testes em
   commit próprio, vermelhos antes da correção.
+- Na terceira reabertura, `PairingInfoTest.kt` rejeita U+0001 cru numa string
+  extra; `ProtocolClientTest.kt` mantém o long-poll vazio por mais de 30 s e
+  consulta presença em 204, 200 e 204; `PresenceLifecycleTest.kt` verifica o
+  reset de presença ao iniciar e cancelar um ciclo RESUMED.
+- Na quinta reabertura, `PairingInfoTest.kt` rejeita whitespace fora do conjunto
+  JSON entre tokens (por exemplo U+000B), com os três campos obrigatórios válidos.
 
 ## Comments
+
+- 2026-09-26 Stage 2 (sexta reabertura) concluído: `f94a90b` contém só testes e configuração de teste; o vermelho funcional foi a presença ainda verdadeira após `MainActivity.resume()`, antes de nova confirmação de `/listen`. `4674863` limpa a presença no `ON_RESUME` e remove o helper de teste sem uso. `gate.ps1 -TestsOnly` e o gate completo passaram: 38 Rust, 24 Node e 45 Kotlin (43 cliente, 2 app), além de fmt, clippy, typecheck e lint Android. O Débito humano dos critérios 3–9 permanece.
+
+- 2026-09-26 Stage 2 (sexta reabertura): testes agora atravessam a Activity real em `PresenceLifecycleTest.kt` e o `AppState` com HTTP falso em `PendingDeliveryTest.kt`, sem chamar os helpers internos. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: a Activity deixa `online = true` após `resume` antes de uma nova confirmação de `/listen`; o teste de entrega parcial passou. Rust e Node passaram (38 e 24 testes).
+
+- 2026-09-26 Stage 2 (quinta reabertura): teste do QR com tab vertical entre campos e após a porta. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: 43 testes do cliente Android, 1 falhou (`whitespace fora do JSON e recusado no QR`); os testes Rust e Node passaram.
+- 2026-09-26 Stage 2 concluído: `skipWhitespace()` agora aceita apenas espaço, tab, CR e LF, conforme JSON. Gate completo verde: 38 testes Rust, 24 Node e 45 Kotlin (43 no cliente, 2 no app), além de fmt, clippy, typecheck e lint Android. `git diff --check` passou. O Débito humano dos critérios 3–9 permanece.
 
 - 2026-09-24 Attempt 1 failed: exit 0. Log tail: Encontrei SYN-012 em `Stage: to-implement`, com árvore de trabalho limpa. O binding do repositório atribui o stage 2 ao **gpt-6-luna max**, mas esta sessão não está identificada como esse modelo. Pelo `ticket-flow`, devo parar sem implementar; o próximo passo é executar SYN-012 com gpt-6-luna max.
 
@@ -133,3 +146,118 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-26 Review ended at to-review (exit 0); branch syn-012 holds the review; left for a human
 
 - 2026-09-26 Proxy: bloqueio falso de modelo. O driver lançou stage 3 com `gpt-5.6-sol high`, conforme o binding atualizado na sessão; o reviewer leu o `AGENTS.md` antigo da branch `syn-012`. O commit `94c172f` atualizou essa branch. Retomar o review em `to-review`.
+
+- 2026-09-25 Attempt 4 stopped: escrevi os casos do parser do QR em `PairingInfoTest.kt`, mas não consegui provar o vermelho. O gate passou nos 37 testes Rust e 24 Node; o passo Android nem iniciou porque a distribuição Gradle 9.4.1 não está no cache desta sessão e o download de `services.gradle.org` expirou, inclusive com timeout de 60 segundos. Os testes Kotlin seguem sem execução. Para retomar, disponibilize Gradle 9.4.1 no `GRADLE_USER_HOME` da sessão ou restabeleça o acesso ao host e rode `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly`; então confirme o vermelho antes de implementar.
+
+- 2026-09-25 Proxy decided: ambiente destravado. Gradle 9.4.1 oficial está em `C:\Users\bruno\AppData\Local\Temp\SynchroNice-gradle-home`, com SHA-256 validado, e `android/local.properties` aponta para o SDK instalado. Com `GRADLE_USER_HOME` nesse cache, `gate.ps1 -TestsOnly` passou na base, inclusive nos testes Android. Retomar aqui em `1262762` e confirmar o vermelho dos novos casos de QR antes de implementar.
+
+- 2026-09-25 Proxy decided: a tentativa 4 foi um falso bloqueio de modelo. O driver lançou `codex exec --model gpt-6-luna --config model_reasoning_effort=max`, conforme o binding; falta de autoidentificação não indica incompatibilidade. Guard do `ticket-flow` esclarecido. `Stage: to-implement` já estava preservado nesta branch; retomar e confirmar o vermelho dos testes em `1262762`.
+
+- 2026-09-25 Stage 2: o gate ficou vermelho antes do parser (`parsePairingQr` não resolvido) e passou depois da implementação. `gate.ps1 -TestsOnly` passou com 37 testes Rust, 24 Node e 34 Kotlin; o gate completo também passou, incluindo lint Android. A tag `keep/syn-012` citada acima não existe neste checkout.
+
+- Débito humano: critérios 3–9 não foram verificados no app/aparelho. O Computer Use disponível retornou apenas Chrome, sem superfície de apps nativos; por isso o APK não foi instalado/aberto no AVD e a câmera, o pareamento, mDNS, entrega de textos e reconexão continuam sem verificação manual.
+
+- 2026-09-26 Stage 2: `3694c60` é o commit só de testes. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: 37 testes Rust e 24 Node passaram; em 35 testes Kotlin, só `escape JSON invalido e recusado mesmo em campo extra` falhou porque `parsePairingQr` aceitou `\q`. `e4662ea` rejeita escapes fora do conjunto JSON; o mesmo gate ficou verde, com 37 Rust, 24 Node e 35 Kotlin. A correção do indicador segue o ciclo de `/listen`; mDNS continua resolvendo endereços e acionando a fila, sem definir presença.
+
+- Gate completo passou: `cargo fmt --check`, `cargo clippy`, 37 testes Rust, `tsc --noEmit`, 24 testes Node, 35 testes Kotlin e `gradle check` do app Android. Ambiente: JDK 17 em `C:\Users\bruno\.jdks\jdk-17.0.20.1+1`, Gradle em `C:\Users\bruno\AppData\Local\Temp\SynchroNice-gradle-home`; `JAVA_TOOL_OPTIONS` apontou `user.home` ao diretório temporário gravável. O Kotlin daemon não abriu seu diretório em AppData e usou compilação de fallback; o gate terminou com sucesso.
+
+#### Review (2026-09-26)
+
+Verdict: Reopen — critérios 1 e 4 falharam.
+
+- Standards: nenhuma violação atual de regra documentada. `AppState` concentra estado de Par, rede e chat (possível Divergent Change; sem refatoração neste ticket).
+- Spec: `FlatJson.kt` aceita um escape JSON inválido em campo extra e `parsePairingQr` cria o Par; o teste novo deve falhar por esse motivo. O teste existente de porta fora da faixa usa token inválido, então não isola a porta. `MainActivity.kt` usa resolução mDNS como presença, embora o ticket exija a conexão de escuta.
+- Gate: PC fmt/clippy, 24 testes Node e Android `:app:check` passaram; Android `:protocol-client:test` passou com 34 testes (4 QR, 30 cliente). O gate completo falhou em `pc/src-tauri/tests/server.rs::escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar` por conexão abortada (Windows 10053) em duas execuções; o mesmo teste havia passado na primeira execução. Sem mudança nesse código neste ticket.
+- Verificação visual: Computer Use listou apps Windows, sem emulador ou app Android para inspecionar; o Débito humano acima permanece.
+
+#### Review (2026-09-26, segunda rodada)
+
+Verdict: Reopen — critérios 1 e 4 ainda falham.
+
+- Standards: nenhuma violação documentada. Possível Divergent Change em `MainActivity.kt` (Par, rede e UI no mesmo arquivo); não refatorar neste ticket.
+- Critério 1: `parseFlatJsonObject` aceita `"extra":1-2` como número; com os três campos obrigatórios válidos, `parsePairingQr` cria o Par a partir de JSON inválido. Exige teste novo vermelho antes da correção.
+- Critério 4: `MainActivity.kt` marca `online = true` antes de `client.listen()` resolver o endereço, conectar e autenticar. O indicador pode afirmar "Na rede" com o PC indisponível. Para refletir a conexão de `/listen`, a costura de `ProtocolClient.listen()` precisa entrar em Primary files pela stage 1 antes da implementação.
+- O tratamento de HTTP 401 que esquece o Par está coberto por SYN-013, critério 5; não é achado deste ticket.
+- Gate completo: passou `cargo fmt --check`, `cargo clippy`, 37 testes Rust, `tsc --noEmit`, 24 testes Node, 35 testes Kotlin e `:app:check` (incluindo lint). `git diff --check` passou.
+- Verificação no aparelho: `adb devices` não iniciou por falta de permissão para criar `\\.android`; permanece o Débito humano acima.
+
+- 2026-09-26 Stage 2 bloqueado: o critério 4 exige que a presença acompanhe o ciclo autenticado de `/listen`, mas `ProtocolClient.listen()` e os testes desse ciclo não estão autorizados em `Primary files` (o escopo atual do cliente é só a leitura do QR). Stage 2 não pode ampliar a costura. Stage 1 deve autorizar o ciclo de `listen()` e definir seus testes de contrato antes de voltar a `to-implement`. Nenhum código ou teste foi alterado.
+
+- 2026-09-26 Proxy decidiu: autorizar apenas a costura de presença de `/listen` no cliente, no servidor PC e em seus testes, conforme Primary files e critério 4 acima. Com fila vazia, o GET autentica e bloqueia antes de responder; portanto o Android não pode inferir autenticação por resolução mDNS, conexão TCP ou início do GET. `HEAD /listen` confirma escuta autenticada sem mudar o long-poll nem o 401 de revogação. Testes de contrato vermelhos precedem a correção; nenhum outro comportamento do protocolo entra neste ticket.
+- 2026-09-26 Stage 2 test-only: adicionado o caso de número JSON inválido em campo extra e os contratos de presença. `gate.ps1 -TestsOnly`: Rust 37 passaram e o novo teste HEAD falhou por timeout (sem rota HEAD, a requisição cai no GET long-poll); Node 24 passaram. O Android não compilou: este ambiente só tem JDK 25/26, sem a toolchain 17 exigida pelo Gradle.
+
+- 2026-09-26 Proxy: stage 2 expirou após 45 minutos. Os testes ficaram nos commits `9efe6a5` e `6c05a96`; o diff de implementação não commitado foi salvo em `.scratch/run-log/SYN-012-rescue-20260926-1032.patch` e restaurado sem alterações no commit WIP `5db2386`. O gate Android estava em execução no timeout, portanto o verde desse diff ainda não foi comprovado. Retomar a implementação e a verificação a partir desses commits.
+- 2026-09-26 Stage 2 concluído: o vermelho em `6c05a96` confirmou a rota HEAD ausente (o pedido caiu no GET long-poll e expirou) e a API `isListening()` ausente (falha de compilação dos testes Kotlin). Com a implementação, `gate.ps1 -TestsOnly` passou e o gate completo passou: 38 testes Rust, 24 Node, 38 Kotlin, `tsc --noEmit`, clippy/fmt e `:app:check` com compilação e lint. `8add947` só formatou o novo teste Rust, sem alterar asserções. O débito humano dos critérios 3–9 registrado acima continua pendente.
+
+#### Review (2026-09-26, terceira rodada)
+
+Verdict: Reopen — critérios 1 e 4 ainda precisam de testes e correção.
+
+- Standards: nenhuma violação de regra documentada. Possível Divergent Change em `MainActivity.kt`, já registrado nas revisões anteriores; fora do escopo desta correção.
+- Critério 1: `parseJsonString` aceita U+0000–U+001F sem escape dentro de string JSON. Um campo extra assim invalida o QR, mas `parsePairingQr` ainda cria o Par. Novo teste vermelho em `PairingInfoTest.kt` antes da correção.
+- Critério 4: `repeatOnLifecycle(RESUMED)` cancela seu bloco ao pausar, mas `state.updateOnline(false)` só roda depois que `repeatOnLifecycle` retorna; ao reabrir, "Na rede" pode ficar visível antes da próxima consulta HEAD. O GET `/listen` herda `readTimeout = 30_000` e expira com a fila vazia; o catch apaga a presença e aguarda antes de reabrir. Cobrir esses ciclos com teste antes da correção.
+- Gate completo nesta revisão: passou com 38 testes Rust, 24 Node, 38 Kotlin, fmt/clippy, `tsc --noEmit` e `:app:check` com lint. `git diff --check` passou. O débito humano dos critérios 3–9 permanece.
+
+- 2026-09-26 Stage 2 (terceira reabertura): `ff0cf37` contém só os testes. `gate.ps1 -TestsOnly` confirmou o vermelho: o parser aceitava controle cru e `listen()` expirava com `SocketTimeoutException` aos 30 s; o teste de ciclo de vida dependia do reset ainda ausente. `fefe8d4` corrige o parser, mantém o long-poll aberto e limpa a presença no início e no cancelamento de cada período RESUMED. O mesmo gate passou com 38 testes Rust, 24 Node, 40 do protocolo Android e 1 teste Android da Activity.
+
+- Gate completo após rebase na branch de sessão: passou `cargo fmt --check`, `cargo clippy`, 38 testes Rust, `tsc --noEmit`, 24 Node e 41 testes Kotlin; `gradle check` passou, incluindo lint Android.
+
+- Débito humano: os critérios 3–9 ainda não foram conferidos no Android real ou emulador. O Computer Use retornou `apps=[]` e somente abas do Chrome, sem janela nativa para abrir o app.
+
+#### Review (2026-09-26, quarta rodada)
+
+Verdict: Reopen — critérios 5 e 7 precisam de testes e correção.
+
+- Standards: a regra de testes da spec pede comportamento externo, mas `PresenceLifecycleTest.kt` chama diretamente `clearPresenceDuringLifecycleCycle` com estados simulados. O teste não prova que a Activity encerra a escuta ao sair do chat. É uma costura de teste a corrigir no stage 2; a concentração de estado e UI em `MainActivity.kt` continua um possível Divergent Change, sem refatoração neste ticket.
+- Critério 5: `ProtocolClient.listen()` tem `readTimeout = 0`; `ConnectionLifecycle` só abre outro GET depois que o atual termina. Uma conexão silenciosa que permaneça aberta após a troca de IP impede a nova resolução para a escuta. Cobrir reconexão e fechamento da escuta no ciclo de vida por comportamento observável antes da correção.
+- Critério 7: `AppState.retryPending()` marca bolhas Entregue somente se toda a fila esvaziar. Se A foi confirmado e B segue Pendente, A fica com o estado errado. Cobrir entrega parcial na UI ou no estado do app antes da correção.
+- Gate completo: passou `cargo fmt --check`, `cargo clippy`, 38 testes Rust, `tsc --noEmit`, 24 testes Node e `gradle check` com compilação e lint Android. As tarefas de teste Gradle estavam atualizadas; a execução anterior registrada acima contou 41 testes Kotlin. `git diff --check` passou.
+- Verificação no aparelho: `adb devices` ainda falha ao criar `\\.android` por permissão. Permanece o Débito humano registrado acima.
+
+- 2026-09-26 Stage 2 (quarta reabertura): `a80b1f7` contém só os testes para reconexão após GET silencioso e entrega parcial; `gate.ps1 -TestsOnly` ficou vermelho na compilação porque `reconcilePendingDelivery` ainda não existia. `9564381` limita a escuta ociosa a 35 s e concilia cada bolha enviada com o prefixo confirmado da fila, inclusive quando a próxima mensagem continua Pendente. `6afbef3` contém só o teste de fechamento imediato do GET; o mesmo gate ficou vermelho pela API `closeListen` ausente. `d197a47` desconecta o GET ao pausar/sair do chat e limpa a presença. Depois, `gate.ps1 -TestsOnly` passou com 38 testes Rust, 24 Node e 44 Kotlin (42 no cliente do protocolo, 2 no app).
+
+- Gate completo passou: `cargo fmt --check`, `cargo clippy`, 38 testes Rust, `tsc --noEmit`, 24 testes Node e `gradle check` com 44 testes Kotlin, compilação e lint Android. `git diff --check` passou. O Débito humano dos critérios 3–9 registrado acima permanece para verificação no aparelho.
+
+#### Review (2026-09-26, quinta rodada)
+
+Verdict: Reopen — o critério 1 ainda aceita whitespace inválido em JSON.
+
+- Standards: nenhuma violação documentada. Os Pendentes reaparecerem no chat
+  é exigido pela spec ("sempre, os Pendentes da fila"), apesar de a Sessão comum
+  ser descartável. `MainActivity.kt` continua um possível Divergent Change e
+  repete o tratamento de `ProtocolRejectedException`; sem refatorar neste ticket.
+- Critério 1: `skipWhitespace()` usa `Char.isWhitespace()`, que aceita caracteres
+  como U+000B entre tokens. JSON permite somente espaço, tab, CR e LF; portanto um
+  QR sintaticamente inválido ainda pode criar o Par. `PairingInfoTest.kt` precisa
+  provar o vermelho antes da correção mínima em `FlatJson.kt`.
+- Escopo: a alteração equivalente de modelos em `AGENTS.md` já está na branch
+  de sessão e será descartada pelo rebase; não é mudança funcional deste ticket.
+- Verificação: o gate completo verde do stage 2 está registrado acima;
+  `git diff --check` passou nesta revisão. O Débito humano dos critérios 3–9
+  permanece.
+
+#### Review (2026-09-26, sexta rodada)
+
+Verdict: Reopen — a prova automatizada dos critérios 4, 5 e 7 usa funções
+internas em vez do comportamento observável.
+
+- Standards: `PendingDeliveryTest.kt` chama `reconcilePendingDelivery()` e
+  `PresenceLifecycleTest.kt` chama `clearPresenceDuringLifecycleCycle()`.
+  Isso viola a decisão de testes da spec: "Um teste bom exercita comportamento
+  externo" e "Nunca funções internas". O segundo ainda simula lifecycle, que a
+  mesma seção deixa fora do teste automático. A correção precisa substituir
+  essas provas por uma costura observável autorizada; como exige teste novo,
+  volta ao stage 2.
+- Spec: nenhuma falha estática nova nos critérios 1–9. Os critérios 3–9
+  continuam com o `Débito humano` de verificação no aparelho. A alteração
+  de modelos em `AGENTS.md` aparece no diff de três pontos porque a branch
+  divergiu antes do commit equivalente em `main`; o conteúdo atual dos dois
+  arquivos é idêntico, portanto não há mudança ali a levar ao merge.
+- Smells (julgamento, sem refatorar neste ticket): possível Divergent Change em
+  `MainActivity.kt`; `clearPresenceDuringLifecycleCycle()` é Speculative
+  Generality criada para o teste interno; `submitted` é um Mysterious Name.
+- Gate completo verde com JDK 17 e o diretório de usuário Android temporário:
+  38 testes Rust, 24 Node e `gradle check` (testes Kotlin, compilação e lint).
+  `git diff --check` passou. O primeiro gate sem essas variáveis falhou apenas
+  porque o AGP tentou usar `C:\.android`; a segunda tentativa encontrou a mesma
+  limitação de ambiente para autodetectar o JDK 17.

@@ -31,6 +31,9 @@
 //!                                 para continuar escutando. A conexão viva
 //!                                 é o sinal de presença.
 //!   Authorization: Bearer <token>
+//!   HEAD /listen                 200 se há GET autenticado ativo; 204 se
+//!                                 não há; 401 com token inválido.
+//!   Authorization: Bearer <token>
 //!
 //!   GET  /outbox/{id}/file       bytes de um Item de arquivo ainda
 //!                                 Pendente; 404 se o id não existir ou já
@@ -284,7 +287,7 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/items/text", post(post_text))
         .route("/items/file", post(post_file))
-        .route("/listen", get(get_listen))
+        .route("/listen", get(get_listen).head(head_listen))
         .route("/outbox/{id}/file", get(get_outbox_file))
         .route("/outbox/{id}/ack", post(post_outbox_ack))
         .with_state(state)
@@ -511,6 +514,17 @@ async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl I
         .collect::<Vec<_>>()
         .join("\n");
     (StatusCode::OK, corpo).into_response()
+}
+
+async fn head_listen(State(state): State<AppState>, headers: HeaderMap) -> StatusCode {
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    if state.presence.get() {
+        StatusCode::OK
+    } else {
+        StatusCode::NO_CONTENT
+    }
 }
 
 /// Bytes de um Item de arquivo ainda Pendente na fila de saída.
