@@ -391,6 +391,7 @@ private fun ConnectionLifecycle(state: AppState) {
     DisposableEffect(lifecycle, pairing) {
         val client = state.client()
         val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) state.updateOnline(false)
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
                 state.updateOnline(false)
                 client?.closeListen()
@@ -406,8 +407,9 @@ private fun ConnectionLifecycle(state: AppState) {
     LaunchedEffect(lifecycle, pairing) {
         val currentPair = pairing ?: return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            clearPresenceDuringLifecycleCycle(state::updateOnline) cycle@{
-                val client = state.client() ?: return@cycle
+            state.updateOnline(false)
+            try {
+                val client = state.client() ?: return@repeatOnLifecycle
                 coroutineScope {
                     launch(Dispatchers.IO) {
                         while (isActive) {
@@ -472,19 +474,9 @@ private fun ConnectionLifecycle(state: AppState) {
                         }
                     }
                 }
+            } finally {
+                state.updateOnline(false)
             }
         }
-    }
-}
-
-internal suspend fun clearPresenceDuringLifecycleCycle(
-    updateOnline: (Boolean) -> Unit,
-    block: suspend () -> Unit,
-) {
-    updateOnline(false)
-    try {
-        block()
-    } finally {
-        updateOnline(false)
     }
 }
