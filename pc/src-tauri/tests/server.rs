@@ -605,6 +605,24 @@ fn retry_apos_cancelar_resposta_na_finalizacao_nao_duplica_arquivo() {
     let (base, items, _outbox, raiz) = sobe();
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
     let body = vec![b'A'; 32 * 1024 * 1024];
+    let connection = std::sync::Arc::new(std::sync::Mutex::new(None::<TcpStream>));
+    let connection_on_progress = connection.clone();
+    let (cancelled_tx, cancelled_rx) = std::sync::mpsc::channel();
+    let expected_size = body.len() as u64;
+    items.on_new(move |item| {
+        if matches!(
+            &item.body,
+            ItemBody::File { name, received, status, .. }
+                if name == "cancelado.bin"
+                    && *received == expected_size
+                    && *status == FileStatus::Receiving
+        ) {
+            if let Some(connection) = connection_on_progress.lock().unwrap().take() {
+                connection.shutdown(Shutdown::Both).unwrap();
+                cancelled_tx.send(()).unwrap();
+            }
+        }
+    });
     let request = format!(
         "POST /items/file HTTP/1.1\r\n\
          Host: {addr}\r\n\
@@ -617,9 +635,12 @@ fn retry_apos_cancelar_resposta_na_finalizacao_nao_duplica_arquivo() {
         body.len()
     );
     let mut first = TcpStream::connect(addr).expect("conecta primeiro envio");
+    *connection.lock().unwrap() = Some(first.try_clone().unwrap());
     first.write_all(request.as_bytes()).unwrap();
     first.write_all(&body).unwrap();
-    first.shutdown(Shutdown::Both).unwrap();
+    cancelled_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("servidor deve consumir o primeiro envio");
     drop(first);
 
     assert_eq!(
@@ -628,7 +649,7 @@ fn retry_apos_cancelar_resposta_na_finalizacao_nao_duplica_arquivo() {
             TOKEN,
             "resposta-cancelada",
             "cancelado.bin",
-            &body
+            b"retry"
         ),
         201
     );
