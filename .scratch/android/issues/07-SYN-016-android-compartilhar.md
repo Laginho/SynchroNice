@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -77,3 +77,5 @@ Critérios 3 a 9 são no aparelho: verificação manual.
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: O SYN-016 está **bloqueado** no branch `syn-016` (commit `57f3925`). A revisão exige corrigir a duplicação quando o PC grava um Item, mas a resposta HTTP se perde. Isso requer alterar e testar o servidor PC, fora dos arquivos autorizados pelo [ticket](C:/Users/bruno/Desktop/Pastinha/Programas/Projects/SynchroNice/.scratch/android/issues/07-SYN-016-android-compartilhar.md). /  / Registrei a costura necessária no ticket. A etapa 1 precisa autorizar `pc/src-tauri/src/server.rs` e `pc/src-tauri/tests/server.rs`, ou redefinir o critério 2. Os critérios 7 e 8 também seguem pendentes.
 
 - 2026-09-26 Proxy decidiu: ampliar apenas a costura HTTP do PC acima. A fila Android já pertence aos Primary files e deve conservar o id do remetente entre tentativas; só o destinatário consegue confirmar um id já aceito quando o 201 se perde. A deduplicação é por id, nunca pelo conteúdo. Critérios 7 e 8 continuam reabertos para o stage 2.
+
+- 2026-09-26 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: `SYN-016` ficou `Stage: blocked` na [branch/ticket](C:/Users/bruno/Desktop/Pastinha/Programas/Projects/SynchroNice/.scratch/android/issues/07-SYN-016-android-compartilhar.md). /  / O teste HTTP comprometido permite retry automático e não prova resposta perdida. Commits: `2b6d749` e `3b0672e`; branch limpa, sem alterações de produção mantidas. /  / Próximo passo: substituir o cenário por servidor TCP de conexão única e voltar para `to-implement`.
