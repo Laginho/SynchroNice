@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,10 +64,10 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. Um número malformado em campo extra ainda é aceito; falta teste vermelho.
+1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. Um controle não escapado em string de campo extra ainda é aceito; falta teste vermelho.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. As revisões anteriores identificaram o indicador ligado só por mDNS, a presença derivada do último IP conhecido e a confirmação prematura, antes de `/listen` autenticar.
+4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. As revisões anteriores encontraram presença baseada só em mDNS/IP; a terceira também apontou estado antigo ao pausar e quedas periódicas pelo timeout de 30 segundos.
 5. Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
 7. Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
@@ -175,3 +175,12 @@ Verdict: Reopen — critérios 1 e 4 ainda falham.
 
 - 2026-09-26 Proxy: stage 2 expirou após 45 minutos. Os testes ficaram nos commits `9efe6a5` e `6c05a96`; o diff de implementação não commitado foi salvo em `.scratch/run-log/SYN-012-rescue-20260926-1032.patch` e restaurado sem alterações no commit WIP `5db2386`. O gate Android estava em execução no timeout, portanto o verde desse diff ainda não foi comprovado. Retomar a implementação e a verificação a partir desses commits.
 - 2026-09-26 Stage 2 concluído: o vermelho em `6c05a96` confirmou a rota HEAD ausente (o pedido caiu no GET long-poll e expirou) e a API `isListening()` ausente (falha de compilação dos testes Kotlin). Com a implementação, `gate.ps1 -TestsOnly` passou e o gate completo passou: 38 testes Rust, 24 Node, 38 Kotlin, `tsc --noEmit`, clippy/fmt e `:app:check` com compilação e lint. `8add947` só formatou o novo teste Rust, sem alterar asserções. O débito humano dos critérios 3–9 registrado acima continua pendente.
+
+#### Review (2026-09-26, terceira rodada)
+
+Verdict: Reopen — critérios 1 e 4 ainda precisam de testes e correção.
+
+- Standards: nenhuma violação de regra documentada. Possível Divergent Change em `MainActivity.kt`, já registrado nas revisões anteriores; fora do escopo desta correção.
+- Critério 1: `parseJsonString` aceita U+0000–U+001F sem escape dentro de string JSON. Um campo extra assim invalida o QR, mas `parsePairingQr` ainda cria o Par. Novo teste vermelho em `PairingInfoTest.kt` antes da correção.
+- Critério 4: `repeatOnLifecycle(RESUMED)` cancela seu bloco ao pausar, mas `state.updateOnline(false)` só roda depois que `repeatOnLifecycle` retorna; ao reabrir, "Na rede" pode ficar visível antes da próxima consulta HEAD. O GET `/listen` herda `readTimeout = 30_000` e expira com a fila vazia; o catch apaga a presença e aguarda antes de reabrir. Cobrir esses ciclos com teste antes da correção.
+- Gate completo nesta revisão: passou com 38 testes Rust, 24 Node, 38 Kotlin, fmt/clippy, `tsc --noEmit` e `:app:check` com lint. `git diff --check` passou. O débito humano dos critérios 3–9 permanece.
