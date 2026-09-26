@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -125,3 +125,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-26 Attempt 5 failed: exit 0; blocked after two attempts. Log tail: SYN-012 está `Stage: blocked`, registrado no commit `ede906c`. /  / O critério 4 exige ampliar o escopo para `ProtocolClient.listen()` e seus testes. A etapa 1 precisa aprovar essa costura antes de retornar o ticket a `to-implement`. Nenhum código foi alterado nem teste executado.
 
 - 2026-09-26 Proxy decidiu: autorizar apenas a costura de presença de `/listen` no cliente, no servidor PC e em seus testes, conforme Primary files e critério 4 acima. Com fila vazia, o GET autentica e bloqueia antes de responder; portanto o Android não pode inferir autenticação por resolução mDNS, conexão TCP ou início do GET. `HEAD /listen` confirma escuta autenticada sem mudar o long-poll nem o 401 de revogação. Testes de contrato vermelhos precedem a correção; nenhum outro comportamento do protocolo entra neste ticket.
+
+- 2026-09-26 Attempt 6 failed: timeout; blocked after two attempts. Log tail: ...warning: in the working copy of 'android/protocol-client/src/test/kotlin/synchronice/protocolclient/ProtocolClientTest.kt', LF will be replaced by CRLF the next time Git touches it\n[syn-012 6c05a96] test: fix listen presence assertion typing (SYN-012)\n 1 file changed, 1 insertion(+), 1 deletion(-)\n","exit_code":0,"status":"completed"}} / {"type":"item.started","item":{"id":"item_57","type":"command_execution","command":"\"C:\\\\Users\\\\bruno\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command '$jdkHome = Join-Path (Join-Path $env:TEMP '\"'SynchroNice-temurin-17-jdk') 'jdk-17.0.20.1+1'\n\"'$androidHome = Join-Path $env:TEMP '\"'SynchroNice-android-user-home'\n\"'$localAppData = Join-Path $androidHome '\"'Local'\nNew-Item -ItemType Directory -Force -Path \"'$localAppData | Out-Null\n$env:JAVA_HOME = $jdkHome\n$env:PATH = \"$jdkHome'\"\\\\bin;\"'$env:PATH\"\n$env:JAVA_TOOL_OPTIONS = \"-Duser.home=$androidHome\"\n$env:ANDROID_USER_HOME = $androidHome\n$env:LOCALAPPDATA = $localAppData\npowershell -ExecutionPolicy Bypass -File .'\"\\\\gate.ps1 -TestsOnly\"","aggregated_output":"","exit_code":null,"status":"in_progress"}} /
