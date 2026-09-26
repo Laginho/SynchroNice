@@ -376,13 +376,12 @@ private fun ConnectionLifecycle(state: AppState) {
                     while (isActive) {
                         try {
                             val address = state.resolver.resolve(currentPair.instanceName)
-                            withContext(Dispatchers.Main.immediate) { state.updateOnline(address != null) }
                             if (address != null) state.knownAddress.save(address)
                             state.retryPending()
                         } catch (error: CancellationException) {
                             throw error
                         } catch (_: Exception) {
-                            withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
+                            // DNS lookup and send retries do not define the /listen presence.
                         }
                         delay(4_000)
                     }
@@ -390,9 +389,10 @@ private fun ConnectionLifecycle(state: AppState) {
                 launch(Dispatchers.IO) {
                     while (isActive) {
                         try {
+                            withContext(Dispatchers.Main.immediate) { state.updateOnline(true) }
                             val items = kotlinx.coroutines.runInterruptible { client.listen() }
                             withContext(Dispatchers.Main.immediate) {
-                                state.updateOnline(true)
+                                state.updateOnline(false)
                                 items.filterIsInstance<Item.Text>().forEach(state::receive)
                             }
                             items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }

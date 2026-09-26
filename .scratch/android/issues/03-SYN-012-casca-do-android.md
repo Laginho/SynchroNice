@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,7 +64,7 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. `parsePairingQr` aceita JSON com escape inválido (`\q`) num campo extra; escrever um teste vermelho com os três campos válidos e esse extra antes de corrigir o parser.
+1. ✅ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
 4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. A revisão anterior flagou o indicador ligado só por mDNS e a presença derivada do último IP conhecido.
@@ -143,6 +143,10 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-25 Stage 2: o gate ficou vermelho antes do parser (`parsePairingQr` não resolvido) e passou depois da implementação. `gate.ps1 -TestsOnly` passou com 37 testes Rust, 24 Node e 34 Kotlin; o gate completo também passou, incluindo lint Android. A tag `keep/syn-012` citada acima não existe neste checkout.
 
 - Débito humano: critérios 3–9 não foram verificados no app/aparelho. O Computer Use disponível retornou apenas Chrome, sem superfície de apps nativos; por isso o APK não foi instalado/aberto no AVD e a câmera, o pareamento, mDNS, entrega de textos e reconexão continuam sem verificação manual.
+
+- 2026-09-26 Stage 2: `3694c60` é o commit só de testes. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: 37 testes Rust e 24 Node passaram; em 35 testes Kotlin, só `escape JSON invalido e recusado mesmo em campo extra` falhou porque `parsePairingQr` aceitou `\q`. `e4662ea` rejeita escapes fora do conjunto JSON; o mesmo gate ficou verde, com 37 Rust, 24 Node e 35 Kotlin. A correção do indicador segue o ciclo de `/listen`; mDNS continua resolvendo endereços e acionando a fila, sem definir presença.
+
+- Gate completo passou: `cargo fmt --check`, `cargo clippy`, 37 testes Rust, `tsc --noEmit`, 24 testes Node, 35 testes Kotlin e `gradle check` do app Android. Ambiente: JDK 17 em `C:\Users\bruno\.jdks\jdk-17.0.20.1+1`, Gradle em `C:\Users\bruno\AppData\Local\Temp\SynchroNice-gradle-home`; `JAVA_TOOL_OPTIONS` apontou `user.home` ao diretório temporário gravável. O Kotlin daemon não abriu seu diretório em AppData e usou compilação de fallback; o gate terminou com sucesso.
 
 #### Review (2026-09-26)
 
