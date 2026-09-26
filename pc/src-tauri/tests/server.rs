@@ -5,7 +5,7 @@ use pc_lib::outbox::{OutBody, OutItem, Outbox};
 use pc_lib::par::Par;
 use pc_lib::server;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::time::Duration;
 
 const TOKEN: &str = "segredo-de-teste";
@@ -591,6 +591,47 @@ fn envios_concorrentes_do_mesmo_id_criam_um_item_e_um_arquivo() {
 
     assert!(first_response.starts_with("HTTP/1.1 201"));
     assert!(second_response.starts_with("HTTP/1.1 201"));
+    assert_eq!(arquivos(&items).len(), 1);
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn retry_apos_cancelar_resposta_na_finalizacao_nao_duplica_arquivo() {
+    let (base, items, _outbox, raiz) = sobe();
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let body = vec![b'A'; 32 * 1024 * 1024];
+    let request = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-Item-Id: resposta-cancelada\r\n\
+         X-File-Name: cancelado.bin\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        body.len()
+    );
+    let mut first = TcpStream::connect(addr).expect("conecta primeiro envio");
+    first.write_all(request.as_bytes()).unwrap();
+    first.write_all(&body).unwrap();
+    first.shutdown(Shutdown::Both).unwrap();
+    drop(first);
+
+    assert_eq!(
+        post_arquivo_com_id(
+            &base,
+            TOKEN,
+            "resposta-cancelada",
+            "cancelado.bin",
+            &body
+        ),
+        201
+    );
     assert_eq!(arquivos(&items).len(), 1);
     assert_eq!(
         std::fs::read_dir(raiz.path().join("pasta"))
