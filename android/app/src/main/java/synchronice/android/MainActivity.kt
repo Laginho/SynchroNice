@@ -387,6 +387,74 @@ internal class AppState(context: Context) {
         online = value
     }
 
+    suspend fun listen(currentPair: PairingInfo, client: ProtocolClient) = withContext(Dispatchers.IO) {
+        while (isActive) {
+            try {
+                retryReceivedReceipts(currentPair, client)
+                val items = kotlinx.coroutines.runInterruptible { client.listen() }
+                withContext(Dispatchers.Main.immediate) {
+                    updateOnline(false)
+                    items.filterIsInstance<Item.Text>().forEach(::receive)
+                }
+                items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }
+                items.filterIsInstance<Item.FileMeta>().forEach { receiveFile(it, client) }
+                if (items.isEmpty()) delay(1_500)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: SocketTimeoutException) {
+                // Reopen the idle long-poll so mDNS can resolve a changed PC address.
+            } catch (error: ProtocolRejectedException) {
+                if (error.code == 401) {
+                    unpair(currentPair)
+                    break
+                }
+                withContext(Dispatchers.Main.immediate) { updateOnline(false) }
+                delay(1_000)
+            } catch (error: IOException) {
+                withContext(Dispatchers.Main.immediate) { updateOnline(false) }
+                delay(1_000)
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main.immediate) { updateOnline(false) }
+                delay(1_500)
+            }
+        }
+    }
+
+    private fun removeReceipt(key: String) {
+        val receipt = pairingPreferences.getString(key, null)
+        if (!pairingPreferences.edit().remove(key).commit()) {
+            // commit(false) still changes the in-memory preferences; preserve the retry there too.
+            pairingPreferences.edit().putString(key, receipt).commit()
+            throw IOException("não foi possível apagar o recibo de recebimento")
+        }
+    }
+
+    private suspend fun retryReceivedReceipts(currentPair: PairingInfo, client: ProtocolClient) = withContext(Dispatchers.Main.immediate) {
+        if (client !== protocolClient || pairing != currentPair) return@withContext
+        val prefix = "received-file:${currentPair.token}:"
+        val receipts = pairingPreferences.all.filter { (key, value) ->
+            key.startsWith(prefix) && value is String && value.startsWith("content:")
+        }
+        for ((key, value) in receipts) {
+            val itemId = key.removePrefix(prefix).toLong()
+            try {
+                withContext(Dispatchers.IO) {
+                    kotlinx.coroutines.runInterruptible {
+                        files.publish(Uri.parse(value as String))
+                        client.acknowledgeFile(Item.FileMeta(itemId, 0, "", 0))
+                    }
+                }
+                if (client !== protocolClient || pairing != currentPair) return@withContext
+                receivedFiles[itemId]?.let { setDelivery(it, Delivery.DELIVERED) }
+                removeReceipt(key)
+                connectionError = null
+            } catch (error: Exception) {
+                if (error !is CancellationException) connectionError = "Não foi possível concluir o recebimento: ${error.message}"
+                throw error
+            }
+        }
+    }
+
     suspend fun receiveFile(item: Item.FileMeta, currentClient: ProtocolClient) = withContext(Dispatchers.Main.immediate) {
         if (currentClient !== protocolClient) return@withContext
         val receiptKey = "received-file:${pairing!!.token}:${item.id}"
@@ -412,6 +480,7 @@ internal class AppState(context: Context) {
                 throw IOException("não foi possível guardar o recebimento")
             }
         }
+        var acknowledged = false
         val savedUri = messages.firstOrNull { it.localId == id }?.uri
         update { it.copy(delivery = Delivery.PENDING, progress = 0) }
         try {
@@ -444,9 +513,11 @@ internal class AppState(context: Context) {
                             }
                         }
                     })
-                    // The receipt is only for retrying an unconfirmed delivery, not chat history.
-                    if (!pairingPreferences.edit().remove(receiptKey).commit()) {
-                        throw IOException("não foi possível apagar o recibo de recebimento")
+                    acknowledged = true
+                    // A successful ACK delivers the Item even if local cleanup needs another attempt.
+                    kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                        update { it.copy(delivery = Delivery.DELIVERED, progress = 100) }
+                        removeReceipt(receiptKey)
                     }
                 }
             }
@@ -456,7 +527,7 @@ internal class AppState(context: Context) {
             update { it.copy(delivery = if (it.uri != null) Delivery.DELIVERED else Delivery.FAILED) }
         } catch (error: Exception) {
             if (currentClient === protocolClient) {
-                update { it.copy(delivery = Delivery.FAILED) }
+                update { it.copy(delivery = if (acknowledged) Delivery.DELIVERED else Delivery.FAILED) }
                 if (error !is CancellationException) connectionError = "Não foi possível receber ${item.name}: ${error.message}"
             }
             throw error
@@ -773,35 +844,7 @@ private fun ConnectionLifecycle(state: AppState) {
                         }
                     }
                     launch(Dispatchers.IO) {
-                        while (isActive) {
-                            try {
-                                val items = kotlinx.coroutines.runInterruptible { client.listen() }
-                                withContext(Dispatchers.Main.immediate) {
-                                    state.updateOnline(false)
-                                    items.filterIsInstance<Item.Text>().forEach(state::receive)
-                                }
-                                items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }
-                                items.filterIsInstance<Item.FileMeta>().forEach { state.receiveFile(it, client) }
-                                if (items.isEmpty()) delay(1_500)
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (_: SocketTimeoutException) {
-                                // Reopen the idle long-poll so mDNS can resolve a changed PC address.
-                            } catch (error: ProtocolRejectedException) {
-                                if (error.code == 401) {
-                                    state.unpair(currentPair)
-                                    break
-                                }
-                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
-                                delay(1_000)
-                            } catch (error: IOException) {
-                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
-                                delay(1_000)
-                            } catch (_: Exception) {
-                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
-                                delay(1_500)
-                            }
-                        }
+                        state.listen(currentPair, client)
                     }
                 }
             } finally {

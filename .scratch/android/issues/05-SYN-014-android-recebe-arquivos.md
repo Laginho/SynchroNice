@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -244,3 +244,10 @@ nos relatórios), além de fmt, clippy, typecheck e lint.
 
 - Green SAF: 20 testes do app passaram com a intenção persistida antes da criação e consulta por marcador na Pasta original. Testes cdc1ebe/5b9103e; código 9501a89, sem alteração de testes.
 - Red da escuta: o novo teste exige executar o laço real via AppState.listen; o gate falha na compilação porque esse laço ainda está embutido no Composable. O servidor deixa de anunciar o Item após ACK; a falha de remoção também reproduz a alteração do cache de SharedPreferences antes de retornar false.
+
+- Red comportamental da escuta: após expor o laço de produção sem mudar seu comportamento, o teste cee19af falhou porque ACK aceito + falha de limpeza deixou a bolha FAILED em vez de DELIVERED (21 testes do app, 1 falha).
+- Green da escuta: AppState executa o mesmo laço usado pela Activity e, antes de abrir /listen, republica/confirma os recibos completos do Par e tenta removê-los. Isso independe de novo anúncio do PC e não recria o histórico. Se commit(false) já alterou o cache de SharedPreferences, o recibo é restaurado para permitir nova tentativa. ACK aceito deixa a bolha Entregue mesmo quando a limpeza falha. O teste commitado passou, com um GET e uma cópia; o servidor não reanuncia após ACK.
+- Recuperação SAF: a intenção contém Pasta original e marcador UUID e fica no recibo do token/id antes de createDocument. A consulta exige um único documento com o marcador e sem EXTRA_LOADING; o document ID vira URI persistida antes da escrita. Não há rename automático. Provedor que oculta/altera o marcador, devolve candidatos ambíguos ou não permite consulta deixa o Item Pendente com erro recuperável, sem criar, escrever, apagar ou confirmar na retomada. Documento alheio com o mesmo nome original é preservado, inclusive ao trocar a preferência de Pasta entre as duas AppState.
+- Gate completo passou: 44 testes Rust, 24 TypeScript, 56 protocolo Android e 21 JVM do app (145 no total), zero falhas; fmt/clippy, typecheck e lint Android passaram. Log: `%TEMP%/syn-014-final-gate.log`. `git diff --check` passou. Os commits de implementação não alteram testes.
+- A referência para identidade e consulta SAF continua sendo DocumentsContract.Document: https://developer.android.com/reference/android/provider/DocumentsContract.Document. A intenção limita a recuperação aos provedores que expõem seu marcador; não pressupõe transação oferecida pelo Android.
+- O débito visual anteriormente registrado permanece; esta retomada validou automaticamente as falhas de processo e persistência, sem declarar nova verificação no aparelho. CLEAN-010 continua responsável pela atualização do ADR. Stage 2 encerrado; revisão é uma sessão separada.
