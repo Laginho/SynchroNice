@@ -284,6 +284,29 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `listen abandona uma conexao silenciosa para poder resolver o PC novamente`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            try {
+                Thread.sleep(42_000)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<List<Item>> { client(port).listen() }
+            val failure = assertFailsWith<java.util.concurrent.ExecutionException> {
+                result.get(40, TimeUnit.SECONDS)
+            }
+            assertTrue(failure.cause is java.net.SocketTimeoutException)
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
     fun `presenca de listen nao e confirmada em 401 ou falha de rede`() {
         val port = freePort()
         val server = fakeServer(port, "/listen") { exchange ->
