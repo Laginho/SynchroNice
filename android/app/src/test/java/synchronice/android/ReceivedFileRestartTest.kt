@@ -61,13 +61,34 @@ class ReceivedFileRestartTest {
     fun restartingAfterSafCreationBeforeUriReturnsReusesTheMarkedDocument() =
         exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true)
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false) = runBlocking {
+    @Test
+    fun changedSafMarkerLeavesItemPendingWithoutTouchingOtherDocuments() =
+        exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "changed")
+
+    @Test
+    fun hiddenSafDocumentDoesNotCreateAnotherCopy() =
+        exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "hidden")
+
+    @Test
+    fun ambiguousSafMarkerDoesNotOverwriteEitherDocument() =
+        exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "ambiguous")
+
+    @Test
+    fun loadingSafQueryDoesNotAdoptItsPartialResult() =
+        exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "loading")
+
+    @Test
+    fun unavailableSafQueryKeepsItsCreationIntent() =
+        exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "unavailable")
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null) = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         var rejectRemoval = failRemoval
         var crashBeforeReceipt = safCrash && !beforeWrite
         var crashBeforeWrite = beforeWrite && !beforeUri
         var crashBeforeUri = beforeUri
         val names = mutableListOf<String>()
+        var recovering = false
         val copies = mutableListOf<File>()
         val preferences = application.getSharedPreferences("pairing", 0)
         val context = object : ContextWrapper(application) {
@@ -156,8 +177,14 @@ class ReceivedFileRestartTest {
             }
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int =
                 if (copies[uri.lastPathSegment!!.toInt() - 1].delete()) 1 else 0
-            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
-                MatrixCursor(projection!!).apply {
+            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? {
+                if (recovering) assertEquals("root", DocumentsContract.getTreeDocumentId(uri))
+                if (recovering && recovery == "unavailable") return null
+                return MatrixCursor(projection!!).apply {
+                    if (recovering && recovery == "loading") extras = Bundle().apply {
+                        putBoolean(DocumentsContract.EXTRA_LOADING, true)
+                    }
+                    if (recovering && recovery == "hidden") return@apply
                     names.forEachIndexed { index, name ->
                         addRow(projection.map { column ->
                             when (column) {
@@ -168,6 +195,7 @@ class ReceivedFileRestartTest {
                         })
                     }
                 }
+            }
             override fun getType(uri: Uri) = "application/octet-stream"
         }.apply { attachInfo(context, ProviderInfo().apply { this.authority = authority }) })
         val gets = AtomicInteger()
@@ -205,13 +233,35 @@ class ReceivedFileRestartTest {
             }
             assertEquals(if (beforeWrite) "" else "payload", copies.single().readText())
 
+            if (beforeUri) {
+                // An unrelated writer can use the original name while the app is dead.
+                copies.add(File(context.cacheDir, "unrelated.bin").apply { writeText("foreign") })
+                names.add(if (recovery == "ambiguous") names.first() else "received.bin")
+                if (recovery == "changed") names[0] = "received.bin"
+                // Recovery must use the original Pasta, even if the preference has changed.
+                if (recovery == null) context.getSharedPreferences("settings", 0).edit()
+                    .putString("receive-folder", "content://test.documents/tree/other").commit()
+                recovering = true
+            }
             val reopened = AppState(context)
             assertTrue(reopened.messages.isEmpty(), "The chat session must remain disposable")
+            if (recovery != null) {
+                assertFailsWith<IOException> { reopened.receiveFile(item, reopened.client()!!) }
+                assertTrue(reopened.connectionError != null)
+                assertEquals(0, gets.get())
+                assertEquals(0, acks.get())
+                assertEquals(2, copies.size)
+                assertEquals("", copies.first().readText())
+                assertEquals("foreign", copies.last().readText())
+                assertTrue(preferences.all.keys.any { it.startsWith("received-file:") })
+                return@runBlocking
+            }
             reopened.receiveFile(item, reopened.client()!!)
             assertEquals(if (crashAfterPublication == null && !safCrash) 2 else 1, acks.get())
             assertEquals(1, gets.get(), "A saved Item only needs another ACK")
-            assertEquals(1, copies.size, "Restarting must not create another copy")
-            assertEquals("payload", copies.single().readText())
+            assertEquals(if (beforeUri) 2 else 1, copies.size, "Restarting must not create another copy")
+            assertEquals("payload", copies.first().readText())
+            if (beforeUri) assertEquals("foreign", copies.last().readText())
             assertEquals(if (beforeUri) 0 else 1, published.size, "Recovery must finish publication before acknowledging")
             assertEquals(Delivery.DELIVERED, reopened.messages.single().delivery)
             assertTrue(preferences.all.keys.none { it.startsWith("received-file:") }, "An acknowledged receipt must be removed")

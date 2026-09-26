@@ -239,3 +239,5 @@ nos relatórios), além de fmt, clippy, typecheck e lint.
 #### Terceira retomada Stage 2 (2026-09-26)
 
 - Red SAF: teste no AppState real interrompe o provedor após criar, antes de devolver a URI. A retomada cria 2 documentos em vez de 1. Gate -TestsOnly: 15 testes do app, 1 falha; 44 Rust, 24 TS e 56 protocolo passaram. Primeira tentativa parou por acesso a C:\.android; repetição autorizada confirmou a falha comportamental.
+
+- Red SAF ampliado: 20 testes do app, 6 falhas contra o código anterior. Marcador alterado/oculto/ambíguo e consulta carregando não interrompem a recuperação; consulta indisponível não preserva intenção; mudar a preferência de Pasta faz consultar o lugar errado. Os testes incluem documento alheio com nome original igual.
