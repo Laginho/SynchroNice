@@ -76,6 +76,6 @@ private fun parseJsonNumber(json: String, start: Int): Pair<String, Int> {
 
 private fun skipWhitespace(json: String, start: Int): Int {
     var i = start
-    while (i < json.length && json[i].isWhitespace()) i++
+    while (i < json.length && json[i] in " \t\n\r") i++
     return i
 }
