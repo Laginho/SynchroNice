@@ -57,8 +57,7 @@ internal class ReceivedFiles(context: Context) {
                 val markedName = "${name.take(dot)} ${intent.getString("marker")}${name.substring(dot)}"
                 DocumentsContract.createDocument(resolver, parent, mime, markedName)
                     ?: throw IOException("não foi possível criar o arquivo na Pasta")
-            }
-            recoverCreatedDocument(targetTree, intent.getString("marker"))
+            } else recoverCreatedDocument(targetTree, intent.getString("marker"))
         } ?: throw IOException("não foi possível criar o arquivo na Pasta")
 
         var tracked = existingUri != null || tree != null || creationIntent != null
