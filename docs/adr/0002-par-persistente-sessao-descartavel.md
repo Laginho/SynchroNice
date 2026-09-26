@@ -22,6 +22,10 @@ gerenciamento de arquivos pelo app.
   janela não encerra.
 - Arquivos recebidos são gravados na Pasta como arquivos comuns e sobrevivem;
   o app não os gerencia depois.
+- No Android, um recibo mínimo de arquivo já gravado persiste ligado ao **Par**
+  enquanto o ACK não foi aceito, para repetir a confirmação sem baixar outra
+  cópia, mesmo após reiniciar o app. O recibo é transitório e removido após o
+  ACK; não é histórico da Sessão nem restaura o chat.
 - Itens ficam **pendentes** no aparelho de origem enquanto o destino não está
   na rede e são entregues sozinhos depois.
 
@@ -37,7 +41,8 @@ gerenciamento de arquivos pelo app.
   com IP variável. É a parte mais delicada do projeto.
 - Sem banco de dados nem histórico de chat: fora dos arquivos comuns gravados
   na Pasta, o estado persistente é o Par, a Pasta escolhida, a preferência de
-  cópia do PC e a fila de Pendentes mantida no aparelho de origem. A Sessão
+  cópia do PC, a fila de Pendentes mantida no aparelho de origem e os recibos
+  transitórios de arquivos recebidos no Android, ligados ao Par. A Sessão
   continua apenas em memória.
 - Segurança: rede doméstica, uso pessoal. Só o token do QR autentica a
   conexão; sem cifra. Decisão explícita do autor.
