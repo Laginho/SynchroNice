@@ -578,7 +578,15 @@ class MainActivity : ComponentActivity() {
             try {
                 if (confirmed) {
                     if (file.length() == 0L) throw IOException("a câmera não gravou a foto")
-                    if (state.keepPhotos) withContext(Dispatchers.IO) { state.files.savePhoto(file) }
+                    if (state.keepPhotos) try {
+                        withContext(Dispatchers.IO) { state.files.savePhoto(file) }
+                    } catch (error: Exception) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "A foto será enviada, mas não foi possível guardá-la na Pasta: ${error.message}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                     if (state.pairing == null) throw IOException("pareie com o PC antes de enviar")
                     state.queueFile(file)
                 }

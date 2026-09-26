@@ -1,5 +1,5 @@
 # SYN-017: Android — botão de câmera
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-013, SYN-016, SYN-014
 Review: agent
