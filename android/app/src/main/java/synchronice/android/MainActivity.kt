@@ -322,17 +322,23 @@ internal class AppState(context: Context) {
         onFileProgress: (Int) -> Unit = {},
         onFileStart: (Long) -> Unit = {},
     ) {
+        val currentPair = pairing
         val currentClient = client() ?: run { unpair(); return }
-        outboundMutex.withLock {
-            if (currentClient !== protocolClient) return@withLock
-            try {
-                currentClient.retryPending(onFileProgress, onFileStart)
-            } finally {
-                val remaining = queueStore.load().size
-                withContext(Dispatchers.Main.immediate) {
-                    reconcilePendingDelivery(messages, submitted, remaining)
+        try {
+            outboundMutex.withLock {
+                if (currentClient !== protocolClient) return@withLock
+                try {
+                    currentClient.retryPending(onFileProgress, onFileStart)
+                } finally {
+                    val remaining = queueStore.load().size
+                    withContext(Dispatchers.Main.immediate) {
+                        reconcilePendingDelivery(messages, submitted, remaining)
+                    }
                 }
             }
+        } catch (error: ProtocolRejectedException) {
+            if (error.code != 401) throw error
+            unpair(currentPair)
         }
     }
 
@@ -565,13 +571,8 @@ private fun ConnectionLifecycle(state: AppState) {
                                 if (address != null) state.knownAddress.save(address)
                             } catch (error: CancellationException) {
                                 throw error
-                            } catch (error: ProtocolRejectedException) {
-                                if (error.code == 401) {
-                                    state.unpair(currentPair)
-                                    break
-                                }
                             } catch (_: Exception) {
-                                // DNS lookup and send retries do not define the /listen presence.
+                                // DNS lookup does not define the /listen presence.
                             }
                             delay(4_000)
                         }
