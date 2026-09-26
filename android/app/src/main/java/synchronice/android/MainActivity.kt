@@ -390,7 +390,9 @@ internal class AppState(context: Context) {
     suspend fun receiveFile(item: Item.FileMeta, currentClient: ProtocolClient) = withContext(Dispatchers.Main.immediate) {
         if (currentClient !== protocolClient) return@withContext
         val receiptKey = "received-file:${pairing!!.token}:${item.id}"
-        val persistedUri = pairingPreferences.getString(receiptKey, null)?.let(Uri::parse)
+        val receipt = pairingPreferences.getString(receiptKey, null)
+        val incompleteUri = receipt?.takeIf { it.startsWith("writing:") }?.removePrefix("writing:")?.let(Uri::parse)
+        val persistedUri = receipt?.takeUnless { it.startsWith("writing:") }?.let(Uri::parse)
         val id = receivedFiles.getOrPut(item.id) {
             val id = nextMessageId++
             messages.add(ChatMessage(id, item.name, false, Delivery.PENDING, file = item, uri = persistedUri))
@@ -400,6 +402,14 @@ internal class AppState(context: Context) {
             if (currentClient !== protocolClient) throw IOException("Par alterado durante o download")
             val index = messages.indexOfFirst { it.localId == id }
             if (index >= 0) messages[index] = change(messages[index])
+        }
+        fun saveReceipt(value: String) {
+            if (currentClient !== protocolClient) throw IOException("Par alterado durante o download")
+            val previous = pairingPreferences.getString(receiptKey, null)
+            if (!pairingPreferences.edit().putString(receiptKey, value).commit()) {
+                pairingPreferences.edit().putString(receiptKey, previous).commit()
+                throw IOException("não foi possível guardar o recebimento")
+            }
         }
         val savedUri = messages.firstOrNull { it.localId == id }?.uri
         update { it.copy(delivery = Delivery.PENDING, progress = 0) }
@@ -411,13 +421,13 @@ internal class AppState(context: Context) {
                         files.publish(savedUri)
                         currentClient.acknowledgeFile(item)
                     }
-                    else files.receive(currentClient, item, onSaved = { uri ->
+                    else files.receive(currentClient, item, existingUri = incompleteUri, onCreated = { uri ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
-                            if (currentClient !== protocolClient) throw IOException("Par alterado durante o download")
-                            if (!pairingPreferences.edit().putString(receiptKey, uri.toString()).commit()) {
-                                pairingPreferences.edit().remove(receiptKey).commit()
-                                throw IOException("não foi possível guardar o recebimento")
-                            }
+                            saveReceipt("writing:$uri")
+                        }
+                    }, onSaved = { uri ->
+                        kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                            saveReceipt(uri.toString())
                             update { it.copy(uri = uri) }
                         }
                     }, onProgress = { progress ->

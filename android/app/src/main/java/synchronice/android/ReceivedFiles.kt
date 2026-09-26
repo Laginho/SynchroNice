@@ -29,12 +29,12 @@ internal class ReceivedFiles(context: Context) {
         }
     }
 
-    fun receive(client: ProtocolClient, item: Item.FileMeta, onSaved: (Uri) -> Unit, onProgress: (Int) -> Unit) {
+    fun receive(client: ProtocolClient, item: Item.FileMeta, existingUri: Uri?, onCreated: (Uri) -> Unit, onSaved: (Uri) -> Unit, onProgress: (Int) -> Unit) {
         val tree = folder()
         val mime = fileMimeType(item.name)
         val name = item.name.substringAfterLast('/').substringAfterLast('\\')
             .filter { it >= ' ' }.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "arquivo"
-        val uri = if (tree == null) {
+        val uri = existingUri ?: if (tree == null) {
             // MediaStore allocates a unique filename atomically, including for repeated names.
             resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -57,16 +57,25 @@ internal class ReceivedFiles(context: Context) {
             DocumentsContract.createDocument(resolver, parent, mime, unique)
         } ?: throw IOException("não foi possível criar o arquivo na Pasta")
 
-        var saved = false
+        var tracked = existingUri != null
         try {
-            val output = resolver.openOutputStream(uri, "w") ?: throw IOException("não foi possível abrir o destino")
-            client.downloadFile(item, output, onSaved = {
+            onCreated(uri)
+            // Keep interrupted destinations so a restart writes to the same file, including SAF.
+            tracked = true
+            val complete = {
                 onSaved(uri)
-                saved = true
                 publish(uri)
-            }, onProgress = onProgress)
+            }
+            if (existingUri != null && hasCompleteContent(uri, item.size)) {
+                complete()
+                onProgress(100)
+                client.acknowledgeFile(item)
+            } else {
+                val output = resolver.openOutputStream(uri, "wt") ?: throw IOException("não foi possível abrir o destino")
+                client.downloadFile(item, output, onSaved = complete, onProgress = onProgress)
+            }
         } catch (error: Exception) {
-            if (!saved) {
+            if (!tracked) {
                 try {
                     val removed = if (tree == null) resolver.delete(uri, null, null) > 0
                         else DocumentsContract.deleteDocument(resolver, uri)
@@ -76,6 +85,19 @@ internal class ReceivedFiles(context: Context) {
                 }
             }
             throw error
+        }
+    }
+
+    private fun hasCompleteContent(uri: Uri, size: Long): Boolean {
+        (resolver.openInputStream(uri) ?: throw IOException("não foi possível ler o destino")).use { input ->
+            val buffer = ByteArray(8192)
+            var received = 0L
+            while (true) {
+                val count = input.read(buffer)
+                if (count == -1) return received == size
+                received += count
+                if (received > size) return false
+            }
         }
     }
 

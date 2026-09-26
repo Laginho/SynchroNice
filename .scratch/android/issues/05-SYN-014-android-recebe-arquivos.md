@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -157,3 +157,10 @@ deles é conserto permitido no Stage 3.
 #### Segunda retomada Stage 2 (2026-09-26)
 
 - Red: dois testes no AppState real interrompem a publicação imediatamente antes e depois do update do MediaStore, sem executar limpeza de exceção. Recriar AppState faz 2 GETs em vez de 1 nos dois casos. Gate -TestsOnly: 11 testes do app, 2 falhas; 44 Rust e 24 TS passaram, protocolo sem alterações.
+- Red-green da publicação: `2d0c749` contém só testes e ticket; `90670db` grava o recibo antes de publicar e repete a publicação antes do ACK na retomada. Os 11 testes do app passaram, sem alteração dos testes no commit de código.
+- Red-green da limpeza: `bdbc13c` prova que commit falso ao remover o recibo era tratado como sucesso (12 testes do app, 1 falha). `fc7ae9f` informa IOException e erro de conexão; a retomada termina a limpeza sem outra cópia. Os 12 testes passaram.
+- Red do SAF: `a5b7f53` usa um provedor de documentos com bytes em disco e interrompe antes da escrita ou depois dos bytes completos, antes do recibo final. A versão anterior criava 2 destinos no primeiro caso e fazia 2 GETs no segundo (14 testes do app, 2 falhas). O teste do arquivo incompleto também exige conteúdo completo antes da confirmação.
+- Correção do SAF: persiste `writing:<URI>` antes de abrir o stream; depois de fechar e validar o download, troca pelo recibo de URI completa, publica e confirma. Ao retomar uma escrita, lê e conta os bytes do mesmo destino: tamanho exato dispensa outro GET; conteúdo incompleto é regravado no mesmo URI com truncamento. Destinos de downloads interrompidos ficam registrados para a próxima tentativa. A bolha só recebe URI utilizável depois da conclusão. Recibos antigos de URI simples continuam aceitos, e a Sessão continua descartável.
+- Green: os cinco testes acrescentados nesta retomada passaram, com uma cópia e um GET em cada cenário de crash. Gate completo passou: 44 Rust, 24 TS, 56 protocolo e 14 app; zero falhas nos relatórios JVM; fmt/clippy, typecheck e lint passaram. A primeira chamada do gate completo terminou com falha apesar de Android verde; a saída truncada não preservou a causa. A repetição sem alterações, com log completo, passou (`%TEMP%/syn-014-gate.log`).
+- Referência de API: [ContentResolver.openOutputStream](https://developer.android.com/reference/android/content/ContentResolver) documenta que `w` pode não truncar; a retomada usa `wt`.
+- O débito visual já registrado permanece. Esta retomada verifica falhas de processo e armazenamento automaticamente, sem nova alegação de verificação manual no aparelho. A atualização do ADR permanece no CLEAN-010, conforme a revisão anterior.
