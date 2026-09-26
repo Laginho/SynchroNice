@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
