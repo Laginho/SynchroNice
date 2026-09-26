@@ -171,7 +171,9 @@ internal class AppState(context: Context) {
                     queueStore.clear()
                     withContext(Dispatchers.Main.immediate) {
                         protocolClient?.closeListen()
-                        pairingPreferences.edit().clear().commit()
+                        if (!pairingPreferences.edit().clear().commit()) {
+                            throw IOException("não foi possível apagar o Par")
+                        }
                         networkPreferences.edit().remove("last-address").apply()
                         protocolClient = null
                         clientFor = null
