@@ -554,6 +554,53 @@ fn reenvio_de_arquivo_com_o_mesmo_id_nao_duplica_item_nem_arquivo() {
 }
 
 #[test]
+fn envios_concorrentes_do_mesmo_id_criam_um_item_e_um_arquivo() {
+    let (base, items, _outbox, raiz) = sobe();
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let body = vec![b'A'; 4096];
+    let request = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-Item-Id: mesmo-id\r\n\
+         X-File-Name: simultaneo.bin\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        body.len()
+    );
+    let mut first = TcpStream::connect(addr).expect("conecta primeiro envio");
+    let mut second = TcpStream::connect(addr).expect("conecta segundo envio");
+    first
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    second
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+
+    first.write_all(request.as_bytes()).unwrap();
+    second.write_all(request.as_bytes()).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    first.write_all(&body).unwrap();
+    second.write_all(&body).unwrap();
+
+    let mut first_response = String::new();
+    let mut second_response = String::new();
+    first.read_to_string(&mut first_response).unwrap();
+    second.read_to_string(&mut second_response).unwrap();
+
+    assert!(first_response.starts_with("HTTP/1.1 201"));
+    assert!(second_response.starts_with("HTTP/1.1 201"));
+    assert_eq!(arquivos(&items).len(), 1);
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn segundo_post_do_mesmo_nome_ganha_sufixo() {
     let (base, _items, _outbox, raiz) = sobe();
     let pasta = raiz.path().join("pasta");

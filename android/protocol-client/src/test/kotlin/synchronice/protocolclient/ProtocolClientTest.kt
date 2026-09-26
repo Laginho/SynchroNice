@@ -6,9 +6,13 @@ import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.Socket
+import java.io.RandomAccessFile
 import java.util.concurrent.Executors
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -65,6 +69,65 @@ private fun textRequest(server: ServerSocket, respond: Boolean): String? = serve
 }
 
 class ProtocolClientTest {
+
+    @Test
+    fun `upload lento que termina com 201 sai da fila`() {
+        val file = tempFile(ByteArray(1024 * 1024))
+        val paused = AtomicBoolean()
+        val port = freePort()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port)
+            sender.enqueueFile(file)
+
+            sender.retryPending(onFileProgress = {
+                if (paused.compareAndSet(false, true)) Thread.sleep(32_000)
+            })
+
+            assertFalse(sender.hasPending())
+        } finally {
+            server.stop(0)
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `escrita bloqueada devolve o controle e preserva o Pendente`() {
+        val dir = kotlin.io.path.createTempDirectory("blocked-upload").toFile()
+        val file = File(dir, "video.bin")
+        RandomAccessFile(file, "rw").use { it.setLength(64L * 1024 * 1024) }
+        val server = serverSocket()
+        val accepted = AtomicReference<Socket?>()
+        val connected = CountDownLatch(1)
+        val executor = Executors.newCachedThreadPool()
+        try {
+            executor.submit {
+                server.accept().also {
+                    it.receiveBufferSize = 1024
+                    accepted.set(it)
+                    connected.countDown()
+                }
+                CountDownLatch(1).await()
+            }
+            val sender = client(server.localPort)
+            sender.enqueueFile(file)
+            val retry = executor.submit { sender.retryPending() }
+            assertTrue(connected.await(5, TimeUnit.SECONDS))
+
+            retry.get(35, TimeUnit.SECONDS)
+
+            assertTrue(sender.hasPending())
+        } finally {
+            accepted.get()?.close()
+            server.close()
+            executor.shutdownNow()
+            dir.deleteRecursively()
+        }
+    }
 
     @Test
     fun `texto aceito sem resposta mantem id ate confirmacao no retry`() {
