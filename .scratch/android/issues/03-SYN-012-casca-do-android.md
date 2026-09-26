@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -67,7 +67,7 @@ nem move o SDK.
 1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. Um número malformado em campo extra ainda é aceito; falta teste vermelho.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. A revisão anterior flagou o indicador ligado só por mDNS e a presença derivada do último IP conhecido.
+4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. As revisões anteriores identificaram o indicador ligado só por mDNS, a presença derivada do último IP conhecido e a confirmação prematura, antes de `/listen` autenticar.
 5. Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
 7. Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
@@ -169,3 +169,5 @@ Verdict: Reopen — critérios 1 e 4 ainda falham.
 - Verificação no aparelho: `adb devices` não iniciou por falta de permissão para criar `\\.android`; permanece o Débito humano acima.
 
 - 2026-09-26 Stage 2 bloqueado: o critério 4 exige que a presença acompanhe o ciclo autenticado de `/listen`, mas `ProtocolClient.listen()` e os testes desse ciclo não estão autorizados em `Primary files` (o escopo atual do cliente é só a leitura do QR). Stage 2 não pode ampliar a costura. Stage 1 deve autorizar o ciclo de `listen()` e definir seus testes de contrato antes de voltar a `to-implement`. Nenhum código ou teste foi alterado.
+
+- 2026-09-26 Proxy decidiu: autorizar apenas a costura de presença de `/listen` no cliente, no servidor PC e em seus testes, conforme Primary files e critério 4 acima. Com fila vazia, o GET autentica e bloqueia antes de responder; portanto o Android não pode inferir autenticação por resolução mDNS, conexão TCP ou início do GET. `HEAD /listen` confirma escuta autenticada sem mudar o long-poll nem o 401 de revogação. Testes de contrato vermelhos precedem a correção; nenhum outro comportamento do protocolo entra neste ticket.
