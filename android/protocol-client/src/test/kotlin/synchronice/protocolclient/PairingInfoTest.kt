@@ -52,6 +52,19 @@ class PairingInfoTest {
     }
 
     @Test
+    fun `whitespace fora do JSON e recusado no QR`() {
+        val valid = """{"instance_name":"synchronice-12345678","port":47820,"token":"0123456789abcdef0123456789abcdef"}"""
+        val verticalTab = 11.toChar()
+
+        for (malformed in listOf(
+            valid.replace("\"token\"", "$verticalTab\"token\""),
+            valid.replace("47820,", "47820$verticalTab,"),
+        )) {
+            assertFailsWith<IllegalArgumentException> { parsePairingQr(malformed) }
+        }
+    }
+
+    @Test
     fun `campo ausente e recusado`() {
         assertFailsWith<IllegalArgumentException> {
             parsePairingQr("""{"instance_name":"synchronice-12345678","port":47820}""")

@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -103,6 +103,8 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   JSON entre tokens (por exemplo U+000B), com os três campos obrigatórios válidos.
 
 ## Comments
+
+- 2026-09-26 Stage 2 (quinta reabertura): teste do QR com tab vertical entre campos e após a porta. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: 43 testes do cliente Android, 1 falhou (`whitespace fora do JSON e recusado no QR`); os testes Rust e Node passaram.
 
 - 2026-09-24 Attempt 1 failed: exit 0. Log tail: Encontrei SYN-012 em `Stage: to-implement`, com árvore de trabalho limpa. O binding do repositório atribui o stage 2 ao **gpt-6-luna max**, mas esta sessão não está identificada como esse modelo. Pelo `ticket-flow`, devo parar sem implementar; o próximo passo é executar SYN-012 com gpt-6-luna max.
 
