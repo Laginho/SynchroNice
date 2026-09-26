@@ -5,10 +5,16 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URI
 import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 /** O PC recusou a requisição (ex.: token errado) — não é indisponibilidade. */
@@ -171,28 +177,50 @@ class ProtocolClient(
         itemId: String? = null,
         onFileStart: (Long) -> Unit = {},
     ): SendOutcome {
-        var connection: HttpURLConnection? = null
+        val socket = Socket()
         return try {
-            connection = open("/items/file", "POST")
-            connection.doOutput = true
-            itemId?.let { connection.setRequestProperty("X-Item-Id", it) }
-            connection.setRequestProperty("X-File-Name-Utf8", URLEncoder.encode(displayName, Charsets.UTF_8).replace("+", "%20"))
-            if (displayName.all { it in ' '..'~' }) {
-                connection.setRequestProperty("X-File-Name", displayName)
-            }
+            val address = currentAddress()
+            socket.connect(InetSocketAddress(address, pairing.port), 5_000)
+            socket.soTimeout = 30_000
             val total = file.length()
-            connection.setFixedLengthStreamingMode(total)
+            val encodedName = URLEncoder.encode(displayName, Charsets.UTF_8).replace("+", "%20")
+            val output = socket.getOutputStream()
+            output.write(buildString {
+                append("POST /items/file HTTP/1.1\r\n")
+                append("Host: ").append(if (':' in address) "[$address]" else address).append(':').append(pairing.port).append("\r\n")
+                append("Authorization: Bearer ").append(pairing.token).append("\r\n")
+                itemId?.let { append("X-Item-Id: ").append(it).append("\r\n") }
+                append("X-File-Name-Utf8: ").append(encodedName).append("\r\n")
+                if (displayName.all { it in ' '..'~' }) append("X-File-Name: ").append(displayName).append("\r\n")
+                append("Content-Length: ").append(total).append("\r\n")
+                append("Connection: close\r\n\r\n")
+            }.toByteArray(Charsets.US_ASCII))
+            output.flush()
+
+            val response = FutureTask {
+                val reader = socket.getInputStream().bufferedReader(Charsets.US_ASCII)
+                var code: Int
+                do {
+                    code = reader.readLine()?.split(' ')?.getOrNull(1)?.toIntOrNull()
+                        ?: throw IOException("resposta HTTP inválida")
+                    while (reader.readLine()?.isNotEmpty() == true) Unit
+                } while (code < 200)
+                try {
+                    socket.shutdownOutput()
+                } catch (_: IOException) {
+                }
+                code
+            }
+            Thread(response, "synchronice-upload-response").apply { isDaemon = true }.start()
             try {
                 file.inputStream().use { input ->
-                    connection.outputStream.use { output ->
-                        onFileStart(total)
-                        pump(input, output, total, onProgress)
-                    }
+                    onFileStart(total)
+                    pump(input, output, total, onProgress)
                 }
+                output.flush()
             } catch (_: IOException) {
-                // O PC pode confirmar um id conhecido antes de consumir o corpo.
             }
-            val code = connection.responseCode
+            val code = response.get(30, TimeUnit.SECONDS)
             if (code == HttpURLConnection.HTTP_CREATED) {
                 onProgress(100)
                 SendOutcome.Success
@@ -203,8 +231,12 @@ class ProtocolClient(
             }
         } catch (_: IOException) {
             SendOutcome.Unreachable
+        } catch (_: ExecutionException) {
+            SendOutcome.Unreachable
+        } catch (_: TimeoutException) {
+            SendOutcome.Unreachable
         } finally {
-            connection?.disconnect()
+            socket.close()
         }
     }
 
