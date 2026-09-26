@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -149,3 +149,38 @@ Verdict: Reopen — os critérios 2, 7 e 8 precisam de testes e correção.
 - Gate completo verde: `cargo fmt --check`, `cargo clippy`, 41 testes Rust,
   `tsc --noEmit`, 24 testes Node, 48 testes do cliente Android, 2 testes do app
   Android e lint.
+
+#### Review (2026-09-26, segunda revisão)
+
+Verdict: Reopen — critério 9 tem uma corrida e a prova do critério 2 ainda não cobre a perda da resposta.
+
+- Standards: nenhuma violação documentada. Permanecem os julgamentos não
+  bloqueantes de manutenção: `AppState.sendText` só tem chamadores nos testes,
+  e `hasPending`/`hasLargePending` interpretam a fila pertencente ao cliente.
+  Não ampliar esta correção para limpar esses caminhos.
+- ❌ **Critério 9:** `AppState.queueFile` libera `outboundMutex` depois de
+  enfileirar, antes de adicionar a bolha e seu id a `submitted`. Um worker já
+  ativo pode adquirir o mutex, entregar o arquivo e reconciliar a fila nesse
+  intervalo. A continuação então registra a bolha como Pendente; o próximo
+  `DeliveryWorker` retorna cedo porque a fila está vazia e não a reconcilia.
+  O registro da bolha precisa participar da mesma exclusão da reconciliação.
+  Stage 2 deve primeiro reproduzir essa intercalação em teste no app, usando
+  o caminho de produção de `queueFile`/`retryPending`, e só depois corrigir.
+- ❌ **Prova do critério 2:** o teste `id do Pendente sobrevive a falha e
+  recriacao da fila` devolve 503 explicitamente. Os testes Rust recebem o 201
+  antes de repetir o POST. Nenhum cobre o destinatário aceitar o Item e a
+  conexão cair antes da confirmação chegar ao cliente, como exige a seção
+  de testes. Cobrir texto e arquivo com resposta perdida, reconstrução da
+  fila, manutenção do id e remoção do Pendente após confirmação no retry.
+  Incluir arquivo grande: o servidor responde cedo a ids conhecidos enquanto
+  o cliente ainda escreve o corpo; a compatibilidade desse caminho precisa
+  ser demonstrada (não foi reproduzida falha nesta revisão).
+- Critérios 7 e 8: as correções estão presentes; a callback usa o tamanho do
+  arquivo efetivamente drenado sob mutex e só ocorre após abrir a conexão.
+- Gate desta revisão: passou com 41 testes Rust, 24 Node, 48 do cliente
+  Android e 2 do app, além de fmt, clippy, typecheck e lint. Gradle reutilizou
+  resultados atualizados. A primeira execução falhou no sandbox por acesso a
+  `C:\.android`; a repetição com acesso ampliado passou.
+- Sem merge e sem entrada no ledger. Os achados exigem testes novos, por isso
+  voltam ao stage 2 conforme `ticket-flow`; nenhuma correção de produção foi
+  feita nesta revisão. O débito humano registrado acima permanece.
