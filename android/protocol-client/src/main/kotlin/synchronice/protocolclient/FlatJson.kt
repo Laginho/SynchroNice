@@ -10,7 +10,10 @@ internal fun parseFlatJsonObject(json: String): Map<String, String> {
     var i = skipWhitespace(json, 0)
     require(i < json.length && json[i] == '{') { "esperava '{': $json" }
     i = skipWhitespace(json, i + 1)
-    if (i < json.length && json[i] == '}') return result
+    if (i < json.length && json[i] == '}') {
+        require(skipWhitespace(json, i + 1) == json.length) { "conteúdo depois de '}': $json" }
+        return result
+    }
     while (true) {
         i = skipWhitespace(json, i)
         val (key, afterKey) = parseJsonString(json, i)
@@ -18,11 +21,15 @@ internal fun parseFlatJsonObject(json: String): Map<String, String> {
         require(json[i] == ':') { "esperava ':': $json" }
         i = skipWhitespace(json, i + 1)
         val (value, afterValue) = if (json[i] == '"') parseJsonString(json, i) else parseJsonNumber(json, i)
+        require(key !in result) { "chave JSON duplicada: $key" }
         result[key] = value
         i = skipWhitespace(json, afterValue)
         when (json[i]) {
             ',' -> i = skipWhitespace(json, i + 1)
-            '}' -> return result
+            '}' -> {
+                require(skipWhitespace(json, i + 1) == json.length) { "conteúdo depois de '}': $json" }
+                return result
+            }
             else -> error("esperava ',' ou '}': $json")
         }
     }
