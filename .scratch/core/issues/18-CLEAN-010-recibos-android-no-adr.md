@@ -1,5 +1,5 @@
 # CLEAN-010: Registrar recibos Android no ADR-0002
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -33,3 +33,9 @@ Nenhum: o ticket altera apenas documentação.
 
 - 2026-09-26 Achado de Standards na revisão de SYN-014; fora dos Primary
   files daquele ticket.
+- 2026-09-26 Stage 2: ADR-0002 registra o recibo transitório ligado ao Par,
+  sua remoção após o ACK e a Sessão apenas em memória. Diff revisado contra
+  os critérios 1 e 2; sem testes novos conforme o contrato documental.
+  Gate completo passou fora do sandbox (44 testes Rust, 32 testes Node;
+  Gradle check bem-sucedido, testes Android UP-TO-DATE). A primeira execução
+  no sandbox falhou em Rust e no acesso do Gradle a `C:\.android`.
