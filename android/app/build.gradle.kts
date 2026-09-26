@@ -42,6 +42,7 @@ dependencies {
     implementation("com.google.zxing:core:3.5.4")
 
     testImplementation(kotlin("test-junit"))
+    testImplementation("androidx.work:work-testing:2.12.0")
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

@@ -29,6 +29,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -52,6 +55,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -78,7 +82,7 @@ class SynchroNiceApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         state = AppState(this)
-        if (state.pairing != null && state.hasPending()) scheduleDelivery(this)
+        if (state.hasPending()) scheduleDelivery(this)
     }
 }
 
@@ -143,7 +147,16 @@ internal class AppState(context: Context) {
             return false
         }
 
+        if (pairingPreferences.getBoolean("discard-pending", false)) {
+            try {
+                queueStore.clear()
+            } catch (error: IOException) {
+                pairingError = "Não foi possível limpar os Pendentes do Par anterior: ${error.message}"
+                return false
+            }
+        }
         pairingPreferences.edit()
+            .remove("discard-pending")
             .putString("instance-name", newPair.instanceName)
             .putInt("port", newPair.port)
             .putString("token", newPair.token)
@@ -157,6 +170,52 @@ internal class AppState(context: Context) {
         protocolClient = null
         clientFor = null
         return true
+    }
+
+    suspend fun unpair(expected: PairingInfo? = pairing) {
+        val currentPair = expected
+        try {
+            withContext(Dispatchers.IO + NonCancellable) {
+                outboundMutex.withLock {
+                    if (withContext(Dispatchers.Main.immediate) { pairing != currentPair }) return@withLock
+                    val removal = pairingPreferences.edit()
+                    removal.clear()
+                    removal.putBoolean("discard-pending", true)
+                    if (currentPair != null && !removal.commit()) {
+                        // SharedPreferences also changes its memory cache when commit fails.
+                        pairingPreferences.edit()
+                            .remove("discard-pending")
+                            .putString("instance-name", currentPair.instanceName)
+                            .putInt("port", currentPair.port)
+                            .putString("token", currentPair.token)
+                            .apply()
+                        throw IOException("não foi possível apagar o Par")
+                    }
+                    try {
+                        queueStore.clear()
+                        pairingPreferences.edit().remove("discard-pending").apply()
+                    } finally {
+                        withContext(Dispatchers.Main.immediate) {
+                            protocolClient?.closeListen()
+                            networkPreferences.edit().remove("last-address").apply()
+                            protocolClient = null
+                            clientFor = null
+                            pairing = null
+                            online = false
+                            pairingError = null
+                            connectionError = null
+                            messages.clear()
+                            submitted.clear()
+                            receivedIds.clear()
+                        }
+                    }
+                }
+            }
+        } catch (error: IOException) {
+            withContext(Dispatchers.Main.immediate) {
+                connectionError = "Não foi possível desparear: ${error.message ?: "erro de disco"}"
+            }
+        }
     }
 
     @Synchronized
@@ -222,10 +281,12 @@ internal class AppState(context: Context) {
     }
 
     suspend fun sendText(id: Long, text: String) {
+        val currentPair = pairing ?: return
         val currentClient = client() ?: return
         try {
             withContext(Dispatchers.IO) {
                 outboundMutex.withLock {
+                    if (currentClient !== protocolClient) return@withLock
                     submitted.addLast(id)
                     try {
                         currentClient.sendText(text)
@@ -242,6 +303,10 @@ internal class AppState(context: Context) {
             }
         } catch (error: Exception) {
             if (error is CancellationException) throw error
+            if (error is ProtocolRejectedException && error.code == 401) {
+                unpair(currentPair)
+                return
+            }
             withContext(Dispatchers.Main.immediate) {
                 setDelivery(id, Delivery.FAILED)
                 connectionError = if (error is ProtocolRejectedException) {
@@ -257,16 +322,23 @@ internal class AppState(context: Context) {
         onFileProgress: (Int) -> Unit = {},
         onFileStart: (Long) -> Unit = {},
     ) {
-        val currentClient = client() ?: return
-        outboundMutex.withLock {
-            try {
-                currentClient.retryPending(onFileProgress, onFileStart)
-            } finally {
-                val remaining = queueStore.load().size
-                withContext(Dispatchers.Main.immediate) {
-                    reconcilePendingDelivery(messages, submitted, remaining)
+        val currentPair = pairing
+        val currentClient = client() ?: run { unpair(); return }
+        try {
+            outboundMutex.withLock {
+                if (currentClient !== protocolClient) return@withLock
+                try {
+                    currentClient.retryPending(onFileProgress, onFileStart)
+                } finally {
+                    val remaining = queueStore.load().size
+                    withContext(Dispatchers.Main.immediate) {
+                        reconcilePendingDelivery(messages, submitted, remaining)
+                    }
                 }
             }
+        } catch (error: ProtocolRejectedException) {
+            if (error.code != 401) throw error
+            unpair(currentPair)
         }
     }
 
@@ -279,10 +351,6 @@ internal class AppState(context: Context) {
 
     fun updateOnline(value: Boolean) {
         online = value
-    }
-
-    fun showConnectionError(message: String?) {
-        connectionError = message
     }
 
     private fun setDelivery(id: Long, delivery: Delivery) {
@@ -317,7 +385,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    if (state.pairing == null) PairingScreen(state) else ChatScreen(state)
+                    var showSettings by remember(state.pairing) { mutableStateOf(false) }
+                    if (state.pairing == null) PairingScreen(state)
+                    else if (showSettings) SettingsScreen(state, onBack = { showSettings = false })
+                    else ChatScreen(state, onSettings = { showSettings = true })
                 }
             }
         }
@@ -358,7 +429,7 @@ private fun PairingScreen(state: AppState) {
 }
 
 @Composable
-private fun ChatScreen(state: AppState) {
+private fun ChatScreen(state: AppState, onSettings: () -> Unit) {
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) {
@@ -381,7 +452,12 @@ private fun ChatScreen(state: AppState) {
     Column(Modifier.fillMaxSize().imePadding().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("SynchroNice", style = MaterialTheme.typography.titleLarge)
-            Text(if (state.online) "Na rede" else "Fora da rede", color = if (state.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (state.online) "Na rede" else "Fora da rede", color = if (state.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                TextButton(onClick = onSettings, modifier = Modifier.semantics { contentDescription = "Configurações" }) {
+                    Text("⚙", style = MaterialTheme.typography.titleLarge)
+                }
+            }
         }
         state.connectionError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp)) }
         if (state.messages.isEmpty()) {
@@ -417,6 +493,19 @@ private fun ChatScreen(state: AppState) {
                 },
             ) { Text("Enviar") }
         }
+    }
+}
+
+@Composable
+private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("Voltar") }
+        Text("Configurações", style = MaterialTheme.typography.headlineSmall)
+        Button(onClick = { scope.launch { state.unpair() } }, modifier = Modifier.padding(top = 24.dp)) {
+            Text("Desparear")
+        }
+        state.connectionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }
 
@@ -483,7 +572,7 @@ private fun ConnectionLifecycle(state: AppState) {
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (_: Exception) {
-                                // DNS lookup and send retries do not define the /listen presence.
+                                // DNS lookup does not define the /listen presence.
                             }
                             delay(4_000)
                         }
@@ -496,11 +585,11 @@ private fun ConnectionLifecycle(state: AppState) {
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (error: ProtocolRejectedException) {
-                                withContext(Dispatchers.Main.immediate) {
-                                    state.updateOnline(false)
-                                    state.showConnectionError("O PC recusou o Par (HTTP ${error.code}).")
+                                if (error.code == 401) {
+                                    state.unpair(currentPair)
+                                    break
                                 }
-                                break
+                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
                             } catch (_: Exception) {
                                 withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
                             }
@@ -522,11 +611,12 @@ private fun ConnectionLifecycle(state: AppState) {
                             } catch (_: SocketTimeoutException) {
                                 // Reopen the idle long-poll so mDNS can resolve a changed PC address.
                             } catch (error: ProtocolRejectedException) {
-                                withContext(Dispatchers.Main.immediate) {
-                                    state.updateOnline(false)
-                                    state.showConnectionError("O PC recusou o Par (HTTP ${error.code}).")
+                                if (error.code == 401) {
+                                    state.unpair(currentPair)
+                                    break
                                 }
-                                break
+                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
+                                delay(1_000)
                             } catch (error: IOException) {
                                 withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
                                 delay(1_000)
