@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -103,6 +103,8 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   JSON entre tokens (por exemplo U+000B), com os três campos obrigatórios válidos.
 
 ## Comments
+
+- 2026-09-26 Stage 2 (sexta reabertura) concluído: `f94a90b` contém só testes e configuração de teste; o vermelho funcional foi a presença ainda verdadeira após `MainActivity.resume()`, antes de nova confirmação de `/listen`. `4674863` limpa a presença no `ON_RESUME` e remove o helper de teste sem uso. `gate.ps1 -TestsOnly` e o gate completo passaram: 38 Rust, 24 Node e 45 Kotlin (43 cliente, 2 app), além de fmt, clippy, typecheck e lint Android. O Débito humano dos critérios 3–9 permanece.
 
 - 2026-09-26 Stage 2 (sexta reabertura): testes agora atravessam a Activity real em `PresenceLifecycleTest.kt` e o `AppState` com HTTP falso em `PendingDeliveryTest.kt`, sem chamar os helpers internos. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: a Activity deixa `online = true` após `resume` antes de uma nova confirmação de `/listen`; o teste de entrega parcial passou. Rust e Node passaram (38 e 24 testes).
 
