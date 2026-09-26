@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -174,3 +174,4 @@ Verdict: Reopen — critérios 1 e 4 ainda falham.
 - 2026-09-26 Stage 2 test-only: adicionado o caso de número JSON inválido em campo extra e os contratos de presença. `gate.ps1 -TestsOnly`: Rust 37 passaram e o novo teste HEAD falhou por timeout (sem rota HEAD, a requisição cai no GET long-poll); Node 24 passaram. O Android não compilou: este ambiente só tem JDK 25/26, sem a toolchain 17 exigida pelo Gradle.
 
 - 2026-09-26 Proxy: stage 2 expirou após 45 minutos. Os testes ficaram nos commits `9efe6a5` e `6c05a96`; o diff de implementação não commitado foi salvo em `.scratch/run-log/SYN-012-rescue-20260926-1032.patch` e restaurado sem alterações no commit WIP `5db2386`. O gate Android estava em execução no timeout, portanto o verde desse diff ainda não foi comprovado. Retomar a implementação e a verificação a partir desses commits.
+- 2026-09-26 Stage 2 concluído: o vermelho em `6c05a96` confirmou a rota HEAD ausente (o pedido caiu no GET long-poll e expirou) e a API `isListening()` ausente (falha de compilação dos testes Kotlin). Com a implementação, `gate.ps1 -TestsOnly` passou e o gate completo passou: 38 testes Rust, 24 Node, 38 Kotlin, `tsc --noEmit`, clippy/fmt e `:app:check` com compilação e lint. `8add947` só formatou o novo teste Rust, sem alterar asserções. O débito humano dos critérios 3–9 registrado acima continua pendente.

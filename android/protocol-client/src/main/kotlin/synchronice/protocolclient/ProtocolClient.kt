@@ -266,9 +266,8 @@ class ProtocolClient(
 
     /** Confirma a presença do cliente pela escuta GET aberta no outro lado. */
     fun isListening(): Boolean {
-        var connection: HttpURLConnection? = null
+        val connection = open("/listen", "HEAD").apply { readTimeout = 5_000 }
         return try {
-            connection = open("/listen", "HEAD").apply { readTimeout = 5_000 }
             when (val status = connection.responseCode) {
                 HttpURLConnection.HTTP_OK -> true
                 HttpURLConnection.HTTP_UNAUTHORIZED -> throw ProtocolRejectedException(status)
@@ -277,7 +276,7 @@ class ProtocolClient(
         } catch (_: IOException) {
             false
         } finally {
-            connection?.disconnect()
+            connection.disconnect()
         }
     }
 
