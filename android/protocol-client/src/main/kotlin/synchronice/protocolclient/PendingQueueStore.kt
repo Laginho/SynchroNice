@@ -80,10 +80,10 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     }
 
     override fun clear() {
-        persist(emptyList())
-        val discarded = items.toList()
+        persist(emptyList()) {
+            items.filterIsInstance<PendingItem.File>().forEach { Files.deleteIfExists(File(it.path).toPath()) }
+        }
         items.clear()
-        discarded.filterIsInstance<PendingItem.File>().forEach { File(it.path).delete() }
     }
 
     /**
@@ -129,10 +129,11 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
      * essa janela — o temporário fica na mesma pasta do arquivo final
      * justamente para o rename atômico ser sempre possível.
      */
-    private fun persist(nextItems: List<PendingItem>) {
+    private fun persist(nextItems: List<PendingItem>, beforeCommit: () -> Unit = {}) {
         file.parentFile?.mkdirs()
         val tempFile = File(file.parentFile ?: File("."), "${file.name}.tmp")
         tempFile.writeText(nextItems.joinToString("") { encodeLine(it) + "\n" })
+        beforeCommit()
         Files.move(
             tempFile.toPath(),
             file.toPath(),
