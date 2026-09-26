@@ -52,7 +52,8 @@ private fun parseJsonString(json: String, start: Int): Pair<String, Int> {
                     sb.append(json.substring(i + 1, i + 5).toInt(16).toChar())
                     i += 4
                 }
-                else -> sb.append(escaped)
+                '"', '\\', '/' -> sb.append(escaped)
+                else -> error("escape JSON inválido")
             }
         } else {
             sb.append(json[i])
