@@ -5,10 +5,17 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URI
 import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 /** O PC recusou a requisição (ex.: token errado) — não é indisponibilidade. */
@@ -73,6 +80,12 @@ class ProtocolClient(
         )
     }
 
+    /** Persiste um Item antes de entregá-lo a um executor em segundo plano. */
+    fun enqueueText(text: String) = enqueue(PendingItem.Text(text))
+
+    /** Faz uma cópia interna antes de a URI ou o arquivo de origem desaparecer. */
+    fun enqueueFile(file: File) = enqueue(PendingItem.File(file.absolutePath, file.name))
+
     /**
      * Caminho único de envio: drena o Pendente antes, nunca fura a fila; se
      * ainda houver Pendente à frente ou o PC estiver indisponível, o Item
@@ -99,7 +112,10 @@ class ProtocolClient(
      * arquivo Pendente cujo payload sumiu é descartado em vez de travar a
      * fila para sempre.
      */
-    fun retryPending() {
+    fun retryPending(
+        onFileProgress: (Int) -> Unit = {},
+        onFileStart: (Long) -> Unit = {},
+    ) {
         while (true) {
             val next = pending.firstOrNull() ?: return
             if (next is PendingItem.File && !File(next.path).exists()) {
@@ -107,8 +123,14 @@ class ProtocolClient(
                 continue
             }
             val outcome = when (next) {
-                is PendingItem.Text -> trySendText(next.text)
-                is PendingItem.File -> trySendFile(File(next.path), next.name) {}
+                is PendingItem.Text -> trySendText(next.text, next.id)
+                is PendingItem.File -> trySendFile(
+                    File(next.path),
+                    next.name,
+                    onFileProgress,
+                    next.id,
+                    onFileStart,
+                )
             }
             when (outcome) {
                 SendOutcome.Success -> dequeueFirst()
@@ -118,9 +140,10 @@ class ProtocolClient(
         }
     }
 
-    private fun enqueue(item: PendingItem) {
-        val stored = queueStore.enqueue(item) ?: return
+    private fun enqueue(item: PendingItem): Boolean {
+        val stored = queueStore.enqueue(item) ?: return false
         pending.add(stored)
+        return true
     }
 
     private fun dequeueFirst() {
@@ -128,11 +151,12 @@ class ProtocolClient(
         pending.removeAt(0)
     }
 
-    private fun trySendText(text: String): SendOutcome {
+    private fun trySendText(text: String, itemId: String? = null): SendOutcome {
         var connection: HttpURLConnection? = null
         return try {
             connection = open("/items/text", "POST")
             connection.doOutput = true
+            itemId?.let { connection.setRequestProperty("X-Item-Id", it) }
             connection.outputStream.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             when (code) {
@@ -147,21 +171,81 @@ class ProtocolClient(
         }
     }
 
-    private fun trySendFile(file: File, displayName: String, onProgress: (Int) -> Unit): SendOutcome {
-        var connection: HttpURLConnection? = null
+    private fun trySendFile(
+        file: File,
+        displayName: String,
+        onProgress: (Int) -> Unit,
+        itemId: String? = null,
+        onFileStart: (Long) -> Unit = {},
+    ): SendOutcome {
+        val socket = Socket()
+        val writes = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "synchronice-upload-writer").apply { isDaemon = true }
+        }
         return try {
-            connection = open("/items/file", "POST")
-            connection.doOutput = true
-            connection.setRequestProperty("X-File-Name-Utf8", URLEncoder.encode(displayName, Charsets.UTF_8).replace("+", "%20"))
-            if (displayName.all { it in ' '..'~' }) {
-                connection.setRequestProperty("X-File-Name", displayName)
-            }
+            val address = currentAddress()
+            socket.connect(InetSocketAddress(address, pairing.port), 5_000)
             val total = file.length()
-            connection.setFixedLengthStreamingMode(total)
-            file.inputStream().use { input ->
-                connection.outputStream.use { output -> pump(input, output, total, onProgress) }
+            val encodedName = URLEncoder.encode(displayName, Charsets.UTF_8).replace("+", "%20")
+            val output = socket.getOutputStream()
+            output.write(buildString {
+                append("POST /items/file HTTP/1.1\r\n")
+                append("Host: ").append(if (':' in address) "[$address]" else address).append(':').append(pairing.port).append("\r\n")
+                append("Authorization: Bearer ").append(pairing.token).append("\r\n")
+                itemId?.let { append("X-Item-Id: ").append(it).append("\r\n") }
+                append("X-File-Name-Utf8: ").append(encodedName).append("\r\n")
+                if (displayName.all { it in ' '..'~' }) append("X-File-Name: ").append(displayName).append("\r\n")
+                append("Content-Length: ").append(total).append("\r\n")
+                append("Connection: close\r\n\r\n")
+            }.toByteArray(Charsets.US_ASCII))
+            output.flush()
+
+            val response = FutureTask {
+                try {
+                    val reader = socket.getInputStream().bufferedReader(Charsets.US_ASCII)
+                    var code: Int
+                    do {
+                        code = reader.readLine()?.split(' ')?.getOrNull(1)?.toIntOrNull()
+                            ?: throw IOException("resposta HTTP inválida")
+                        while (reader.readLine()?.isNotEmpty() == true) Unit
+                    } while (code < 200)
+                    try {
+                        socket.shutdownOutput()
+                    } catch (_: IOException) {
+                    }
+                    code
+                } catch (e: Exception) {
+                    socket.close()
+                    throw e
+                }
             }
-            val code = connection.responseCode
+            Thread(response, "synchronice-upload-response").apply { isDaemon = true }.start()
+
+            fun timedWrite(action: () -> Unit) {
+                try {
+                    writes.submit(action).get(30, TimeUnit.SECONDS)
+                } catch (_: TimeoutException) {
+                    socket.close()
+                    throw IOException("escrita do upload excedeu 30 segundos")
+                } catch (e: ExecutionException) {
+                    throw (e.cause as? IOException ?: IOException("falha ao escrever upload", e.cause))
+                }
+            }
+            val timedOutput = object : OutputStream() {
+                override fun write(byte: Int) = timedWrite { output.write(byte) }
+                override fun write(bytes: ByteArray, offset: Int, length: Int) =
+                    timedWrite { output.write(bytes, offset, length) }
+                override fun flush() = timedWrite { output.flush() }
+            }
+            try {
+                file.inputStream().use { input ->
+                    onFileStart(total)
+                    pump(input, timedOutput, total, onProgress)
+                }
+                timedOutput.flush()
+            } catch (_: IOException) {
+            }
+            val code = response.get(30, TimeUnit.SECONDS)
             if (code == HttpURLConnection.HTTP_CREATED) {
                 onProgress(100)
                 SendOutcome.Success
@@ -172,8 +256,13 @@ class ProtocolClient(
             }
         } catch (_: IOException) {
             SendOutcome.Unreachable
+        } catch (_: ExecutionException) {
+            SendOutcome.Unreachable
+        } catch (_: TimeoutException) {
+            SendOutcome.Unreachable
         } finally {
-            connection?.disconnect()
+            writes.shutdownNow()
+            socket.close()
         }
     }
 
