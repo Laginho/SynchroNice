@@ -42,7 +42,7 @@ private fun tempFile(bytes: ByteArray): File =
 class ProtocolClientTest {
 
     @Test
-    fun `id do Pendente sobrevive a falha e recriacao da fila`() {
+    fun `texto aceito sem resposta mantem id ate confirmacao no retry`() {
         val dir = kotlin.io.path.createTempDirectory("pending-item-id").toFile()
         val queue = File(dir, "pending.txt")
         val ids = mutableListOf<String?>()
@@ -51,12 +51,48 @@ class ProtocolClientTest {
         val server = fakeServer(port, "/items/text") { exchange ->
             ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
             exchange.requestBody.readBytes()
-            exchange.sendResponseHeaders(if (attempts.incrementAndGet() == 1) 503 else 201, -1)
+            if (attempts.incrementAndGet() > 1) exchange.sendResponseHeaders(201, -1)
             exchange.close()
         }
         try {
             val sender = client(port, FilePendingQueueStore(queue))
             sender.enqueueText("texto")
+            sender.retryPending()
+            assertTrue(sender.hasPending())
+
+            val restored = client(port, FilePendingQueueStore(queue))
+            restored.retryPending()
+
+            assertEquals(2, ids.size)
+            assertTrue(ids.first()?.isNotBlank() == true)
+            assertEquals(ids.first(), ids.last())
+            assertFalse(restored.hasPending())
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `arquivo grande aceito sem resposta mantem id e retry confirma sem reenviar corpo`() {
+        val dir = kotlin.io.path.createTempDirectory("pending-file-id").toFile()
+        val queue = File(dir, "pending.txt")
+        val original = File(dir, "video.bin").apply { writeBytes(ByteArray(10 * 1024 * 1024)) }
+        val ids = mutableListOf<String?>()
+        val attempts = java.util.concurrent.atomic.AtomicInteger()
+        val port = freePort()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            if (attempts.incrementAndGet() == 1) {
+                exchange.requestBody.readBytes()
+            } else {
+                exchange.sendResponseHeaders(201, -1)
+            }
+            exchange.close()
+        }
+        try {
+            val sender = client(port, FilePendingQueueStore(queue))
+            sender.enqueueFile(original)
             sender.retryPending()
             assertTrue(sender.hasPending())
 
