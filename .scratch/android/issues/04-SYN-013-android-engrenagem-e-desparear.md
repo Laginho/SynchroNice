@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: reviewing
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -26,11 +26,11 @@ que o Desparear, sozinho. HTTP 503 continua sendo "tentar de novo".
 
 #### Acceptance criteria
 
-1. A fila de Pendentes do módulo cliente pode ser descartada inteira: depois do descarte, a fila fica vazia em disco e os arquivos copiados para a pasta interna somem. Falha ao excluir uma cópia não pode ser tratada como descarte concluído nem perder a referência necessária para nova limpeza.
+1. ❌ A fila de Pendentes do módulo cliente pode ser descartada inteira: depois do descarte, a fila fica vazia em disco e os arquivos copiados para a pasta interna somem. `File.delete()` pode falhar silenciosamente e deixar a cópia interna para trás. Falha ao excluir uma cópia não pode ser tratada como descarte concluído nem perder a referência necessária para nova limpeza.
 2. Um descarte que falha na escrita não deixa a memória e o disco discordando (mesma garantia do enfileirar e do desenfileirar).
 3. A engrenagem no topo do chat abre a tela de configurações, com "Desparear".
-4. "Desparear" apaga o Par, descarta os Pendentes e abre a câmera; ler um QR pareia de novo. Se a gravação que apaga o Par falhar, o Par e os Pendentes antigos permanecem juntos, sem perda parcial.
-5. Com o PC re-pareado com outro aparelho, a próxima requisição do celular, inclusive pelo `DeliveryWorker`, recebe 401 e desfaz o Par e os Pendentes. Se o app estiver aberto, volta à câmera; se estiver fechado, a próxima abertura vai à câmera. HTTP 503 mantém Par e Pendentes para retry.
+4. ❌ "Desparear" apaga o Par, descarta os Pendentes e abre a câmera; ler um QR pareia de novo. Se apagar o Par persistido falha depois de limpar a fila, o Par é mantido mas os Pendentes já foram perdidos. Falha na gravação que apaga o Par deve manter o Par e os Pendentes antigos juntos.
+5. ❌ Com o PC re-pareado com outro aparelho, a próxima requisição do celular recebe 401, e o app desfaz o Par e abre a câmera sozinho. O `DeliveryWorker`, dono atual dos reenvios, converte 401 em `Result.retry()`. Também nele, 401 deve descartar Par/Pendentes; se o app estiver fechado, a próxima abertura vai à câmera. HTTP 503 mantém Par/Pendentes e retorna retry.
 
 #### Verification
 
@@ -61,3 +61,11 @@ Critérios 3 a 5 são no aparelho: verificação manual.
 - 2026-09-26 Attempt 1 stopped to ask: SYN-013 ficou `blocked`, registrado no commit `cd2a42d`. Nenhum código alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando falta uma costura de teste aprovada: “a seam the ticket does not name”. Você autoriza incorporar ao contrato testes do Desparear e do HTTP 401/503 no `DeliveryWorker`?
 
 - Débito humano: no aparelho, abrir a engrenagem, tocar Desparear, ler outro QR e conferir que HTTP 401 volta sozinho à câmera; não havia aparelho conectado nem janela de emulador para inspeção por Computer Use.
+
+#### Review (2026-09-26)
+
+Verdict: Reopen — critérios 1, 4 e 5 precisam de novos testes.
+
+- Spec: testar falha de exclusão do payload, falha entre as duas persistências do Desparear e HTTP 401 no `DeliveryWorker`; 503 continua sendo retry.
+- Standards: remover o tratamento morto de 401 no loop que agora só resolve DNS e concentrar a política no caminho que realmente executa cada requisição.
+- O Computer Use não encontrou app nem emulador aberto; o débito humano acima permanece.
