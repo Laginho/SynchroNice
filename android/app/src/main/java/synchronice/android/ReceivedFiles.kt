@@ -61,11 +61,9 @@ internal class ReceivedFiles(context: Context) {
         try {
             val output = resolver.openOutputStream(uri, "w") ?: throw IOException("não foi possível abrir o destino")
             client.downloadFile(item, output, onSaved = {
-                if (tree == null && resolver.update(uri, ContentValues().apply {
-                    put(MediaStore.MediaColumns.IS_PENDING, 0)
-                }, null, null) != 1) throw IOException("não foi possível publicar o arquivo")
                 onSaved(uri)
                 saved = true
+                publish(uri)
             }, onProgress = onProgress)
         } catch (error: Exception) {
             if (!saved) {
@@ -79,5 +77,11 @@ internal class ReceivedFiles(context: Context) {
             }
             throw error
         }
+    }
+
+    fun publish(uri: Uri) {
+        if (uri.authority == MediaStore.AUTHORITY && resolver.update(uri, ContentValues().apply {
+            put(MediaStore.MediaColumns.IS_PENDING, 0)
+        }, null, null) != 1) throw IOException("não foi possível publicar o arquivo")
     }
 }

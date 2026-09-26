@@ -407,7 +407,10 @@ internal class AppState(context: Context) {
             withContext(Dispatchers.IO) {
                 kotlinx.coroutines.runInterruptible {
                     var lastProgress = -1
-                    if (savedUri != null) currentClient.acknowledgeFile(item)
+                    if (savedUri != null) {
+                        files.publish(savedUri)
+                        currentClient.acknowledgeFile(item)
+                    }
                     else files.receive(currentClient, item, onSaved = { uri ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
                             if (currentClient !== protocolClient) throw IOException("Par alterado durante o download")
