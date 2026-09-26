@@ -7,6 +7,7 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -300,6 +301,36 @@ class ProtocolClientTest {
                 result.get(40, TimeUnit.SECONDS)
             }
             assertTrue(failure.cause is java.net.SocketTimeoutException)
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `fechar escuta encerra GET ativo sem esperar timeout`() {
+        val port = freePort()
+        val entered = CountDownLatch(1)
+        val server = fakeServer(port, "/listen") { exchange ->
+            entered.countDown()
+            try {
+                Thread.sleep(10_000)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val receiver = client(port)
+            val result = executor.submit<List<Item>> { receiver.listen() }
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+
+            receiver.closeListen()
+
+            val failure = assertFailsWith<java.util.concurrent.ExecutionException> {
+                result.get(3, TimeUnit.SECONDS)
+            }
+            assertTrue(failure.cause is IOException)
         } finally {
             server.stop(0)
             executor.shutdownNow()
