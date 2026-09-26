@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: implementing
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -184,3 +184,5 @@ Verdict: Reopen — critério 9 tem uma corrida e a prova do critério 2 ainda n
 - Sem merge e sem entrada no ledger. Os achados exigem testes novos, por isso
   voltam ao stage 2 conforme `ticket-flow`; nenhuma correção de produção foi
   feita nesta revisão. O débito humano registrado acima permanece.
+
+- 2026-09-26 Stage 2 bloqueado: o teste comprometido `texto aceito sem resposta mantem id ate confirmacao no retry` se provou incorreto. Ao fechar o `HttpServer` sem resposta, `HttpURLConnection` pode repetir o POST automaticamente, receber o 201 na mesma chamada e remover corretamente o Pendente; o teste exige que ele permaneça na fila. Substituir a primeira tentativa por um servidor TCP de uma conexão, que lê o corpo e derruba o socket antes da resposta, prova a perda real sem confundir o retry interno. O teste de arquivo grande continua válido: no retry, o PC responde 201 ao id conhecido sem consumir o corpo e o cliente ainda deixa o Item Pendente. Nenhuma correção de produção foi mantida neste bloqueio.
