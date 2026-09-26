@@ -20,6 +20,7 @@ android {
     }
 
     testOptions.unitTests.isIncludeAndroidResources = true
+    sourceSets.getByName("test").resources.srcDir("../../testdata")
 }
 
 dependencies {
