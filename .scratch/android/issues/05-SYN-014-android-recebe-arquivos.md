@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent

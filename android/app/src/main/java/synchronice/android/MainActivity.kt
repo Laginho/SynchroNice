@@ -657,7 +657,7 @@ private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean) {
                 else {
                     Text(message.text)
                     thumbnail?.let { Image(it.asImageBitmap(), contentDescription = file.name, modifier = Modifier.sizeIn(maxWidth = 240.dp, maxHeight = 240.dp)) }
-                    Text("${fileMimeType(file.name)} · ${android.text.format.Formatter.formatFileSize(context, file.size)}", style = MaterialTheme.typography.labelSmall)
+                    Text("${file.name.substringAfterLast('.', fileMimeType(file.name)).uppercase()} · ${android.text.format.Formatter.formatFileSize(context, file.size)}", style = MaterialTheme.typography.labelSmall)
                     if (message.delivery == Delivery.PENDING) {
                         LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth())
                         Text("Recebendo ${message.progress}%", style = MaterialTheme.typography.labelSmall)
