@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -75,3 +75,11 @@ Verdict: Reopen — critérios 1, 4 e 5 precisam de novos testes.
 - 2026-09-26 Stage 2 bloqueado: a revisão pede testes de persistência do Desparear e de HTTP 401/503 no DeliveryWorker, mas a seção Tests stage 2 writes autoriza somente a costura do módulo cliente. A spec também deixa WorkManager fora de teste automático. Decisão necessária de stage 1: aprovar explicitamente a costura de testes do estado do app/DeliveryWorker e incorporar os cenários da revisão ao contrato (Tests stage 2 writes e critérios), antes de retomar a implementação. Nenhum código ou teste alterado nesta tentativa.
 
 - 2026-09-26 Proxy decidiu: aprovar a costura de testes JVM locais do app para Desparear e para a política HTTP do `DeliveryWorker`. Esses casos provam os critérios 1, 4 e 5 já exigidos pela spec; não ampliam o produto para testar câmera ou agendamento do WorkManager no aparelho. Falhas de exclusão ou persistência não podem deixar o Par antigo com fila perdida nem declarar sucesso com payload órfão. Stage 2 retoma nesta branch com teste vermelho em commit próprio antes da correção.
+
+#### Stage 2 — correções da revisão (2026-09-26)
+
+- Critérios 1, 4 e 5 corrigidos. O descarte mantém as referências até concluir a exclusão; falha de escrita do Par preserva Par/fila/cópias. A remoção persistida do Par marca a limpeza pendente para retomada após falha ou reinício, antes de aceitar outro QR.
+- `AppState.retryPending`, usado pelo `DeliveryWorker`, despareia em HTTP 401; 503 conserva Par/Pendentes e retorna retry. Removido o tratamento de 401 do loop que só resolve DNS.
+- Red-green: `d9a3b31` registrou a falha de exclusão (1 falha em 54 testes do protocolo), corrigida em `2737d12`. `a402d3b` registrou as falhas de persistência/retomada (2 falhas em 6 testes do app), corrigidas em `f073c13`. `6733368` registrou 401 retornando Retry (1 falha em 8 testes do app; 503 verde), corrigido em `f7341c3`. Commits de implementação não alteram testes.
+- Gate completo passou: 44 testes Rust, 24 testes TS, 54 testes do protocolo e 8 testes JVM do app; zero falhas. Rust fmt/clippy, TypeScript typecheck e Android lint passaram. `assembleDebug` também passou.
+- Débito humano: validar engrenagem, Desparear, câmera/QR e agendamento real do WorkManager no aparelho. Tentativa desta sessão: emulador SynchroNice_API37 iniciado; instalação recusada por `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (assinatura diferente do app existente), sem remover seus dados. Computer Use inicializou e localizou a janela, mas negou acesso com `Computer Use was not approved to use qemu-system-x86_64`. Emulador encerrado após a tentativa. Os caminhos de estado/persistência e execução do worker foram verificados pelos testes JVM.
