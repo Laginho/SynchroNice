@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -71,3 +71,5 @@ Verdict: Reopen — critérios 1, 4 e 5 precisam de novos testes.
 - O Computer Use não encontrou app nem emulador aberto; o débito humano acima permanece.
 
 - 2026-09-26 Stage 2 bloqueado: a revisão pede testes de persistência do Desparear e de HTTP 401/503 no DeliveryWorker, mas a seção Tests stage 2 writes autoriza somente a costura do módulo cliente. A spec também deixa WorkManager fora de teste automático. Decisão necessária de stage 1: aprovar explicitamente a costura de testes do estado do app/DeliveryWorker e incorporar os cenários da revisão ao contrato (Tests stage 2 writes e critérios), antes de retomar a implementação. Nenhum código ou teste alterado nesta tentativa.
+
+- 2026-09-26 Proxy decidiu: aprovar a costura de testes JVM locais do app para Desparear e para a política HTTP do `DeliveryWorker`. Esses casos provam os critérios 1, 4 e 5 já exigidos pela spec; não ampliam o produto para testar câmera ou agendamento do WorkManager no aparelho. Falhas de exclusão ou persistência não podem deixar o Par antigo com fila perdida nem declarar sucesso com payload órfão. Stage 2 retoma nesta branch com teste vermelho em commit próprio antes da correção.
