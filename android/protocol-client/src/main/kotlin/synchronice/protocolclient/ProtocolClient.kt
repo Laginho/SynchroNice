@@ -250,8 +250,8 @@ class ProtocolClient(
      * responsabilidade de quem chama.
      */
     fun listen(): List<Item> {
-        // ponytail: no read timeout keeps idle long-polls alive; cancel and reopen on a silent link loss if that ceiling matters.
-        val connection = open("/listen", "GET").apply { readTimeout = 0 }
+        // ponytail: a 35s idle timeout bounds reconnection after a silent IP change; a network callback could shorten it.
+        val connection = open("/listen", "GET").apply { readTimeout = 35_000 }
         val body = try {
             val code = connection.responseCode
             if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)

@@ -66,6 +66,7 @@ import synchronice.protocolclient.ProtocolRejectedException
 import synchronice.protocolclient.parsePairingQr
 import java.io.File
 import java.io.IOException
+import java.net.SocketTimeoutException
 
 class SynchroNiceApplication : Application() {
     internal lateinit var state: AppState
@@ -97,6 +98,7 @@ internal class AppState(context: Context) {
     private var nextMessageId = 1L
     private var clientFor: PairingInfo? = null
     private var protocolClient: ProtocolClient? = null
+    private val submitted = ArrayDeque<Long>()
 
     var pairing by mutableStateOf(readPairing())
         private set
@@ -119,7 +121,9 @@ internal class AppState(context: Context) {
 
     init {
         queueStore.load().filterIsInstance<PendingItem.Text>().forEach { pending ->
-            messages.add(ChatMessage(nextMessageId++, pending.text, true, Delivery.PENDING))
+            val id = nextMessageId++
+            messages.add(ChatMessage(id, pending.text, true, Delivery.PENDING))
+            submitted.addLast(id)
         }
     }
 
@@ -167,14 +171,21 @@ internal class AppState(context: Context) {
     suspend fun sendText(id: Long, text: String) {
         val currentClient = client() ?: return
         try {
-            val pending = withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
                 outboundMutex.withLock {
-                    currentClient.sendText(text)
-                    currentClient.hasPending()
+                    submitted.addLast(id)
+                    try {
+                        currentClient.sendText(text)
+                    } catch (error: Exception) {
+                        submitted.remove(id)
+                        throw error
+                    } finally {
+                        val remaining = queueStore.load().count { it is PendingItem.Text }
+                        withContext(Dispatchers.Main.immediate) {
+                            reconcilePendingDelivery(messages, submitted, remaining)
+                        }
+                    }
                 }
-            }
-            withContext(Dispatchers.Main.immediate) {
-                setDelivery(id, if (pending) Delivery.PENDING else Delivery.DELIVERED)
             }
         } catch (error: Exception) {
             if (error is CancellationException) throw error
@@ -191,17 +202,13 @@ internal class AppState(context: Context) {
 
     suspend fun retryPending() {
         val currentClient = client() ?: return
-        val stillPending = outboundMutex.withLock {
-            currentClient.retryPending()
-            currentClient.hasPending()
-        }
-        if (!stillPending) {
-            withContext(Dispatchers.Main.immediate) {
-                messages.indices.forEach { index ->
-                    val message = messages[index]
-                    if (message.outgoing && message.delivery == Delivery.PENDING) {
-                        messages[index] = message.copy(delivery = Delivery.DELIVERED)
-                    }
+        outboundMutex.withLock {
+            try {
+                currentClient.retryPending()
+            } finally {
+                val remaining = queueStore.load().count { it is PendingItem.Text }
+                withContext(Dispatchers.Main.immediate) {
+                    reconcilePendingDelivery(messages, submitted, remaining)
                 }
             }
         }
@@ -232,6 +239,18 @@ internal class AppState(context: Context) {
         val port = pairingPreferences.getInt("port", 0)
         val token = pairingPreferences.getString("token", null) ?: return null
         return if (port in 1..65535) PairingInfo(name, port, token) else null
+    }
+}
+
+internal fun reconcilePendingDelivery(
+    messages: MutableList<ChatMessage>,
+    submitted: ArrayDeque<Long>,
+    remainingTexts: Int,
+) {
+    while (submitted.size > remainingTexts) {
+        val deliveredId = submitted.removeFirst()
+        val index = messages.indexOfFirst { it.localId == deliveredId }
+        if (index >= 0) messages[index] = messages[index].copy(delivery = Delivery.DELIVERED)
     }
 }
 
@@ -418,6 +437,8 @@ private fun ConnectionLifecycle(state: AppState) {
                                 if (items.none { it is Item.Text }) delay(1_500)
                             } catch (error: CancellationException) {
                                 throw error
+                            } catch (_: SocketTimeoutException) {
+                                // Reopen the idle long-poll so mDNS can resolve a changed PC address.
                             } catch (error: ProtocolRejectedException) {
                                 withContext(Dispatchers.Main.immediate) {
                                     state.updateOnline(false)
