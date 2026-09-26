@@ -58,6 +58,7 @@ private fun parseJsonString(json: String, start: Int): Pair<String, Int> {
                 else -> error("escape JSON inválido")
             }
         } else {
+            require(json[i] >= ' ') { "caractere de controle JSON sem escape" }
             sb.append(json[i])
         }
         i++

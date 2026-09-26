@@ -250,7 +250,8 @@ class ProtocolClient(
      * responsabilidade de quem chama.
      */
     fun listen(): List<Item> {
-        val connection = open("/listen", "GET")
+        // ponytail: no read timeout keeps idle long-polls alive; cancel and reopen on a silent link loss if that ceiling matters.
+        val connection = open("/listen", "GET").apply { readTimeout = 0 }
         val body = try {
             val code = connection.responseCode
             if (code != HttpURLConnection.HTTP_OK) throw ProtocolRejectedException(code)

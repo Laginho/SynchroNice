@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,10 +64,10 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. Um controle não escapado em string de campo extra ainda é aceito; falta teste vermelho.
+1. ✅ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. As revisões anteriores encontraram presença baseada só em mDNS/IP; a terceira também apontou estado antigo ao pausar e quedas periódicas pelo timeout de 30 segundos.
+4. ✅ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
 5. Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
 7. Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
@@ -95,6 +95,10 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   autenticado ativo, 204 sem escuta e 401 com token errado; o GET continua
   entregando Itens e a rotação continua revogando a escuta. Novos testes em
   commit próprio, vermelhos antes da correção.
+- Na terceira reabertura, `PairingInfoTest.kt` rejeita U+0001 cru numa string
+  extra; `ProtocolClientTest.kt` mantém o long-poll vazio por mais de 30 s e
+  consulta presença em 204, 200 e 204; `PresenceLifecycleTest.kt` verifica o
+  reset de presença ao iniciar e cancelar um ciclo RESUMED.
 
 ## Comments
 
@@ -184,3 +188,9 @@ Verdict: Reopen — critérios 1 e 4 ainda precisam de testes e correção.
 - Critério 1: `parseJsonString` aceita U+0000–U+001F sem escape dentro de string JSON. Um campo extra assim invalida o QR, mas `parsePairingQr` ainda cria o Par. Novo teste vermelho em `PairingInfoTest.kt` antes da correção.
 - Critério 4: `repeatOnLifecycle(RESUMED)` cancela seu bloco ao pausar, mas `state.updateOnline(false)` só roda depois que `repeatOnLifecycle` retorna; ao reabrir, "Na rede" pode ficar visível antes da próxima consulta HEAD. O GET `/listen` herda `readTimeout = 30_000` e expira com a fila vazia; o catch apaga a presença e aguarda antes de reabrir. Cobrir esses ciclos com teste antes da correção.
 - Gate completo nesta revisão: passou com 38 testes Rust, 24 Node, 38 Kotlin, fmt/clippy, `tsc --noEmit` e `:app:check` com lint. `git diff --check` passou. O débito humano dos critérios 3–9 permanece.
+
+- 2026-09-26 Stage 2 (terceira reabertura): `ff0cf37` contém só os testes. `gate.ps1 -TestsOnly` confirmou o vermelho: o parser aceitava controle cru e `listen()` expirava com `SocketTimeoutException` aos 30 s; o teste de ciclo de vida dependia do reset ainda ausente. `fefe8d4` corrige o parser, mantém o long-poll aberto e limpa a presença no início e no cancelamento de cada período RESUMED. O mesmo gate passou com 38 testes Rust, 24 Node, 40 do protocolo Android e 1 teste Android da Activity.
+
+- Gate completo após rebase na branch de sessão: passou `cargo fmt --check`, `cargo clippy`, 38 testes Rust, `tsc --noEmit`, 24 Node e 41 testes Kotlin; `gradle check` passou, incluindo lint Android.
+
+- Débito humano: os critérios 3–9 ainda não foram conferidos no Android real ou emulador. O Computer Use retornou `apps=[]` e somente abas do Chrome, sem janela nativa para abrir o app.

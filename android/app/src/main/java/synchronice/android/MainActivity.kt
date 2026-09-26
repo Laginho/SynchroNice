@@ -370,70 +370,83 @@ private fun ConnectionLifecycle(state: AppState) {
     LaunchedEffect(lifecycle, pairing) {
         val currentPair = pairing ?: return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            val client = state.client() ?: return@repeatOnLifecycle
-            coroutineScope {
-                launch(Dispatchers.IO) {
-                    while (isActive) {
-                        try {
-                            val address = state.resolver.resolve(currentPair.instanceName)
-                            if (address != null) state.knownAddress.save(address)
-                            state.retryPending()
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (_: Exception) {
-                            // DNS lookup and send retries do not define the /listen presence.
+            clearPresenceDuringLifecycleCycle(state::updateOnline) cycle@{
+                val client = state.client() ?: return@cycle
+                coroutineScope {
+                    launch(Dispatchers.IO) {
+                        while (isActive) {
+                            try {
+                                val address = state.resolver.resolve(currentPair.instanceName)
+                                if (address != null) state.knownAddress.save(address)
+                                state.retryPending()
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                // DNS lookup and send retries do not define the /listen presence.
+                            }
+                            delay(4_000)
                         }
-                        delay(4_000)
                     }
-                }
-                launch(Dispatchers.IO) {
-                    while (isActive) {
-                        try {
-                            val active = client.isListening()
-                            withContext(Dispatchers.Main.immediate) { state.updateOnline(active) }
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (error: ProtocolRejectedException) {
-                            withContext(Dispatchers.Main.immediate) {
-                                state.updateOnline(false)
-                                state.showConnectionError("O PC recusou o Par (HTTP ${error.code}).")
+                    launch(Dispatchers.IO) {
+                        while (isActive) {
+                            try {
+                                val active = client.isListening()
+                                withContext(Dispatchers.Main.immediate) { state.updateOnline(active) }
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: ProtocolRejectedException) {
+                                withContext(Dispatchers.Main.immediate) {
+                                    state.updateOnline(false)
+                                    state.showConnectionError("O PC recusou o Par (HTTP ${error.code}).")
+                                }
+                                break
+                            } catch (_: Exception) {
+                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
                             }
-                            break
-                        } catch (_: Exception) {
-                            withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
-                        }
-                        delay(1_000)
-                    }
-                }
-                launch(Dispatchers.IO) {
-                    while (isActive) {
-                        try {
-                            val items = kotlinx.coroutines.runInterruptible { client.listen() }
-                            withContext(Dispatchers.Main.immediate) {
-                                state.updateOnline(false)
-                                items.filterIsInstance<Item.Text>().forEach(state::receive)
-                            }
-                            items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }
-                            if (items.none { it is Item.Text }) delay(1_500)
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (error: ProtocolRejectedException) {
-                            withContext(Dispatchers.Main.immediate) {
-                                state.updateOnline(false)
-                                state.showConnectionError("O PC recusou o Par (HTTP ${error.code}).")
-                            }
-                            break
-                        } catch (error: IOException) {
-                            withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
                             delay(1_000)
-                        } catch (_: Exception) {
-                            withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
-                            delay(1_500)
+                        }
+                    }
+                    launch(Dispatchers.IO) {
+                        while (isActive) {
+                            try {
+                                val items = kotlinx.coroutines.runInterruptible { client.listen() }
+                                withContext(Dispatchers.Main.immediate) {
+                                    state.updateOnline(false)
+                                    items.filterIsInstance<Item.Text>().forEach(state::receive)
+                                }
+                                items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }
+                                if (items.none { it is Item.Text }) delay(1_500)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: ProtocolRejectedException) {
+                                withContext(Dispatchers.Main.immediate) {
+                                    state.updateOnline(false)
+                                    state.showConnectionError("O PC recusou o Par (HTTP ${error.code}).")
+                                }
+                                break
+                            } catch (error: IOException) {
+                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
+                                delay(1_000)
+                            } catch (_: Exception) {
+                                withContext(Dispatchers.Main.immediate) { state.updateOnline(false) }
+                                delay(1_500)
+                            }
                         }
                     }
                 }
             }
         }
-        state.updateOnline(false)
+    }
+}
+
+internal suspend fun clearPresenceDuringLifecycleCycle(
+    updateOnline: (Boolean) -> Unit,
+    block: suspend () -> Unit,
+) {
+    updateOnline(false)
+    try {
+        block()
+    } finally {
+        updateOnline(false)
     }
 }
