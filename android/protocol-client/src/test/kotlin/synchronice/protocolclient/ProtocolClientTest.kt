@@ -42,6 +42,104 @@ private fun tempFile(bytes: ByteArray): File =
 class ProtocolClientTest {
 
     @Test
+    fun `id do Pendente sobrevive a falha e recriacao da fila`() {
+        val dir = kotlin.io.path.createTempDirectory("pending-item-id").toFile()
+        val queue = File(dir, "pending.txt")
+        val ids = mutableListOf<String?>()
+        val attempts = java.util.concurrent.atomic.AtomicInteger()
+        val port = freePort()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(if (attempts.incrementAndGet() == 1) 503 else 201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port, FilePendingQueueStore(queue))
+            sender.enqueueText("texto")
+            sender.retryPending()
+            assertTrue(sender.hasPending())
+
+            val restored = client(port, FilePendingQueueStore(queue))
+            restored.retryPending()
+
+            assertEquals(2, ids.size)
+            assertTrue(ids.first()?.isNotBlank() == true)
+            assertEquals(ids.first(), ids.last())
+            assertFalse(restored.hasPending())
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `Itens iguais recebem ids diferentes`() {
+        val ids = mutableListOf<String?>()
+        val port = freePort()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port)
+            sender.enqueueText("igual")
+            sender.enqueueText("igual")
+
+            sender.retryPending()
+
+            assertEquals(2, ids.filterNotNull().distinct().size)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `arquivo so pede primeiro plano depois que a conexao abre`() {
+        val unreachablePort = freePort()
+        val file = tempFile(ByteArray(10 * 1024 * 1024))
+        val starts = mutableListOf<Long>()
+        try {
+            val sender = client(unreachablePort)
+            sender.enqueueFile(file)
+
+            sender.retryPending(onFileStart = starts::add)
+
+            assertTrue(starts.isEmpty())
+            assertTrue(sender.hasPending())
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `arquivo grande que entra depois da leitura inicial ainda pede primeiro plano`() {
+        val file = tempFile(ByteArray(10 * 1024 * 1024))
+        val starts = mutableListOf<Long>()
+        val port = freePort()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port)
+            assertFalse(sender.hasPending()) // leitura anterior do worker
+            sender.enqueueFile(file) // intercala antes de o dreno adquirir o mutex
+
+            sender.retryPending(onFileStart = starts::add)
+
+            assertEquals(listOf(file.length()), starts)
+            assertFalse(sender.hasPending())
+        } finally {
+            server.stop(0)
+            file.delete()
+        }
+    }
+
+    @Test
     fun `enfileirar para trabalho futuro nao envia antes da tentativa e preserva arquivo`() {
         val dir = kotlin.io.path.createTempDirectory("background-send").toFile()
         val queue = File(dir, "pending.txt")

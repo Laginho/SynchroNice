@@ -334,6 +334,17 @@ fn post_texto(base: &str, token: Option<&str>, texto: &str) -> u16 {
         .as_u16()
 }
 
+fn post_texto_com_id(base: &str, token: &str, id: &str, texto: &str) -> u16 {
+    agent()
+        .post(format!("{base}/items/text"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("X-Item-Id", id)
+        .send(texto)
+        .expect("conexão com o servidor")
+        .status()
+        .as_u16()
+}
+
 /// POST /items/file com `bytes` no corpo e o nome dado; devolve o status HTTP.
 fn post_arquivo(base: &str, token: Option<&str>, nome: &str, bytes: &[u8]) -> u16 {
     let mut req = agent()
@@ -344,6 +355,19 @@ fn post_arquivo(base: &str, token: Option<&str>, nome: &str, bytes: &[u8]) -> u1
         req = req.header("Authorization", format!("Bearer {t}"));
     }
     req.send(bytes)
+        .expect("conexão com o servidor")
+        .status()
+        .as_u16()
+}
+
+fn post_arquivo_com_id(base: &str, token: &str, id: &str, nome: &str, bytes: &[u8]) -> u16 {
+    agent()
+        .post(format!("{base}/items/file"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("X-Item-Id", id)
+        .header("X-File-Name", nome)
+        .header("X-File-Size", bytes.len().to_string())
+        .send(bytes)
         .expect("conexão com o servidor")
         .status()
         .as_u16()
@@ -450,6 +474,17 @@ fn post_com_token_cria_item_de_texto() {
 }
 
 #[test]
+fn reenvio_de_texto_com_o_mesmo_id_nao_duplica_o_item() {
+    let (base, items, _outbox, _raiz) = sobe();
+
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto-1", "igual"), 201);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto-1", "igual"), 201);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto-2", "igual"), 201);
+
+    assert_eq!(textos(&items), vec!["igual", "igual"]);
+}
+
+#[test]
 fn post_sem_token_e_recusado_e_nada_entra() {
     let (base, items, _outbox, _raiz) = sobe();
 
@@ -490,6 +525,32 @@ fn post_arquivo_grava_na_pasta_com_conteudo_identico() {
     let gravado = std::fs::read(raiz.path().join("pasta").join("foto.jpg"))
         .expect("arquivo gravado na Pasta");
     assert_eq!(gravado, bytes);
+}
+
+#[test]
+fn reenvio_de_arquivo_com_o_mesmo_id_nao_duplica_item_nem_arquivo() {
+    let (base, items, _outbox, raiz) = sobe();
+
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-2", "foto.jpg", b"igual"),
+        201
+    );
+
+    assert_eq!(arquivos(&items).len(), 2);
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        2
+    );
 }
 
 #[test]
@@ -874,6 +935,50 @@ fn envio_cortado_no_meio_marca_item_como_failed() {
         })
         .expect("item do envio cortado");
     assert_eq!(status, FileStatus::Failed);
+}
+
+#[test]
+fn envio_cortado_nao_consume_o_id_e_pode_ser_repetido() {
+    let (base, items, _outbox, raiz) = sobe();
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    items.on_new(move |item| {
+        if matches!(
+            &item.body,
+            ItemBody::File {
+                status: FileStatus::Failed,
+                ..
+            }
+        ) {
+            let _ = tx.send(());
+        }
+    });
+
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    let pedido = "POST /items/file HTTP/1.1\r\n\
+         Host: HOST\r\n\
+         Authorization: Bearer TOKEN\r\n\
+         X-Item-Id: arquivo-cortado\r\n\
+         X-File-Name: cortado.bin\r\n\
+         Content-Length: 1000000\r\n\
+         Connection: close\r\n\
+         \r\n"
+        .replace("HOST", addr)
+        .replace("TOKEN", TOKEN);
+    stream.write_all(pedido.as_bytes()).unwrap();
+    stream.write_all(b"incompleto").unwrap();
+    drop(stream);
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("o envio cortado deve terminar antes do retry");
+
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-cortado", "cortado.bin", b"completo"),
+        201
+    );
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/cortado.bin")).unwrap(),
+        b"completo"
+    );
 }
 
 // SYN-004: direção PC -> celular. O PC é o remetente e gera o id do Item
