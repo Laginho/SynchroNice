@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,10 +64,10 @@ nem move o SDK.
 
 #### Acceptance criteria
 
-1. O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada.
+1. ❌ O conteúdo do QR do PC (JSON com nome de instância, porta e token) vira o Par; um conteúdo inválido é recusado sem gravar nada. `parsePairingQr` aceita JSON com escape inválido (`\q`) num campo extra; escrever um teste vermelho com os três campos válidos e esse extra antes de corrigir o parser.
 2. `gate.ps1` compila o módulo do app e continua rodando os testes JVM do módulo cliente.
 3. Primeiro uso: o app abre na câmera; ler o QR do PC grava o Par e abre o chat; reabrir o app vai direto para o chat.
-4. Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta.
+4. ❌ Na mesma Wi-Fi, o app encontra o PC sem digitar nada; o indicador mostra "Na rede" somente após a confirmação de `/listen` autenticado e ativo, inclusive com a fila vazia, e volta a "Fora da rede" ao fechar ou perder a escuta. A revisão anterior flagou o indicador ligado só por mDNS e a presença derivada do último IP conhecido.
 5. Trocar o IP do PC (reconectar o Wi-Fi) e o celular volta a encontrá-lo sem reescanear.
 6. Um texto enviado do PC aparece como bolha à esquerda no celular, com o app aberto.
 7. Um texto digitado no celular aparece no PC, e a bolha à direita passa de Pendente a Entregue.
@@ -143,3 +143,12 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-25 Stage 2: o gate ficou vermelho antes do parser (`parsePairingQr` não resolvido) e passou depois da implementação. `gate.ps1 -TestsOnly` passou com 37 testes Rust, 24 Node e 34 Kotlin; o gate completo também passou, incluindo lint Android. A tag `keep/syn-012` citada acima não existe neste checkout.
 
 - Débito humano: critérios 3–9 não foram verificados no app/aparelho. O Computer Use disponível retornou apenas Chrome, sem superfície de apps nativos; por isso o APK não foi instalado/aberto no AVD e a câmera, o pareamento, mDNS, entrega de textos e reconexão continuam sem verificação manual.
+
+#### Review (2026-09-26)
+
+Verdict: Reopen — critérios 1 e 4 falharam.
+
+- Standards: nenhuma violação atual de regra documentada. `AppState` concentra estado de Par, rede e chat (possível Divergent Change; sem refatoração neste ticket).
+- Spec: `FlatJson.kt` aceita um escape JSON inválido em campo extra e `parsePairingQr` cria o Par; o teste novo deve falhar por esse motivo. O teste existente de porta fora da faixa usa token inválido, então não isola a porta. `MainActivity.kt` usa resolução mDNS como presença, embora o ticket exija a conexão de escuta.
+- Gate: PC fmt/clippy, 24 testes Node e Android `:app:check` passaram; Android `:protocol-client:test` passou com 34 testes (4 QR, 30 cliente). O gate completo falhou em `pc/src-tauri/tests/server.rs::escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar` por conexão abortada (Windows 10053) em duas execuções; o mesmo teste havia passado na primeira execução. Sem mudança nesse código neste ticket.
+- Verificação visual: Computer Use listou apps Windows, sem emulador ou app Android para inspecionar; o Débito humano acima permanece.
