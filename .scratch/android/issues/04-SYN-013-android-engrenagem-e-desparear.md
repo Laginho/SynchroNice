@@ -1,5 +1,5 @@
 # SYN-013: Android — engrenagem e Desparear
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -46,4 +46,4 @@ Critérios 3 a 5 são no aparelho: verificação manual.
 
 ## Comments
 
-- 2026-09-26 Review ended at to-review (exit 0); branch SYN-013 holds the review; left for a human
+- 2026-09-26 Review anterior parou antes do veredito por autoidentificação incorreta do modelo; o comando CLI usou gpt-5.6-sol high. Retomar stage 3 da branch SYN-013.
