@@ -1,5 +1,5 @@
 # SYN-016: Android — Compartilhar
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-012
 Review: agent
@@ -287,3 +287,42 @@ Verdict: Reopen — critério 2 ainda tem uma janela de duplicação após desco
 - 2026-09-26 Proxy decidiu: manter o achado da quarta revisão. O lock do id pertence à future de `post_file`, mas a tarefa destacada continua entre rename e registro do id sem possuir esse lock; se o handler for cancelado nessa janela, outro POST pode passar pela consulta. O teste de socket recuperado fecha a conexão no progresso e não força esse cancelamento, por isso estar verde não refuta o achado. Stage 2 deve primeiro obter o vermelho determinístico descrito acima, em commit só de teste, e depois corrigir a vida útil do lock preservando retry após envio incompleto. Nenhuma mudança de produção foi feita nesta decisão.
 
 - 2026-09-26 Stage 2 (quarta reabertura): o commit de teste `6eb8266` pausou a tarefa destacada depois do rename, cancelou explicitamente o handler e reproduziu em vermelho a liberação prematura da reserva do id. O guarda proprietário do mutex agora acompanha a tarefa de finalização até o id aceito ser registrado; retry após cancelamento responde 201 sem criar outro Item ou arquivo. Gate completo verde: fmt, clippy, 44 testes Rust, typecheck, 24 testes Node, 51 testes do cliente Android, 3 testes do app Android e lint.
+
+#### Resolution (2026-09-26)
+
+Verdict: Approve
+
+##### Standards
+
+- Nenhuma violação de padrão documentado. Uma sugestão não bloqueante:
+  `AppState.sendText` tem apenas chamadores de teste após o composer passar
+  a usar `queueText`, conservando um segundo caminho de envio no app.
+  Limpeza futura; nenhuma refatoração feita nesta revisão.
+
+##### Spec
+
+- Critério 2 aprovado: `post_file` transfere o guarda proprietário do id
+  para a tarefa destacada, que o mantém até registrar a aceitação. Cancelar
+  o handler não libera mais o retry durante a finalização.
+- Prova vermelho/verde: vermelho registrado no stage 2 em `6eb8266`, seguido
+  da correção `599a11b`; após rebase, respectivamente `db82f74` e `29dccf1`.
+  A revisão executou o teste verde. Ele cancela o handler após rename,
+  verifica que o lock continua reservado e exige um só Item e arquivo.
+  Ressalva de prova não bloqueante: a tentativa é pausada antes do lock,
+  não depois da consulta; a asserção de reserva cobre deterministicamente
+  a causa da corrida, sem depender da ordem de retomada das duas tarefas.
+- Permanecem as coberturas de resposta perdida, 201 antecipado, upload lento,
+  escrita bloqueada, retry após envio incompleto e registro atômico da bolha.
+  Nenhuma falha de requisito ou aumento indevido de escopo encontrado.
+- Arquivos revisados: app Android (manifesto, Activity de Compartilhar,
+  WorkManager e fila/bolhas), cliente do protocolo e seus testes, servidor
+  HTTP do PC e testes de idempotência. Sem mudanças de produção na revisão.
+- Gate completo passou após rebase: fmt, clippy, typecheck, lint, 44 testes
+  Rust, 24 Node, 51 do cliente Android e 3 do app. Gradle reutilizou os
+  resultados atualizados, com contagens conferidas nos XMLs. A primeira
+  execução falhou por acesso do sandbox a `C:\.android`; a execução com
+  acesso ampliado passou.
+- Integrado sem squash em `sweatshop/2026-09-25-2127`. O débito humano de
+  verificação no celular físico registrado acima permanece para o QA final.
+- Totais: Standards — 0 violações e 1 sugestão não bloqueante; Spec —
+  0 falhas bloqueantes e 1 ressalva não bloqueante sobre a prova do teste.
