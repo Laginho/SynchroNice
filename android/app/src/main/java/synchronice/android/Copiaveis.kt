@@ -49,8 +49,11 @@ private fun criarLink(bruto: String): Trecho? {
             url = url.dropLast(1)
         }
     }
-    val uri = try { URI(url) } catch (_: java.net.URISyntaxException) { return null }
+    // URI exige escapes válidos; URL do PC aceita percentuais literais fora do host.
+    // Só a validação usa esta cópia: exibição e navegação preservam o texto original.
+    val uri = try { URI(url.replace("%", "%25")) } catch (_: java.net.URISyntaxException) { return null }
     if (uri.host.isNullOrEmpty() || uri.scheme.lowercase() !in listOf("http", "https")) return null
+    if (uri.port != -1 && uri.port !in 0..65535) return null
     return Trecho("link", url, href = url)
 }
 

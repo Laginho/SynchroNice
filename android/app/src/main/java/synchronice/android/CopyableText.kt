@@ -44,7 +44,7 @@ internal fun CopyableText(text: String, copyFormatted: Boolean) {
                 if (trecho.type != "text") {
                     addStringAnnotation("trecho", index.toString(), start, length)
                     addStyle(SpanStyle(
-                        color = Color(0xFF7BA7FF),
+                        color = Color(0xFF1B4FA8),
                         textDecoration = if (trecho.type == "link") TextDecoration.Underline else TextDecoration.None,
                     ), start, length)
                 }

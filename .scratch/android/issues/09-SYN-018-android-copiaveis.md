@@ -1,5 +1,5 @@
 # SYN-018: Android — Copiáveis
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-011, SYN-013
 Review: agent
@@ -28,12 +28,12 @@ A engrenagem ganha "Copiar com pontuação", desligada por padrão e persistente
 
 #### Acceptance criteria
 
-1. ❌ A função de trechos em Kotlin devolve, para cada caso de `testdata/copiaveis.json`, exatamente os trechos esperados. Falta cobrir e igualar ao PC links com porta fora de `1..65535` e escapes `%` malformados.
+1. A função de trechos em Kotlin devolve, para cada caso de `testdata/copiaveis.json`, exatamente os trechos esperados, incluindo limites de porta e escapes `%` malformados. Como no PC, portas de `0..65535` são aceitas.
 2. `gate.ps1` roda esses testes (também com `-TestsOnly`) e falha se eles falharem.
 3. CPF, CNPJ e telefone aparecem formatados na bolha mesmo que o texto recebido não tenha pontuação.
 4. Tocar num Copiável copia só os dígitos; com "Copiar com pontuação" ligada, copia a forma formatada.
 5. Tocar num link abre o navegador, o toque longo nele copia o link, e tocar no resto da bolha copia o texto inteiro.
-6. ❌ Link é azul sublinhado e Copiável é azul sem sublinhado, iguais ao PC. O Android usa `#7ba7ff`; o PC usa `#1b4fa8` nesses trechos.
+6. Link é azul `#1b4fa8` sublinhado e Copiável é azul `#1b4fa8` sem sublinhado, iguais ao PC.
 7. "Copiar com pontuação" aparece na engrenagem, começa desligada e persiste.
 
 #### Verification
@@ -65,3 +65,11 @@ Critérios 3 a 7 são no aparelho: verificação manual.
 - Critério 6: a cor de destaque do Android não é a cor aplicada a links e Copiáveis no PC.
 - Standards: sem bloqueio. A preferência persistente do Android é exigida pela spec Android posterior à ADR-0002; o modelo simples de `Trecho` espelha diretamente o JSON compartilhado, sem justificar uma hierarquia selada.
 - Reaberto porque o critério 1 exige novo teste; a etapa 3 não pode escrevê-lo.
+
+#### Stage 2 — correções da revisão (2026-09-26)
+
+- Critérios 1 e 6 corrigidos: validação de porta, percentuais literais preservados no link original e cor `#1b4fa8` nos dois tipos de trecho.
+- Oito casos acrescentados ao contrato compartilhado: portas -1, 0, 1, 65535, 65536 e 99999, percentual malformado no caminho e percentuais na consulta/fragmento. A porta 0 é aceita pelo PC e foi preservada no Android.
+- Red: commit somente de testes e Stage `cb7111a`; `gate.ps1 -TestsOnly` passou nos 44 testes Rust e 32 casos Node, mas falhou no teste compartilhado do Android: `https://example.com:99999` retornou link em vez de texto (9 testes do app, 1 falha).
+- Green: `gate.ps1` passou com fmt/clippy, typecheck TS, 44 testes Rust, 32 casos Node, 54 testes do protocolo Android e 9 testes JVM do app (incluindo todos os 32 casos compartilhados), além do lint Android. Nenhum teste foi alterado na implementação.
+- Continua válido o débito humano anterior dos critérios 3–7; esta correção não foi verificada visualmente no aparelho.
