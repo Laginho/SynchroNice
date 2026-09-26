@@ -378,8 +378,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     };
     #[cfg(test)]
     pause_once(&state.before_file_item_id_lock).await;
-    let _item_id_lock = if item_id.is_some() {
-        Some(state.file_item_id_lock.lock().await)
+    let item_id_lock = if item_id.is_some() {
+        Some(state.file_item_id_lock.clone().lock_owned().await)
     } else {
         None
     };
@@ -513,6 +513,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         // Move a reserva do nome e o guarda de falha para dentro da tarefa:
         // eles só saem de cena depois do rename, nunca enquanto ele ainda
         // está em voo.
+        let _item_id_lock = item_id_lock;
         let _lease = _lease;
         let _fail_guard = fail_guard;
         // Rebind depois do guarda pela mesma razão de lá em cima: se o flush
