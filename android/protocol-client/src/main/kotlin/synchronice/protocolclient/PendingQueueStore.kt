@@ -21,6 +21,9 @@ interface PendingQueueStore {
 
     /** Tira da fila o Item que estava na cabeça e libera o que a implementação tiver reservado para ele. */
     fun dequeueFirst()
+
+    /** Descarta todos os Pendentes e suas cópias internas. */
+    fun clear()
 }
 
 class InMemoryPendingQueueStore : PendingQueueStore {
@@ -29,6 +32,8 @@ class InMemoryPendingQueueStore : PendingQueueStore {
     override fun enqueue(item: PendingItem): PendingItem = item
 
     override fun dequeueFirst() {}
+
+    override fun clear() {}
 }
 
 /**
@@ -72,6 +77,13 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
         persist(items.drop(1))
         val removed = items.removeAt(0)
         if (removed is PendingItem.File) File(removed.path).delete()
+    }
+
+    override fun clear() {
+        persist(emptyList())
+        val discarded = items.toList()
+        items.clear()
+        discarded.filterIsInstance<PendingItem.File>().forEach { File(it.path).delete() }
     }
 
     /**
