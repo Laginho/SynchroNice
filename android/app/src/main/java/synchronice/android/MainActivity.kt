@@ -11,6 +11,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -45,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -99,6 +103,14 @@ internal class AppState(context: Context) {
     private val appContext = context.applicationContext
     private val pairingPreferences = appContext.getSharedPreferences("pairing", Context.MODE_PRIVATE)
     private val networkPreferences = appContext.getSharedPreferences("network", Context.MODE_PRIVATE)
+    private val preferences = appContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    var copyFormatted by mutableStateOf(preferences.getBoolean("copy-formatted", false))
+        private set
+
+    fun setCopyWithPunctuation(value: Boolean) {
+        preferences.edit().putBoolean("copy-formatted", value).apply()
+        copyFormatted = value
+    }
     private val queueFile = File(appContext.filesDir, "pending-items.txt")
     private var queueStore = FilePendingQueueStore(queueFile)
     private val outboundMutex = Mutex()
@@ -471,7 +483,7 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.messages, key = { it.localId }) { message ->
-                    MessageBubble(message)
+                    MessageBubble(message, state.copyFormatted)
                 }
             }
         }
@@ -502,6 +514,17 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         TextButton(onClick = onBack) { Text("Voltar") }
         Text("Configurações", style = MaterialTheme.typography.headlineSmall)
+        Row(
+            Modifier.fillMaxWidth().toggleable(
+                value = state.copyFormatted,
+                role = Role.Checkbox,
+                onValueChange = state::setCopyWithPunctuation,
+            ).padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = state.copyFormatted, onCheckedChange = null)
+            Text("Copiar com pontuação", Modifier.padding(start = 8.dp))
+        }
         Button(onClick = { scope.launch { state.unpair() } }, modifier = Modifier.padding(top = 24.dp)) {
             Text("Desparear")
         }
@@ -510,20 +533,23 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
+private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean) {
+    val context = LocalContext.current
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.outgoing) Arrangement.End else Arrangement.Start,
     ) {
         Card(
-            modifier = Modifier.sizeIn(maxWidth = 320.dp),
+            modifier = Modifier.sizeIn(maxWidth = 320.dp).clickable(onClickLabel = "Copiar texto inteiro") {
+                copyText(context, message.text)
+            },
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(
                 containerColor = if (message.outgoing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
             ),
         ) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Text(message.text)
+                CopyableText(message.text, copyFormatted)
                 if (message.outgoing) {
                     val label = when (message.delivery) {
                         Delivery.PENDING -> "Pendente"

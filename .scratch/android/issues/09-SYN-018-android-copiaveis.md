@@ -1,5 +1,5 @@
 # SYN-018: Android — Copiáveis
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-011, SYN-013
 Review: agent
@@ -50,3 +50,11 @@ Critérios 3 a 7 são no aparelho: verificação manual.
   acha nada).
 
 ## Comments
+
+#### Stage 2 (2026-09-26)
+
+- Implementada a função pura `segmentarTexto` em Kotlin com o contrato compartilhado do PC. A bolha formata e destaca os trechos, copia Copiáveis nos dois modos, abre links e copia links no toque longo. O restante da bolha copia o texto original inteiro; ações de acessibilidade oferecem as mesmas operações.
+- "Copiar com pontuação" começa desligada e persiste em `settings`, separado do Par.
+- Red: commit de testes `521cc87`; `gate.ps1 -TestsOnly` falhou em `compileDebugUnitTestKotlin` por ausência de `Trecho` e `segmentarTexto`. A primeira execução restrita falhou antes por acesso a `C:\.android`; a execução com acesso ao perfil confirmou o vermelho esperado.
+- Green: `gate.ps1` passou com fmt/clippy, 44 testes Rust, typecheck TS, 24 casos Node, 54 testes do protocolo Android, 9 testes JVM do app e lint Android. O teste novo do app percorre todos os 24 casos de `testdata/copiaveis.json`; nenhum teste foi alterado no commit de implementação.
+- Débito humano: verificar no aparelho os critérios 3–7 (formatação e cores, copiar nos dois modos, abertura e toque longo de links, cópia do restante da bolha e persistência após reiniciar). Computer Use foi inicializado e não encontrou janela de emulador; `adb devices`, pelo SDK configurado em `android/local.properties`, não encontrou aparelho conectado. A interação visual não foi verificada nesta etapa.
