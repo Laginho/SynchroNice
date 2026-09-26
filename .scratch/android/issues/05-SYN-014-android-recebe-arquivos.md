@@ -1,5 +1,5 @@
 # SYN-014: Android recebe arquivos
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-013
 Review: agent
@@ -69,3 +69,5 @@ Critérios 3 a 7 são no aparelho: verificação manual.
 - 2026-09-26 Proxy decidiu: não assumir que a Pasta SAF fique sem alterações externas. `createDocument` só devolve a identidade após criar, e o provedor pode alterar o nome; recuperar pelo nome comum arriscaria escrever em arquivo alheio. O marcador aleatório persistido antes da criação permite retomar somente um candidato inequívoco. Em provedores que não preservam/expõem esse marcador, falhar fechado e exigir intervenção para escolher outra Pasta ou reconciliar o Pendente; nunca adotar por nome/tamanho nem criar outra cópia às cegas. A limpeza de recibo após ACK continua no escopo. Fontes: https://developer.android.com/reference/android/provider/DocumentsProvider e https://developer.android.com/reference/android/provider/DocumentsContract.Document.
 
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: SYN-014 ficou `blocked`, commit `5ea7fd9`, sem alterações de código. /  / Falta definir como identificar com segurança o arquivo SAF após crash, antes de receber sua URI. A proposta está no ticket. /  / Interrompi conforme [ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md): “Stage 2 that needs a decision […] sets `Stage: blocked`”.
+
+- 2026-09-26 Red: gate -TestsOnly falhou na compilação dos dois testes novos porque downloadFile só aceita File e não tem onSaved. Os 44 testes Rust e 24 testes TS passaram; testes JVM existentes do app estavam up-to-date. Primeira tentativa no sandbox falhou por C:\.android; repetição com acesso ao ambiente Android confirmou o red esperado.
