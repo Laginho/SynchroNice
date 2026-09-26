@@ -24,6 +24,15 @@ class PairingInfoTest {
     }
 
     @Test
+    fun `escape JSON invalido e recusado mesmo em campo extra`() {
+        val malformed = """{"instance_name":"synchronice-12345678","port":47820,"token":"0123456789abcdef0123456789abcdef","extra":"\q"}"""
+
+        assertFailsWith<IllegalArgumentException> {
+            parsePairingQr(malformed)
+        }
+    }
+
+    @Test
     fun `campo ausente e recusado`() {
         assertFailsWith<IllegalArgumentException> {
             parsePairingQr("""{"instance_name":"synchronice-12345678","port":47820}""")
@@ -34,7 +43,7 @@ class PairingInfoTest {
     fun `porta fora da faixa e recusada`() {
         for (port in listOf(0, 65536)) {
             assertFailsWith<IllegalArgumentException> {
-                parsePairingQr("""{"instance_name":"synchronice-12345678","port":$port,"token":"x"}""")
+                parsePairingQr("""{"instance_name":"synchronice-12345678","port":$port,"token":"0123456789abcdef0123456789abcdef"}""")
             }
         }
     }
