@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -103,6 +103,8 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
   JSON entre tokens (por exemplo U+000B), com os três campos obrigatórios válidos.
 
 ## Comments
+
+- 2026-09-26 Stage 2 (sexta reabertura): testes agora atravessam a Activity real em `PresenceLifecycleTest.kt` e o `AppState` com HTTP falso em `PendingDeliveryTest.kt`, sem chamar os helpers internos. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: a Activity deixa `online = true` após `resume` antes de uma nova confirmação de `/listen`; o teste de entrega parcial passou. Rust e Node passaram (38 e 24 testes).
 
 - 2026-09-26 Stage 2 (quinta reabertura): teste do QR com tab vertical entre campos e após a porta. `gate.ps1 -TestsOnly` ficou vermelho pelo motivo esperado: 43 testes do cliente Android, 1 falhou (`whitespace fora do JSON e recusado no QR`); os testes Rust e Node passaram.
 - 2026-09-26 Stage 2 concluído: `skipWhitespace()` agora aceita apenas espaço, tab, CR e LF, conforme JSON. Gate completo verde: 38 testes Rust, 24 Node e 45 Kotlin (43 no cliente, 2 no app), além de fmt, clippy, typecheck e lint Android. `git diff --check` passou. O Débito humano dos critérios 3–9 permanece.

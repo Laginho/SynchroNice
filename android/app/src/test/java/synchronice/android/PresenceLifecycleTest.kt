@@ -1,33 +1,33 @@
 package synchronice.android
 
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import android.os.Looper
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 import kotlin.test.Test
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class PresenceLifecycleTest {
     @Test
-    fun resetsPresenceAtCycleStartAndAfterCancellation() = runBlocking {
-        var online = true
-        var onlineAtStart = true
-        val entered = CompletableDeferred<Unit>()
-        val cycle = launch {
-            clearPresenceDuringLifecycleCycle({ online = it }) {
-                onlineAtStart = online
-                online = true
-                entered.complete(Unit)
-                awaitCancellation()
-            }
-        }
+    fun pausingAndResumingChatClearsTheVisiblePresence() {
+        val state = (RuntimeEnvironment.getApplication() as SynchroNiceApplication).state
+        state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":7777,"token":"0123456789abcdef0123456789abcdef"}""")
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        shadowOf(Looper.getMainLooper()).idle()
 
-        entered.await()
-        assertFalse(onlineAtStart)
-        assertTrue(online)
-        cycle.cancelAndJoin()
-        assertFalse(online)
+        state.updateOnline(true)
+        activity.pause()
+        assertFalse(state.online)
+
+        state.updateOnline(true)
+        activity.resume()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(state.online)
+        activity.close()
     }
 }
