@@ -1,5 +1,5 @@
 # SYN-012: Casca do Android
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -101,3 +101,5 @@ para ver vira `Débito humano:` (regra "Humano simulado" do `AGENTS.md`).
 - 2026-09-25 Attempt 3 failed: exit 0; blocked after two attempts. Log tail: [SYN-012](/C:/Users/bruno/Desktop/Pastinha/Programas/Projects/SynchroNice/.scratch/android/issues/03-SYN-012-casca-do-android.md:2) está `blocked`; commit `1262762` na branch `syn-012` guarda os casos do parser QR. /  / Os 37 testes Rust e 24 Node passaram. Os testes Android não iniciaram porque o download do Gradle 9.4.1 expirou; retome quando a distribuição estiver disponível ou o acesso a `services.gradle.org` funcionar.
 
 - 2026-09-25 Proxy decided: o bloqueio de ambiente foi resolvido. Gradle 9.4.1 oficial está no cache temporário `C:\Users\bruno\AppData\Local\Temp\SynchroNice-gradle-home`, com SHA-256 validado; o `android/local.properties` ignorado aponta para o SDK instalado. Com `GRADLE_USER_HOME` nesse cache, `gate.ps1 -TestsOnly` passou, inclusive `:protocol-client:test` e `:app:testDebugUnitTest`. Retomar o stage 2 a partir do teste vermelho preservado em `1262762`.
+
+- 2026-09-25 Attempt 4 failed: exit 0; blocked after two attempts. Log tail: SYN-012 está em `to-implement` na branch `syn-012`; o binding atribui o stage 2 ao **gpt-6-luna max**. Como esta sessão não identifica o modelo, parei conforme o `ticket-flow`, sem rodar testes nem alterar arquivos. Reexecute com gpt-6-luna max.
