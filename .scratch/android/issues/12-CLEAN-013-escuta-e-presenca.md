@@ -68,3 +68,5 @@ existentes):
 
 - 2026-09-27 Criado a partir da revisão do PR #7 (Spec (c) e Standards, bug 3).
   O stage 1 foi feito na sessão interativa.
+
+- 2026-09-27 Attempt 1 failed: exit 0. Log tail: Waiting for the gate run to finish — will resume automatically when it completes or at the next scheduled check.
