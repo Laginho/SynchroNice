@@ -1,5 +1,5 @@
 # CLEAN-015: Download em andamento conta como presença no PC
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -117,3 +117,21 @@ files; qualquer outra falha volta como `blocked` com o nome do teste.
 - 2026-09-27 Attempt 2 stopped to ask: Code's done and green — `cargo test` (40/40), `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all pass, including the red-then-green test for CLEAN-015. But `gate.ps1` itself won't run: both the PowerShell tool and Bash-wrapped `powershell.exe` immediately return "requires approval" without ever surfacing an approval prompt to you — same wall Attempt 1 hit (that's 6 denials total now, 0 actual prompts). /  / Two options: / 1. You run `.\gate.ps1` yourself in your own terminal to get the official proof, or tell me what's blocking the prompt from reaching you. / 2. Treat the equivalent `cargo` commands I just ran as satisfying the gate for this ticket, note that in the ticket, and proceed to `Stage: to-review`. /  / Which do you want?
 
 - 2026-09-27 Foreman: as duas tentativas falharam pelo ambiente, não pelo ticket. Nenhuma das 12 chamadas ao gate usou a única forma liberada pelo driver: a ferramenta **Bash** com o comando exato `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly` (ou sem `-TestsOnly` para o gate completo). O primeiro token tem de ser `powershell`, sem `.exe`, sem `cd ... &&` na frente e sem `| tail` depois. A ferramenta PowerShell e `.\gate.ps1` puro são negados. Essa forma funcionou no CLEAN-013 (tentativa 5, gate completo verde). Resposta à pergunta da tentativa 2: não à opção 2, porque o gate também roda `pc/ui` e `android`, e `cargo` sozinho não o substitui. Retomada: o teste vermelho está em `0fe09cc` (pinado em `refs/keep/clean-015-red`); o fix da tentativa 2 não foi commitado e se perdeu. Faça `git checkout -b clean-015 0fe09cc` e prove o vermelho com `-TestsOnly` pela forma acima. Refaça o fix em `server.rs` e **commite antes de rodar o gate completo**. Gate verde, `Stage: to-review`.
+
+- 2026-09-27 Retomada seguindo a instrução do foreman: `git checkout -b
+  clean-015 0fe09cc`, gate vermelho confirmado com a forma exata (Bash,
+  `powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly`) —
+  `download_em_andamento_conta_como_presenca` falha por timeout esperando
+  `on_change(true)`, os outros 39 testes de `server.rs` verdes. Refeito o fix
+  em `get_outbox_file` (commit `29a3565`, só `server.rs`): guarda de
+  `Presence` movido para dentro de um `Body::from_stream` em pedaços de 64
+  KiB, com `Content-Length` explícito — sem ele o hyper troca para
+  `Transfer-Encoding: chunked`, que quebrou
+  `arquivo_enfileirado_e_baixado_pela_rota_devolve_bytes_identicos` na
+  primeira tentativa (o corpo cru do teste vem com a framing do chunked
+  misturada aos bytes). `-TestsOnly` verde: 40/40 em `server.rs`. Gate
+  completo então acusou `cargo fmt`/`clippy::bool_assert_comparison`
+  pré-existentes no teste vermelho (`assert_eq!(x, true/false)`, duas linhas
+  longas) — fix mecânico, sem mudar o que cada asserção verifica, em commit
+  próprio (`27005f0`), só em `tests/server.rs`. Gate completo verde
+  (`pc`, `pc/ui`, `android`).
