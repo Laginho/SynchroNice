@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent

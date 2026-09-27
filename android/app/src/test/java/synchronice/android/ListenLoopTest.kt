@@ -162,10 +162,10 @@ class ListenLoopTest {
     @Test
     fun aReceiptThatKeepsFailingToPublishDoesNotBlockNewTextFromArriving() = runBlocking {
         val app = freshContext()
-        val updates98 = AtomicInteger()
+        val updates99 = AtomicInteger()
         registerMediaProvider(app) { uri ->
-            if (uri.lastPathSegment == "98") {
-                updates98.incrementAndGet()
+            if (uri.lastPathSegment == "99") {
+                updates99.incrementAndGet()
                 throw IOException("recibo falhou")
             } else 1
         }
@@ -173,7 +173,7 @@ class ListenLoopTest {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         val delivered = AtomicInteger()
         val listens = AtomicInteger()
-        val acks99 = AtomicInteger()
+        val acks98 = AtomicInteger()
         server.createContext("/listen") { exchange ->
             listens.incrementAndGet()
             val body = if (delivered.getAndIncrement() == 0) """{"kind":"text","id":7,"at_ms":0,"text":"novo"}""" else ""
@@ -182,13 +182,14 @@ class ListenLoopTest {
             exchange.close()
         }
         server.createContext("/outbox/7/ack") { exchange -> exchange.sendResponseHeaders(204, -1); exchange.close() }
-        server.createContext("/outbox/99/ack") { exchange -> acks99.incrementAndGet(); exchange.sendResponseHeaders(204, -1); exchange.close() }
+        server.createContext("/outbox/98/ack") { exchange -> acks98.incrementAndGet(); exchange.sendResponseHeaders(204, -1); exchange.close() }
         server.start()
         Dispatchers.setMain(Dispatchers.Unconfined)
         try {
             val state = AppState(app)
             assertTrue(state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"$token"}"""))
             state.knownAddress.save("127.0.0.1")
+            // The preferences map yields 99 before 98, so the failing receipt comes first in the batch.
             preferences.edit()
                 .putString("received-file:$token:98", "content://media/98")
                 .putString("received-file:$token:99", "content://media/99")
@@ -198,10 +199,10 @@ class ListenLoopTest {
                 withTimeout(5_000) { while (state.messages.isEmpty()) delay(10) }
                 assertEquals("novo", state.messages.single().text)
                 withTimeout(5_000) { while (listens.get() < 2) delay(10) }
-                assertTrue(preferences.contains("received-file:$token:98"), "a failing receipt stays queued for the next attempt")
-                assertTrue(updates98.get() >= 2, "the failing receipt must be retried before every listen")
-                assertFalse(preferences.contains("received-file:$token:99"), "another receipt in the same batch must still be acknowledged and dropped")
-                assertEquals(1, acks99.get())
+                assertTrue(preferences.contains("received-file:$token:99"), "a failing receipt stays queued for the next attempt")
+                assertTrue(updates99.get() >= 2, "the failing receipt must be retried before every listen")
+                assertFalse(preferences.contains("received-file:$token:98"), "another receipt in the same batch must still be acknowledged and dropped")
+                assertEquals(1, acks98.get())
             } finally {
                 listening.cancelAndJoin()
             }
@@ -325,7 +326,7 @@ class ListenLoopTest {
             // download's cleanup no time to run before the next reopen is already decided.
             // A short, fixed wait after the first download attempt reaches the server puts
             // both implementations on equal footing instead of leaving it to a real timing
-            // race: the buggy immediate free is long done by then, the fixed 1s hold is not.
+            // race: the buggy immediate free is long done by then, the fixed hold is not.
             if (gets.get() > 0) Thread.sleep(50)
             val body = """{"kind":"file","id":5,"at_ms":0,"name":"a.bin","size":4}"""
             exchange.sendResponseHeaders(200, 0)
@@ -345,17 +346,13 @@ class ListenLoopTest {
             state.knownAddress.save("127.0.0.1")
             val listening = launch { state.listen(state.pairing!!, state.client()!!) }
             try {
-                // The first /listen pays the resolver's one-time, uncached mDNS lookup (up to
-                // 2s in this fake environment); measure the steady-state rate after that, while
-                // the resolver's 3s cache is still warm, so it isn't mistaken for a hot loop.
+                // The clock starts at the first /listen, counting it: before it the resolver pays
+                // its one-time, uncached mDNS lookup (up to 2s in this fake environment), and its
+                // 3s cache stays warm for the whole window, so the window sees the loop's own pace.
                 withTimeout(5_000) { while (listens.get() < 1) delay(10) }
-                val listensAtWarm = listens.get()
-                val getsAtWarm = gets.get()
                 delay(2_000)
-                val listensSince = listens.get() - listensAtWarm
-                val getsSince = gets.get() - getsAtWarm
-                assertTrue(listensSince <= 3, "a fast-failing download must not turn into a hot loop: listens=$listensSince")
-                assertTrue(getsSince <= 3, "a fast-failing download must not turn into a hot loop: gets=$getsSince")
+                assertTrue(listens.get() <= 3, "a fast-failing download must not turn into a hot loop: listens=${listens.get()}")
+                assertTrue(gets.get() <= 3, "a fast-failing download must not turn into a hot loop: gets=${gets.get()}")
             } finally {
                 listening.cancelAndJoin()
             }
