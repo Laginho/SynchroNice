@@ -7,12 +7,15 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import com.sun.net.httpserver.HttpServer
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
@@ -29,6 +32,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -304,6 +308,65 @@ class ListenLoopTest {
                 withTimeout(5_000) { while (state.messages.singleOrNull()?.delivery != Delivery.DELIVERED) delay(10) }
             } finally {
                 listening.cancelAndJoin()
+            }
+        } finally {
+            Dispatchers.resetMain()
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun aLoopCancelledBeforeTheDownloadChildStartsFreesTheId() = runBlocking {
+        val app = freshContext()
+        registerMediaProvider(app) { 1 }
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.executor = Executors.newCachedThreadPool()
+        val listens = AtomicInteger()
+        val gets = AtomicInteger()
+        val listening = AtomicReference<Job>()
+        server.createContext("/listen") { exchange ->
+            val n = listens.incrementAndGet()
+            val body = if (n == 2) {
+                listening.get()!!.cancel()
+                ""
+            } else if (gets.get() == 0) {
+                """{"kind":"file","id":1,"at_ms":0,"name":"a.bin","size":4}"""
+            } else {
+                ""
+            }
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.use { it.write(body.toByteArray()) }
+            exchange.close()
+        }
+        server.createContext("/outbox/1/file") { exchange ->
+            gets.incrementAndGet()
+            exchange.sendResponseHeaders(200, 4)
+            exchange.responseBody.use { it.write("payl".toByteArray()) }
+            exchange.close()
+        }
+        server.createContext("/outbox/1/ack") { exchange -> exchange.sendResponseHeaders(204, -1); exchange.close() }
+        server.start()
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        try {
+            val state = AppState(app)
+            assertTrue(state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"$token"}"""))
+            state.knownAddress.save("127.0.0.1")
+            val loopDispatcher = StandardTestDispatcher()
+            listening.set(
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    state.listen(state.pairing!!, state.client()!!, dispatcher = loopDispatcher)
+                },
+            )
+            loopDispatcher.scheduler.runCurrent()
+            listening.get()!!.join()
+            assertEquals(0, gets.get(), "the download child cancelled before it started must not have run")
+
+            val reopened = launch { state.listen(state.pairing!!, state.client()!!) }
+            try {
+                withTimeout(5_000) { while (gets.get() < 1) delay(10) }
+                withTimeout(5_000) { while (state.messages.singleOrNull()?.delivery != Delivery.DELIVERED) delay(10) }
+            } finally {
+                reopened.cancelAndJoin()
             }
         } finally {
             Dispatchers.resetMain()
