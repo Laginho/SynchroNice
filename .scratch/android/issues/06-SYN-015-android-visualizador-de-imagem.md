@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -53,8 +53,16 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
   abrível e permanece abrível após sua entrega. Teste vermelho em commit próprio
   antes da correção. Gestos, tela cheia e navegação continuam na verificação
   manual, conforme a spec.
+- No `SentImageTest`, inicializar o WorkManager de teste com
+  `WorkManagerTestInitHelper.initializeTestWorkManager(context)` antes de
+  `AppState.queueFile`, sem disparar o trabalho agendado: o teste chama
+  `retryPending` explicitamente. `work-testing` já é dependência de teste.
+  Corrigir só o preparo em novo commit de teste; não simular `scheduleDelivery`
+  nem alterar produção para acomodar o teste.
 
 ## Comments
+
+- 2026-09-26 Proxy decidiu: a falha 23/24 é só setup do `SentImageTest`: `queueFile` chama `scheduleDelivery`, e o Robolectric lançou `WorkManager is not initialized properly` antes das asserções. Autorizar a inicialização oficial do WorkManager de teste acima. Preservar os commits `ba8d7f0` (teste), `e475559` (implementação) e `318d877` (bloqueio), retomando na branch `syn-015` recuperada desse último commit. Após o ajuste de teste, repetir `gate.ps1 -TestsOnly`; confirmar red comportamental da versão sem `e475559` e green com ela, então gate completo antes de `to-review`. Nenhum código de produção ou gate foi alterado nesta decisão. Referência: https://developer.android.com/reference/androidx/work/testing/WorkManagerTestInitHelper.
 
 - 2026-09-26 Proxy decidiu: preservar a imagem enviada apenas como prévia em RAM da Sessão, sem prolongar a cópia de Pendentes nem criar cache em disco. A fila deve continuar removendo seu payload após 201; a bolha mantém a prévia até o processo morrer. Isso permite abrir a imagem entregue e respeita "Guardar fotos tiradas" desligado, que não deixa foto persistente no celular. A prévia dos Pendentes é refeita da fila no início do processo. O teste novo cobre retenção da fonte, não gestos de interface. Android não garante `onDestroy()` quando mata o processo, portanto limpeza de arquivo temporário nesse callback não seria contrato suficiente: https://developer.android.com/guide/components/activities/process-lifecycle.
 
