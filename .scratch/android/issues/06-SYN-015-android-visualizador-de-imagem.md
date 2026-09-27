@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -53,8 +53,16 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
   abrível e permanece abrível após sua entrega. Teste vermelho em commit próprio
   antes da correção. Gestos, tela cheia e navegação continuam na verificação
   manual, conforme a spec.
+- No `SentImageTest`, inicializar o WorkManager de teste com
+  `WorkManagerTestInitHelper.initializeTestWorkManager(context)` antes de
+  `AppState.queueFile`, sem disparar o trabalho agendado: o teste chama
+  `retryPending` explicitamente. `work-testing` já é dependência de teste.
+  Corrigir só o preparo em novo commit de teste; não simular `scheduleDelivery`
+  nem alterar produção para acomodar o teste.
 
 ## Comments
+
+- 2026-09-26 Proxy decidiu: a falha 23/24 é só setup do `SentImageTest`: `queueFile` chama `scheduleDelivery`, e o Robolectric lançou `WorkManager is not initialized properly` antes das asserções. Autorizar a inicialização oficial do WorkManager de teste acima. Preservados os commits `ba8d7f0` (teste), `e475559` (implementação) e `318d877` (bloqueio) nesta branch restaurada. Após o ajuste de teste, repetir `gate.ps1 -TestsOnly`; confirmar que a versão sem `e475559` continua vermelha pelo contrato de prévia ausente e que a versão atual passa, então gate completo antes de `to-review`. Nenhum código de produção ou gate foi alterado nesta decisão. Referência: https://developer.android.com/reference/androidx/work/testing/WorkManagerTestInitHelper.
 
 - 2026-09-26 Stage 2 interrompido: o teste já commitado em `ba8d7f0` precisa corrigir seu preparo. Com gráficos nativos, `SentImageTest` chega a `AppState.queueFile`, mas `scheduleDelivery` lança `IllegalStateException: WorkManager is not initialized properly` antes das asserções. É necessário inicializar explicitamente o WorkManager de teste (dependência work-testing já existe), preservando a costura AppState real + HTTP falso, e repetir a prova vermelha comportamental antes do verde. Não alterei o teste após o commit, conforme ticket-flow. Implementação parcial preservada em `e475559`: prévia Bitmap limitada a 2048px obtida da cópia da fila sob mutex, reconstrução dos Pendentes, visualizador Compose com pinça/arraste/Voltar e imagens recebidas via URI. Não está aprovada: falta gate verde e validação visual. Última execução TestsOnly: 44 testes Rust e 32 Node passaram; app Android 24 testes, 23 passaram e 1 falhou no preparo citado. Para reproduzir neste ambiente: JDK `C:\Users\bruno\.jdks\jdk-17.0.20.1+1`, `JAVA_TOOL_OPTIONS=-Duser.home=C:\Users\bruno`, gate fora do sandbox para carregar o runtime nativo do Robolectric. O user.home temporário falhou com classes Android stub fora do sandbox; no sandbox houve AccessDeniedException no JAR nativeruntime. Computer Use inicializou e listou apps, mas não havia janela Android; adb devices confirmou nenhum dispositivo conectado. O emulador instalado lista SynchroNice_API37, não iniciado nesta etapa. Próximo passo: autorizar a correção do preparo do teste e retomar Stage 2 na branch `syn-015`.
 
