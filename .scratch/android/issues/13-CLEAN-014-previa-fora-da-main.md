@@ -1,5 +1,5 @@
 # CLEAN-014: Prévia de imagem Pendente fora da main thread
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -85,3 +85,5 @@ gate nunca em segundo plano (AGENTS.md).
 - Débito humano: ANR ao abrir o app com muitas fotos Pendentes num celular real (o teste prova só que o construtor não decodifica; não mede o tempo do `onCreate` no dispositivo).
 
 - 2026-09-27 Attempt 1 stopped to ask: ...rante o download..."). That commit's diff now contains my `previewExecutor`/`schedulePreviewDecode` code mixed into CLEAN-013's listen-loop fix. /  / **Current state:** / - `clean-014` branch: only the red test commit (`f0e8118`), no implementation — safe, untouched. / - `clean-013` branch (currently checked out, HEAD `8dcda31`): contains its own legitimate fix *plus* my leaked CLEAN-014 code. / - Working tree is clean (nothing uncommitted right now). /  / This means a `sweatshop`/`foreman` driver (or another live session) is running against this repo concurrently with me. Continuing to commit here risks tangling the two tickets further or racing another branch switch mid-edit. /  / I'm stopping rather than trying to untangle `8dcda31` myself, since rewriting a commit that another live process may still be building on is the kind of action that's better done with your say-so. Two questions: /  / 1. Is a sweatshop/foreman run active right now? If so, should it be paused before I continue? / 2. Do you want me to split my CLEAN-014 code out of `8dcda31` (rebase/edit that commit), or leave CLEAN-013 as-is and just redo the CLEAN-014 implementation cleanly on `clean-014` once the concurrent process is stopped?
+
+- 2026-09-27 Foreman: o processo concorrente era o proxy do foreman, que por engano rodou comandos git no repo real às 14:05 (checkout de `clean-013`, commit `a4e36ed` com autor `t <t@t>`). Parado e limpo: a branch `clean-013` contaminada (`8dcda31`) foi apagada, nada dela entra. Responda à pergunta 2 assim: refaça a implementação limpa, sem reaproveitar `8dcda31`. O vermelho desta tentativa sobrevive como `f0e8118` (só `SentImageTest.kt`, pinado em `refs/keep/clean-014-red`): `git checkout -b clean-014 sweatshop/2026-09-25-2127`, `git cherry-pick f0e8118`, e siga do verde. A tentativa 1 foi perdida pelo ambiente, não pelo ticket.
