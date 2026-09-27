@@ -1140,14 +1140,22 @@ fn upload_preso_libera_o_lock_e_o_id_pode_ser_reenviado() {
     std::thread::sleep(Duration::from_millis(50));
 
     assert_eq!(
-        post_arquivo_com_id(&base, TOKEN, "outro-id", "segundo.bin", b"conteudo do segundo"),
+        post_arquivo_com_id(
+            &base,
+            TOKEN,
+            "outro-id",
+            "segundo.bin",
+            b"conteudo do segundo"
+        ),
         201,
         "segundo upload deve passar assim que o primeiro estourar o timeout, sem reiniciar"
     );
     assert!(
-        std::fs::read_dir(&pasta)
+        std::fs::read_dir(&pasta).unwrap().all(|e| !e
             .unwrap()
-            .all(|e| !e.unwrap().file_name().to_string_lossy().contains(".part-")),
+            .file_name()
+            .to_string_lossy()
+            .contains(".part-")),
         "upload travado não pode deixar .part na Pasta"
     );
 
@@ -1198,10 +1206,7 @@ fn upload_lento_mas_continuo_nao_e_abortado_pelo_timeout() {
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
     assert!(response.starts_with("HTTP/1.1 201"), "{response}");
-    assert_eq!(
-        std::fs::read(pasta.join("lento.bin")).unwrap().len(),
-        total
-    );
+    assert_eq!(std::fs::read(pasta.join("lento.bin")).unwrap().len(), total);
 }
 
 // SYN-004: direção PC -> celular. O PC é o remetente e gera o id do Item
