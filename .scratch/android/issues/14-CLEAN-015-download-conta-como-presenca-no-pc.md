@@ -1,5 +1,5 @@
 # CLEAN-015: Download em andamento conta como presença no PC
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -135,3 +135,70 @@ files; qualquer outra falha volta como `blocked` com o nome do teste.
   longas) — fix mecânico, sem mudar o que cada asserção verifica, em commit
   próprio (`27005f0`), só em `tests/server.rs`. Gate completo verde
   (`pc`, `pc/ui`, `android`).
+
+#### Resolution (2026-09-27)
+
+Verdict: Approve
+
+Revisado `c5c3b68...b4b403f`. Rebaseado na sessão (`d904ea3` teste, `a3c8f0f`
+fix, `a365eaf` estilo, `54f6ff1` ficha, `2e6f416` conserto da revisão) e
+mergeado em `54bebc8`. O único conflito foi em `## Comments` desta ficha,
+resolvido mantendo os dois lados.
+
+- ✅ **Critério 1.** `enter()` roda antes de a resposta sair, e o closure
+  `move` do stream é dono do guarda. `Map` → `Body` → hyper: o guarda vive até
+  o corpo ser solto, não até o handler voltar.
+- ✅ **Critério 2.** O hyper solta o corpo quando o stream acaba ou quando o
+  cliente cai no meio; o teste cobre os dois ramos. A presença cai quando o
+  último pedaço entra no buffer de escrita do hyper, não quando o celular o
+  recebe (até ~400 KiB + buffer do SO antes). Isso cabe em "o solta quando o
+  stream acaba" e é menor que o vão de 1,5 s que a ficha já aceita.
+- ✅ **Critério 3.** 401, 404 e 500 voltam antes de `enter()`.
+- ✅ **Critério 4.** Os três testes nomeados estão fora do diff (só linhas
+  novas em `tests/server.rs`) e verdes.
+- Separação teste-primeiro: `a3c8f0f` e `2e6f416` tocam só `src/server.rs`.
+  **Desvio pela letra:** `a365eaf` toca `tests/server.rs` depois do commit
+  vermelho. Só fmt e `assert_eq!(x, true/false)` → `assert!(x)`/`assert!(!x)`,
+  que falham nas mesmas entradas para `bool`. O vermelho foi provado antes, em
+  `0fe09cc`/`d904ea3`. Reabrir não mudaria nada: o gate exige o fmt, e o
+  vermelho não pode ser reescrito. Fica como está.
+- Nada fora do Primary files. Nenhum `Proxy decided` nesta ficha. O foreman
+  respondeu a pergunta da tentativa 2 ("não à opção 2": `cargo` sozinho não
+  substitui o gate).
+
+**Conserto pequeno da revisão (`2e6f416`, só `server.rs`, sem teste novo):**
+- `bytes.chunks(..).map(to_vec).collect()` fazia uma segunda cópia inteira
+  do arquivo antes de mandar. Pico de 2× o tamanho, e o `Vec` de pedaços
+  ficava vivo o download todo. Agora `Bytes::from` + `slice` fatia sem copiar.
+- `Response::builder()` tinha perdido o `Content-Type:
+  application/octet-stream` que a tupla `(StatusCode, Vec<u8>)` mandava.
+  Voltou. Ninguém o lê hoje; é para a resposta não mudar.
+- Os comentários de `Presence::on_change`, `Presence::enter` e da linha
+  `HEAD /listen` do cabeçalho do módulo ainda diziam só `/listen`. O Primary
+  files os pede.
+
+**Não feito, a julgar:**
+- `lib.rs:23-24` (`PRESENCE_EVENT`) também diz "conexão `/listen` viva". Está
+  fora do Primary files. É uma linha de comentário: fica para o próximo
+  ticket que tocar `lib.rs`, sem `CLEAN-*` próprio.
+- `HEAD /outbox/{id}/file`: o axum responde HEAD com o handler do GET, então
+  um HEAD autorizado entra e sai da presença na hora e dispara
+  `on_change(true)` e `(false)`. A prosa diz "o guarda só é criado quando o
+  corpo vai ser mandado", mas nenhum critério cobre, e nenhum cliente manda
+  HEAD nessa rota. Consertar pede teste novo, então não é conserto pequeno.
+- O teste depende de 8 MiB passar dos buffers de socket do loopback. Passa
+  aqui; numa máquina com buffers maiores pode oscilar.
+- Standards: `conecta_e_le_status_sem_ler_corpo` repete a conexão e a leitura
+  da linha de status de `requisicao_crua_com_timeout`. `const CHUNK` fica
+  dentro do braço do `match`, e as outras constantes estão no nível do módulo.
+
+**Vermelho-verde, reconferido no stage 3** sobre `2e6f416`. Mutação: o guarda
+fica no handler (`let _guard`, fora do closure). `gate.ps1 -TestsOnly`: 39/40
+em `tests/server.rs`, a falha é exatamente
+`download_em_andamento_conta_como_presenca`, em `tests/server.rs:225`
+("critério 1: HEAD /listen confirma a presença do download", left 204, right
+200). Revertido.
+
+**Gate completo** em `2e6f416` (árvore igual à do merge): `gate: passou`. PC
+47 Rust (1 unit + 6 config + 40 server) + 32 node. Android `gradle check`
+BUILD SUCCESSFUL.
