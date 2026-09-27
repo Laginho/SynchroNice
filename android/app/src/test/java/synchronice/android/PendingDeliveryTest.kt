@@ -1,5 +1,6 @@
 package synchronice.android
 
+import androidx.work.testing.WorkManagerTestInitHelper
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -93,6 +94,7 @@ class PendingDeliveryTest {
         Dispatchers.setMain(Dispatchers.Unconfined)
         try {
             val context = RuntimeEnvironment.getApplication()
+            WorkManagerTestInitHelper.initializeTestWorkManager(context)
             context.getSharedPreferences("pairing", 0).edit().clear().commit()
             context.filesDir.resolve("pending-items.txt").delete()
             val state = AppState(context)
@@ -100,9 +102,10 @@ class PendingDeliveryTest {
             state.knownAddress.save("127.0.0.1")
 
             val first = state.addOutgoing("first")
-            state.sendText(first, "first")
+            state.queueText(first, "first")
             val second = state.addOutgoing("second")
-            state.sendText(second, "second")
+            state.queueText(second, "second")
+            state.retryPending()
             assertEquals(listOf(Delivery.PENDING, Delivery.PENDING), state.messages.map { it.delivery })
 
             sent.set(0)
