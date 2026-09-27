@@ -1,0 +1,85 @@
+# CLEAN-014: Prévia de imagem Pendente fora da main thread
+Stage: to-implement
+Status: ready-for-agent
+Blocked by: none
+Review: agent
+
+- Primary files:
+  - android/app/src/main/java/synchronice/android/MainActivity.kt (`AppState`: `init`, `outgoingFile`, construtor; `SynchroNiceApplication.onCreate`)
+  - android/app/src/test/java/synchronice/android/SentImageTest.kt
+
+#### What to build
+
+Achado 4 da revisão do PR #7 (sessão `sweatshop/2026-09-25-2127`), separado
+do CLEAN-013 porque é outra costura.
+
+**Trabalho pesado na main thread ao iniciar.** O `AppState` nasce no
+`Application.onCreate` e ali decodifica a prévia de cada Pendente de imagem,
+inclusive quando o processo acorda só para o WorkManager ou para o
+Compartilhar. Com muitas fotos Pendentes isso é ANR. A prévia passa a ser
+decodificada fora da thread que constrói o `AppState` e aparece na bolha
+quando fica pronta: a mensagem nasce com `preview` nulo e é trocada na lista
+(pelo `localId`; se a mensagem já saiu da lista, o resultado é descartado).
+A troca da mensagem corre na main via `Dispatchers.Main` (os testes trocam por
+`Unconfined`), não via `Handler`, senão o `runBlocking` do teste segura o
+looper e a prévia nunca chega.
+
+O trabalho de fundo entra por um `Executor` que o construtor recebe com
+padrão de uma thread só (`AppState(context, previewExecutor = ...)`); o
+`SynchroNiceApplication` usa o padrão, e o teste passa um executor que
+enfileira e só roda quando drenado, para a asserção "nulo logo após construir"
+não depender de corrida com a decodificação.
+
+A leitura da fila (`queueStore.load()` no `init`) **fica** síncrona. O
+achado original também pedia tirá-la da main, mas é um arquivo de texto
+pequeno, e todo mundo lê `messages` logo depois de construir (o
+`MainActivity.onCreate`, o `hasPending()` do `Application`, os testes). O
+custo que vira ANR é a decodificação.
+
+`queueFile` já chama `outgoingFile` dentro de `Dispatchers.IO`; lá a prévia
+pode continuar síncrona ou seguir o mesmo caminho, o que der o diff menor.
+
+#### Acceptance criteria
+
+1. Criar o `AppState` com Pendentes de imagem não decodifica nenhuma prévia na
+   thread que constrói: logo após o construtor, `preview` é nulo em toda
+   mensagem Pendente de imagem.
+2. Depois de o executor de fundo rodar, a prévia aparece na bolha da mesma
+   mensagem, com o conteúdo da imagem.
+3. Um Pendente de imagem cuja prévia ainda não decodificou continua na lista
+   como `PENDING`, com nome e `file` preenchidos, igual a hoje.
+
+#### Verification
+
+    powershell -ExecutionPolicy Bypass -File .\gate.ps1
+
+## Tests stage 2 writes (own commit, red)
+
+Dois trechos de `SentImageTest.kt` já existem no commit `7c5ccbf` (branch
+`clean-013`, apagada pelo driver; o objeto ainda existe). Não faça cherry-pick
+(o commit também traz `ListenLoopTest.kt`, do CLEAN-013); aplique só o trecho
+deste arquivo:
+
+    git show 7c5ccbf -- android/app/src/test/java/synchronice/android/SentImageTest.kt | git apply
+
+Se o `apply` não bater, são dois hunks pequenos, para refazer à mão:
+
+- no teste existente (`restored = AppState(context)`), antes das asserções de
+  prévia, esperar a prévia de `restored` ficar não nula
+  (`withTimeout(5_000) { while (restored.messages.single().preview == null) delay(10) }`);
+  fica como está: com o executor padrão, esperar é o certo.
+- teste novo `previewForAPendingImageIsDecodedAfterConstructionNotDuringIt`
+  (critérios 1 e 2): enfileira um PNG vermelho 64x64, apaga o original,
+  constrói outro `AppState`. Ajuste: em vez de esperar com `delay`, passe ao
+  construtor um executor que guarda os `Runnable` numa fila; `assertNull` na
+  prévia logo após construir; drene a fila; a prévia é vermelha em (0,0).
+
+Vermelho esperado (prova via `gate.ps1 -TestsOnly`): o teste novo falha na
+`assertNull` (hoje a prévia já vem decodificada do construtor); o teste
+existente segue verde. Commite o vermelho antes de rodar qualquer gate; o
+gate nunca em segundo plano (AGENTS.md).
+
+## Comments
+
+- 2026-09-27 Proxy decided: separar o achado 4 do CLEAN-013 neste ticket, e estreitar o critério para a prévia só (a leitura da fila fica síncrona) — os testes de `7c5ccbf` e o `MainActivity.onCreate` leem `messages` logo após construir, então tirar a fila da main mudaria o contrato de todo mundo por um arquivo de texto pequeno; o ANR é a decodificação.
+- Débito humano: ANR ao abrir o app com muitas fotos Pendentes num celular real (o teste prova só que o construtor não decodifica; não mede o tempo do `onCreate` no dispositivo).
