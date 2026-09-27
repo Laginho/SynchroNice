@@ -20,6 +20,11 @@ internal fun fileMimeType(name: String): String =
     MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
         ?: "application/octet-stream"
 
+/** Só o último segmento, sem caracteres de controle; vazio, "." ou ".." viram "arquivo". */
+internal fun safeFileName(raw: String): String =
+    raw.substringAfterLast('/').substringAfterLast('\\').filter { it >= ' ' && it != '\u007f' }
+        .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "arquivo"
+
 internal class ReceivedFiles(context: Context) {
     private val resolver = context.contentResolver
     private val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -62,8 +67,7 @@ internal class ReceivedFiles(context: Context) {
     fun receive(client: ProtocolClient, item: Item.FileMeta, existingUri: Uri?, creationIntent: String?, onCreating: (String) -> Unit, onCreated: (Uri) -> Unit, onSaved: (Uri) -> Unit, onProgress: (Int) -> Unit) {
         val tree = folder()
         val mime = fileMimeType(item.name)
-        val name = item.name.substringAfterLast('/').substringAfterLast('\\')
-            .filter { it >= ' ' }.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "arquivo"
+        val name = safeFileName(item.name)
         val uri = existingUri ?: if (tree == null && creationIntent == null) {
             // MediaStore allocates a unique filename atomically, including for repeated names.
             resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
