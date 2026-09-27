@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: to-review
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -61,6 +61,8 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
   nem alterar produção para acomodar o teste.
 
 ## Comments
+
+- 2026-09-26 Stage 3 bloqueado: o rebase de `syn-015` sobre `sweatshop/2026-09-25-2127` conflita neste arquivo do ticket ao reaplicar `ba8d7f0`; a branch de sessão acrescentou em paralelo `a76272e` e `287e789` ao mesmo contrato/comentários. Como o arquivo do ticket não está em `Primary files`, a regra de merge do `ticket-flow` proíbe o revisor de resolver o conflito. O rebase foi abortado sem alterar a implementação. A revisão de Standards não encontrou violação documentada; a revisão de Spec não deixou achado acionável. É preciso incorporar na branch de sessão o estado final deste ticket (incluindo `Stage: to-review`, prova red-green e débito humano), ou autorizar explicitamente o arquivo do ticket como fronteira de resolução, antes de repetir o Stage 3.
 
 - 2026-09-26 Stage 2 retomado: `ec0f420` corrige somente o preparo do `SentImageTest`, inicializando `WorkManagerTestInitHelper` antes de `queueFile`, sem acionar o trabalho agendado e sem alterar produção. Implementação `e475559` preservada. Prova vermelha: retirar temporariamente os dois arquivos de produção de `e475559` fez `gate.ps1 -TestsOnly` falhar em `compileDebugUnitTestKotlin`, com `Unresolved reference 'preview'` no teste; os arquivos foram restaurados ao HEAD em `finally`. Prova verde: `gate.ps1 -TestsOnly` passou com 24/24 testes do app, 56/56 do protocolo, 44/44 Rust e 32/32 TypeScript. Gate completo passou (fmt, clippy, tsc, testes e Android lint); nenhuma mudança no gate. A primeira execução no sandbox falhou antes dos testes Android por resolver o diretório de usuário como `C:\`; a execução no ambiente normal passou.
 - Débito humano: verificar os critérios 1–4 no aparelho (abrir imagem recebida em tela cheia, pinça, arrastar, Voltar preservando o chat e abrir outro arquivo no app padrão), além da abertura visual da imagem enviada do critério 5. Computer Use inicializou e listou a janela do AVD `SynchroNice_API37`, iniciado para esta tentativa; a captura foi recusada com `Computer Use was not approved to use qemu-system-x86_64`. O teste JVM comprova retenção, limite de resolução e descarte da prévia, mas não comprova gestos ou navegação.
