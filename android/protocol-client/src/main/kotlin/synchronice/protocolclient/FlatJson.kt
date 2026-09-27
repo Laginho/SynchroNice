@@ -51,7 +51,10 @@ private fun parseJsonString(json: String, start: Int): Pair<String, Int> {
                 'b' -> sb.append('\b')
                 'f' -> sb.append('')
                 'u' -> {
-                    sb.append(json.substring(i + 1, i + 5).toInt(16).toChar())
+                    // toInt(16) aceita sinal ("\u-001"); JSON exige quatro dígitos hex.
+                    val hex = json.substring(i + 1, i + 5)
+                    require(hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) { "escape JSON inválido" }
+                    sb.append(hex.toInt(16).toChar())
                     i += 4
                 }
                 '"', '\\', '/' -> sb.append(escaped)
