@@ -54,7 +54,11 @@ class ShareActivity : ComponentActivity() {
         else -> emptyList()
     }.ifEmpty {
         incoming.clipData?.let { clips -> (0 until clips.itemCount).mapNotNull { clips.getItemAt(it).uri } } ?: emptyList()
-    }
+    }.filter(::isFromAnotherApp)
+
+    /** Recusa file:// e content:// do próprio app: nem as preferências, nem a fila, nem o FileProvider da câmera. */
+    private fun isFromAnotherApp(uri: Uri): Boolean =
+        uri.scheme == "content" && uri.authority != packageName && uri.authority != "$packageName.camera"
 
     private fun copyToStaging(uri: Uri): File {
         val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor: Cursor ->

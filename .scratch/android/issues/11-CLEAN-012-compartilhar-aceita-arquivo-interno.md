@@ -1,5 +1,5 @@
 # CLEAN-012: Compartilhar aceita arquivos internos do próprio app
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -52,3 +52,19 @@ Teste Robolectric do Compartilhar, com Par gravado e a fila observada:
 
 - 2026-09-27 Criado a partir da revisão do PR #7 (Standards, bug 2). O stage 1
   foi feito na sessão interativa.
+- 2026-09-27 Stage 2: o critério 2 não foi provado pelo caminho ponta-a-ponta
+  descrito acima. `androidx.core.content.FileProvider` (`SimplePathStrategy`)
+  compara o caminho canônico do arquivo com a raiz configurada usando `/`
+  fixo; num host Windows o canônico vem com `\`, e a comparação nunca bate —
+  travessia real do FileProvider é irreprodutível sob Robolectric neste
+  ambiente, para qualquer authority. `ShadowContentResolver.registerProviderInternal`
+  também não sobrepõe a authority da câmera porque ela já está declarada no
+  manifesto (funciona para `"media"` em `ReceivedFileRestartTest` só por não
+  haver provider real concorrente ali). O teste
+  `contentUriFromOwnFileProviderIsFilteredOutBeforeReading` chama
+  `sharedUris` por reflection (método seguiu `private`) e verifica que a URI
+  já sai filtrada antes de qualquer leitura — mesmo código de produção, sem
+  depender do ContentResolver. Os outros três testes seguem ponta-a-ponta
+  (Par gravado, fila observada) como o plano previa. Débito humano: nenhuma
+  verificação manual ficou pendente disto — é um bug de ambiente (Windows),
+  não de comportamento no dispositivo real.
