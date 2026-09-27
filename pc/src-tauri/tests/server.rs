@@ -297,6 +297,53 @@ fn download_em_andamento_conta_como_presenca() {
         online_rx.try_recv().is_err(),
         "critério 3: 401 e 404 não disparam on_change"
     );
+
+    // O axum responde HEAD com o handler do GET, mas sem corpo não há download em andamento.
+    let (status, _) = requisicao_crua(
+        &base,
+        "HEAD",
+        &format!("/outbox/{}/file", item.id),
+        Some(&token),
+    );
+    assert_eq!(status, 200);
+    assert!(
+        online_rx.recv_timeout(Duration::from_millis(500)).is_err(),
+        "HEAD no arquivo não entra nem sai da presença"
+    );
+}
+
+#[test]
+fn reenvio_de_arquivo_depois_de_reiniciar_o_pc_nao_duplica_na_pasta() {
+    let raiz = tempfile::tempdir().unwrap();
+    let pasta = raiz.path().join("pasta");
+    std::fs::create_dir_all(&pasta).unwrap();
+    let ids = raiz.path().join("ids-aceitos.txt");
+    let sobe = |outbox: &str| {
+        let running = server::spawn_with_accepted_ids(
+            "127.0.0.1:0".parse().unwrap(),
+            TOKEN.to_string(),
+            Items::new(),
+            Outbox::new(raiz.path().join(outbox)).unwrap(),
+            Some(pasta.clone()),
+            &ids,
+        )
+        .unwrap();
+        format!("http://{}", running.addr)
+    };
+
+    let antes = sobe("outbox-1");
+    assert_eq!(
+        post_arquivo_com_id(&antes, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+    // O 201 se perdeu e o PC reiniciou: Sessão nova, mas o arquivo continua na Pasta.
+    let depois = sobe("outbox-2");
+    assert_eq!(
+        post_arquivo_com_id(&depois, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+
+    assert_eq!(std::fs::read_dir(&pasta).unwrap().count(), 1);
 }
 
 #[test]
