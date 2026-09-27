@@ -218,9 +218,8 @@ fn download_em_andamento_conta_como_presenca() {
         conecta_e_le_status_sem_ler_corpo(&base, &format!("/outbox/{}/file", item.id), &token);
     assert_eq!(status, 200);
 
-    assert_eq!(
+    assert!(
         online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-        true,
         "critério 1: download em andamento, sem /listen aberto, entra na presença"
     );
     assert_eq!(
@@ -238,9 +237,8 @@ fn download_em_andamento_conta_como_presenca() {
 
     // Solta o socket sem ler o corpo — desconecta no meio.
     drop(stream);
-    assert_eq!(
-        online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-        false,
+    assert!(
+        !online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
         "critério 2 (desconecta no meio): presença cai quando o cliente some"
     );
     assert_eq!(
@@ -261,14 +259,16 @@ fn download_em_andamento_conta_como_presenca() {
     let (status, mut stream) =
         conecta_e_le_status_sem_ler_corpo(&base, &format!("/outbox/{}/file", item.id), &token);
     assert_eq!(status, 200);
-    assert_eq!(online_rx.recv_timeout(Duration::from_secs(5)).unwrap(), true);
+    assert!(online_rx.recv_timeout(Duration::from_secs(5)).unwrap());
 
     let mut corpo = Vec::new();
     stream.read_to_end(&mut corpo).expect("lê corpo até o fim");
-    assert_eq!(corpo, bytes, "critério 4: bytes idênticos ao arquivo enfileirado");
     assert_eq!(
-        online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-        false,
+        corpo, bytes,
+        "critério 4: bytes idênticos ao arquivo enfileirado"
+    );
+    assert!(
+        !online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
         "critério 2 (termina): presença cai quando o GET termina"
     );
     assert_eq!(
