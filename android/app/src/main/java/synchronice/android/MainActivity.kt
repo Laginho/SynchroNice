@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import android.net.Uri
 import android.util.Size
 import android.widget.Toast
@@ -111,6 +113,7 @@ internal data class ChatMessage(
     val file: Item.FileMeta? = null,
     val uri: Uri? = null,
     val progress: Int = 0,
+    val preview: Bitmap? = null,
 )
 
 internal class AppState(context: Context) {
@@ -169,7 +172,8 @@ internal class AppState(context: Context) {
                 is PendingItem.Text -> pending.text
                 is PendingItem.File -> pending.name
             }
-            messages.add(ChatMessage(id, label, true, Delivery.PENDING))
+            messages.add(if (pending is PendingItem.File) outgoingFile(id, pending)
+                else ChatMessage(id, label, true, Delivery.PENDING))
             submitted.addLast(id)
         }
     }
@@ -300,16 +304,30 @@ internal class AppState(context: Context) {
         val stored = withContext(Dispatchers.IO) {
             outboundMutex.withLock {
                 val stored = currentClient.enqueueFile(file)
-                if (stored) withContext(Dispatchers.Main.immediate) {
+                if (stored) {
+                    val pending = queueStore.load().last() as PendingItem.File
+                    val message = outgoingFile(0, pending)
+                    withContext(Dispatchers.Main.immediate) {
                     val id = nextMessageId++
-                    messages.add(ChatMessage(id, file.name, true, Delivery.PENDING))
+                    messages.add(message.copy(localId = id))
                     submitted.addLast(id)
+                    }
                 }
                 stored
             }
         }
         if (!stored) throw IOException("arquivo não disponível")
         scheduleDelivery(appContext)
+    }
+
+    private fun outgoingFile(id: Long, pending: PendingItem.File): ChatMessage {
+        val file = File(pending.path)
+        return ChatMessage(
+            id, pending.name, true, Delivery.PENDING,
+            file = Item.FileMeta(id, 0, pending.name, file.length()),
+            preview = if (fileMimeType(pending.name).startsWith("image/"))
+                decodePreview(ImageDecoder.createSource(file)) else null,
+        )
     }
 
     fun hasPending(): Boolean = queueStore.load().isNotEmpty()
@@ -691,6 +709,7 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var draft by remember { mutableStateOf("") }
+    var viewedImage by remember { mutableStateOf<ChatMessage?>(null) }
     ConnectionLifecycle(state)
 
     LaunchedEffect(state.messages.size) {
@@ -719,7 +738,7 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.messages, key = { it.localId }) { message ->
-                    MessageBubble(message, state.copyFormatted)
+                    MessageBubble(message, state.copyFormatted, onImage = { viewedImage = it })
                 }
             }
         }
@@ -745,6 +764,7 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
             ) { Text("Enviar") }
         }
     }
+    viewedImage?.let { ImageViewer(it, onClose = { viewedImage = null }) }
 }
 
 @Composable
@@ -799,10 +819,11 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean) {
+private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean, onImage: (ChatMessage) -> Unit) {
     val context = LocalContext.current
     val file = message.file
     val uri = message.uri
+    val isImage = file != null && fileMimeType(file.name).startsWith("image/")
     val animatedProgress by animateFloatAsState(message.progress / 100f, label = "download")
     var thumbnail by remember(uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(uri) {
@@ -820,9 +841,10 @@ private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean) {
     ) {
         Card(
             modifier = Modifier.sizeIn(maxWidth = 320.dp).clickable(
-                onClickLabel = if (uri == null) "Copiar texto inteiro" else "Abrir arquivo",
+                onClickLabel = if (isImage) "Abrir imagem" else if (uri == null) "Copiar texto inteiro" else "Abrir arquivo",
             ) {
-                if (uri == null) copyText(context, message.text)
+                if (isImage) onImage(message)
+                else if (uri == null) copyText(context, message.text)
                 else try {
                     context.startActivity(Intent(Intent.ACTION_VIEW).apply {
                         setDataAndType(uri, fileMimeType(message.text))
@@ -843,12 +865,12 @@ private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean) {
                 if (file == null) CopyableText(message.text, copyFormatted)
                 else {
                     Text(message.text)
-                    thumbnail?.let { Image(it.asImageBitmap(), contentDescription = file.name, modifier = Modifier.sizeIn(maxWidth = 240.dp, maxHeight = 240.dp)) }
+                    (message.preview ?: thumbnail)?.let { Image(it.asImageBitmap(), contentDescription = file.name, modifier = Modifier.sizeIn(maxWidth = 240.dp, maxHeight = 240.dp)) }
                     Text("${file.name.substringAfterLast('.', fileMimeType(file.name)).uppercase()} · ${android.text.format.Formatter.formatFileSize(context, file.size)}", style = MaterialTheme.typography.labelSmall)
-                    if (message.delivery == Delivery.PENDING) {
+                    if (!message.outgoing && message.delivery == Delivery.PENDING) {
                         LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth())
                         Text("Recebendo ${message.progress}%", style = MaterialTheme.typography.labelSmall)
-                    } else if (message.delivery == Delivery.FAILED) {
+                    } else if (!message.outgoing && message.delivery == Delivery.FAILED) {
                         Text("Falha ao receber; tentando novamente", color = MaterialTheme.colorScheme.error)
                     }
                 }
