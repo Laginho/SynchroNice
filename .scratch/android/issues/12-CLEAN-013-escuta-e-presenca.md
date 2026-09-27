@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -70,3 +70,5 @@ existentes):
   O stage 1 foi feito na sessão interativa.
 
 - 2026-09-27 Attempt 1 failed: exit 0. Log tail: Waiting for the gate run to finish — will resume automatically when it completes or at the next scheduled check.
+
+- 2026-09-27 Attempt 2 failed: timeout; blocked after two attempts. Log tail: 
