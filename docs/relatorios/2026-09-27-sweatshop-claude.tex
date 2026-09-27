@@ -1,0 +1,288 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs,array,tabularx}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+\emergencystretch=2em
+
+\definecolor{sonnet}{HTML}{3B6EA8}
+\definecolor{opus}{HTML}{D08A1E}
+\definecolor{perda}{HTML}{C0504D}
+
+\title{Sweatshop no Claude: fechando os CLEAN\\\large Sonnet 5 (xhigh) no stage 2, Opus 5.5 (xhigh) no stage 3}
+\author{Foreman, sessão \texttt{sweatshop/2026-09-25-2127}}
+\date{27 de setembro de 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Resumo}
+
+Terceiro dia da mesma sessão de sweatshop. Os dias 25 e 26 rodaram no Codex
+(SYN-012 a SYN-018 e CLEAN-010); este run voltou ao
+\texttt{sweatshop.ps1} do Claude para fechar os \texttt{CLEAN-*} que sobraram.
+
+\begin{itemize}
+  \item \textbf{Produzido:} 7 tickets mergeados, com \textbf{uma reabertura}
+        (CLEAN-012). CLEAN-011, 012 e 013 vieram da fila; CLEAN-014 e 015
+        nasceram da divisão do CLEAN-013 pelo proxy; CLEAN-016 e 017 nasceram
+        dos dois \emph{Needs your call} das revisões do CLEAN-013 e do
+        CLEAN-014. Tracker vazio no fim. PR de sessão:
+        \href{https://github.com/Laginho/SynchroNice/pull/7}{\#7}, 15 tickets.
+  \item \textbf{Custo:} \textbf{\$59,99} a preço de lista em 24 estágios com
+        preço (Sonnet \$28,62, Opus \$31,38), mais 2 estágios sem preço (os dois
+        que estouraram o tempo). 346 min de estágio em 6\,h\,38 de relógio
+        (11:01--17:39), 124,9\,M tokens de entrada (96,8\,\% em cache) e
+        1,01\,M de saída.
+  \item \textbf{O que deu errado:} a \textbf{forma de chamar o gate}. O driver
+        só libera \texttt{Bash(powershell:*)}; as sessões que tentaram a
+        ferramenta PowerShell ou \texttt{powershell.exe} foram negadas em
+        silêncio, e três estágios foram perdidos por isso (um deles com o
+        conserto do CLEAN-015 ainda sem commit). Uma nota do foreman com o
+        comando exato resolveu em todas as tentativas seguintes.
+  \item \textbf{Veredito provisório:} Sonnet 5 xhigh + Opus 5.5 xhigh fecham
+        tickets pequenos em 15--32 min e \$3,7--8,1 cada. O CLEAN-013, largo
+        demais (duas costuras), sozinho levou 171 min e \$19,34 mais dois
+        estágios sem preço, e só fechou depois de ser dividido três vezes.
+\end{itemize}
+
+\section{Linha do tempo}
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+11:01 & Lançamento (aliases \texttt{sonnet}/\texttt{opus}, xhigh). CLEAN-012:
+        implementação (25 min), revisão \textbf{reabre} (filtro do próprio
+        provider contornável por \texttt{userId@}), nova implementação
+        (10 min), mergeado às 11:54.\\
+11:54 & CLEAN-013, tentativa 1 (26 min): sai sem avançar o \texttt{Stage}.
+        Tentativa 2 estoura os 45 min. \texttt{blocked}.\\
+13:05 & CLEAN-011 (14 + 17 min), mergeado. 13:37: ``Nothing runnable'', PR
+        com 10 tickets.\\
+13:37 & Proxy divide o CLEAN-013: a prévia fora da main vira CLEAN-014.
+        Relançamento recusado (\texttt{model has no version}); relançado com
+        \texttt{sonnet-5}/\texttt{opus-5.5}.\\
+13:59 & CLEAN-013, tentativa 3, para e pergunta (\texttt{ReceivedFileRestartTest}
+        fora dos Primary files). \textbf{Incidente do proxy}: às 14:05 ele roda
+        \texttt{git} no repositório real e mistura código na branch
+        \texttt{clean-013}; o CLEAN-014 para e pergunta. O foreman apaga a
+        branch contaminada; o proxy decide (a) para o CLEAN-013.\\
+14:15 & CLEAN-013 falha em 2 min: gate negado. CLEAN-014 (8 + 10 min),
+        mergeado às 14:33.\\
+14:40 & CLEAN-013, tentativa 4 (5 min), com a nota do comando exato do gate.
+        A revisão (6 min) bloqueia no critério 1: presença do PC durante o
+        download. O proxy reescreve o critério 1 e abre o CLEAN-015.\\
+14:59 & CLEAN-013, passada 2 (32 min). A revisão faz um conserto próprio,
+        mergeia e \textbf{estoura os 20 min} antes de gravar o veredito.\\
+15:55 & CLEAN-015, tentativas 1 e 2 (4 + 9 min): gate negado; a 2
+        propõe usar \texttt{cargo} como gate. O conserto sem commit se perde no
+        \texttt{Reset-Tree}; o vermelho fica preso em \texttt{refs/keep}.\\
+16:06 & Relançamento. CLEAN-013 revisado e fechado (15 min). CLEAN-015
+        retomado do vermelho (8 + 11 min), mergeado às 16:40.\\
+16:54 & Proxy responde os dois \emph{Needs your call}: CLEAN-016 e CLEAN-017.
+        CLEAN-016, implementação (9 min). A revisão morre às 17:04 com o
+        processo do Claude Code que hospedava o driver.\\
+17:15 & O único restart. CLEAN-016 (revisão 8 min) e CLEAN-017 (6 + 9 min),
+        mergeados. 17:39: ``Nothing runnable'', PR com 15 tickets.\\
+\bottomrule
+\end{tabularx}
+
+\section{Métricas por estágio}
+
+Linhas de \texttt{.scratch/run-log.md} de 27/09. ``?'' é estágio morto por
+timeout, sem uso registrado. A revisão do CLEAN-016 morta às 17:04 não tem
+linha.
+
+\medskip
+\noindent{\footnotesize
+\begin{tabularx}{\linewidth}{@{}l l r r r r r X@{}}
+\toprule
+Estágio & Modelo & Min & Entrada & Cache & Saída & Custo & Desfecho\\
+\midrule
+C12 impl.        & sonnet & 25 & 11,8\,M & 98\,\% & 79\,k & 3,96 & to-review\\
+C12 revisão      & opus   &  6 &  3,2\,M & 93\,\% & 38\,k & 2,75 & reaberto\\
+C12 impl.\ 2     & sonnet & 10 &  4,3\,M & 98\,\% & 37\,k & 1,59 & to-review\\
+C12 revisão 2    & opus   & 12 &  5,0\,M & 96\,\% & 48\,k & 3,19 & mergeado\\
+C13 impl.\ 1     & sonnet & 26 &  6,8\,M & 97\,\% & 87\,k & 2,91 & \textcolor{perda}{falhou}\\
+C13 impl.\ 2     & sonnet & 45 & ?       & ?      & ?     & ?    & \textcolor{perda}{timeout}\\
+C11 impl.        & sonnet & 14 &  6,2\,M & 98\,\% & 33\,k & 2,07 & to-review\\
+C11 revisão      & opus   & 17 &  6,7\,M & 95\,\% & 62\,k & 5,41 & mergeado\\
+C13 impl.\ 3     & sonnet & 20 &  6,5\,M & 97\,\% & 70\,k & 2,63 & perguntou (proxy)\\
+C14 impl.\ 1     & sonnet &  9 &  3,8\,M & 97\,\% & 29\,k & 1,43 & \textcolor{perda}{perguntou (incidente)}\\
+C13 impl.\ 3b    & sonnet &  2 &  2,0\,M & 97\,\% & 10\,k & 0,69 & \textcolor{perda}{gate negado}\\
+C14 impl.\ 2     & sonnet &  8 &  3,2\,M & 97\,\% & 19\,k & 1,14 & to-review\\
+C14 revisão      & opus   & 10 &  4,5\,M & 95\,\% & 37\,k & 3,04 & mergeado\\
+C13 impl.\ 4     & sonnet &  5 &  1,5\,M & 97\,\% &  6\,k & 0,55 & to-review\\
+C13 revisão      & opus   &  6 &  4,5\,M & 94\,\% & 60\,k & 3,65 & bloqueou (proxy)\\
+C13 passada 2    & sonnet & 32 & 15,7\,M & 99\,\% & 92\,k & 4,94 & to-review\\
+C13 revisão 2    & opus   & 20 & ?       & ?      & ?     & ?    & \textcolor{perda}{timeout após merge}\\
+C15 impl.\ 1     & sonnet &  4 &  2,3\,M & 97\,\% & 18\,k & 0,90 & \textcolor{perda}{gate negado}\\
+C15 impl.\ 2     & sonnet &  9 &  6,5\,M & 98\,\% & 36\,k & 2,06 & \textcolor{perda}{gate negado}\\
+C13 revisão 3    & opus   & 15 &  4,9\,M & 94\,\% & 67\,k & 3,97 & mergeado\\
+C15 impl.\ 3     & sonnet &  8 &  4,4\,M & 97\,\% & 27\,k & 1,58 & to-review\\
+C15 revisão      & opus   & 11 &  5,5\,M & 96\,\% & 49\,k & 3,55 & mergeado\\
+C16 impl.        & sonnet &  9 &  3,5\,M & 98\,\% & 19\,k & 1,18 & to-review\\
+C16 revisão      & opus   &  8 &  3,6\,M & 95\,\% & 34\,k & 2,50 & mergeado\\
+C17 impl.        & sonnet &  6 &  2,8\,M & 97\,\% & 13\,k & 0,99 & to-review\\
+C17 revisão      & opus   &  9 &  5,7\,M & 96\,\% & 42\,k & 3,32 & mergeado\\
+\midrule
+\multicolumn{2}{@{}l}{Total} & 346 & 124,9\,M & 96,8\,\% & 1012\,k & 59,99 & \\
+\multicolumn{2}{@{}l}{Perdido} & 115 & 21,4\,M & & 250\,k & 7,99 & 7 estágios, 2 sem preço\\
+\bottomrule
+\end{tabularx}}
+
+\bigskip
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar stacked, bar width=18pt, width=\linewidth, height=6.2cm,
+  ylabel={Tokens de entrada (M)}, ymin=0,
+  symbolic x coords={C12,C11,C13,C14,C15,C16,C17},
+  xtick=data, x tick label style={font=\small},
+  legend style={at={(0.98,0.95)},anchor=north east,draw=none},
+  axis lines*=left, ymajorgrids, grid style={gray!25}]
+\addplot[fill=sonnet,draw=none] coordinates
+  {(C12,24.3) (C11,12.9) (C13,33.1) (C14,7.7) (C15,9.9) (C16,7.1) (C17,8.5)};
+\addplot[fill=perda,draw=none] coordinates
+  {(C12,0) (C11,0) (C13,8.8) (C14,3.8) (C15,8.8) (C16,0) (C17,0)};
+\legend{produziu, perdido}
+\end{axis}
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Onde foi o custo.} Por ticket: CLEAN-013 \$19,34 (+2 estágios sem
+preço, 171 min), CLEAN-012 \$11,48, CLEAN-015 \$8,08, CLEAN-011 \$7,48,
+CLEAN-014 \$5,61, CLEAN-017 \$4,31, CLEAN-016 \$3,68. Os 21,4\,M perdidos têm
+três causas, nenhuma de modelo no sentido estrito: o gate negado (CLEAN-013
+3b, CLEAN-015 1--2: 10,8\,M, \$3,64), o ticket largo demais (CLEAN-013 1--2:
+6,8\,M e 71 min) e o incidente do proxy (CLEAN-014 1: 3,8\,M). O Opus custou
+mais que o Sonnet (\$31,38 contra \$28,62) em menos da metade dos minutos.
+
+\section{Comparação}
+
+Mesma sessão, dias 25--26 no Codex (gpt-6-luna/gpt-6-sol, depois
+gpt-6-astra/gpt-5.6-sol), contra este run. Números de \texttt{run-log.md}.
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}X r r@{}}
+\toprule
+& Codex, 25--26/09 & Claude, 27/09\\
+\midrule
+Estágios & 65 & 26\\
+Tickets mergeados & 8 & 7\\
+Minutos de estágio por ticket mergeado & 86 & 49\\
+Minutos por ticket, mediana & --- & 31 (15--171)\\
+Reaberturas & 16 & 1\\
+Minutos por implementação que chegou a \texttt{to-review}, média & 16,5 & 13,0\\
+Minutos por revisão, média & 6,5 & 11,4\\
+Custo registrado & --- & \$59,99\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+Ressalva forte: os tickets do Codex eram SYN-* de funcionalidade (a casca
+Android, recepção, Compartilhar), maiores que os CLEAN-* de hoje; seis das 16
+reaberturas foram do SYN-012 sozinho. A revisão do Opus é mais longa, mas
+refaz a prova vermelho-verde por mutação em todo ticket, o que as do Codex
+não faziam.
+
+\section{Observações sobre os modelos}
+
+\subsection*{Sonnet 5 (xhigh), implementação}
+\begin{itemize}
+  \item \textbf{TDD limpo:} as revisões conferiram commit só de teste antes do
+        código em todos os tickets (CLEAN-013, 014, 015, 016, 017).
+  \item \textbf{Obedece à nota do foreman:} com o comando exato do gate escrito
+        no ticket, chegou a \texttt{to-review} na primeira tentativa em todos
+        os casos (CLEAN-013 tentativa 4, CLEAN-015 retomado, 016, 017).
+  \item \textbf{Sem a nota, improvisa:} tentou a ferramenta PowerShell,
+        \texttt{powershell.exe} e \texttt{.\textbackslash gate.ps1}, e no
+        CLEAN-015 propôs rodar \texttt{cargo} como gate. Deixou o conserto sem
+        commit antes de parar, e ele se perdeu.
+  \item \textbf{Ticket largo trava:} no CLEAN-013 com duas costuras, gastou
+        71 min em duas tentativas sem chegar a \texttt{to-review}.
+\end{itemize}
+
+\subsection*{Opus 5.5 (xhigh), revisão}
+\begin{itemize}
+  \item \textbf{Uma reabertura em sete tickets,} e justa: o filtro do
+        CLEAN-012 era contornável por \texttt{userId@}.
+  \item \textbf{Achados de desenho viram decisão, não reabertura:} as corridas
+        do CLEAN-013 (despacho) e do CLEAN-014 (prévia contra entrega) saíram
+        como \emph{Needs your call} com o conserto provável; viraram CLEAN-016
+        e 017 e fecharam no mesmo run, com \$8 somados.
+  \item \textbf{Desvio de processo:} a revisão das 15:31 escreveu teste e
+        código no stage 3 (\texttt{d696148}, \texttt{92c4d62}) e mergeou antes
+        de gravar o veredito; estourou os 20 min e custou uma revisão extra
+        (\$3,97).
+\end{itemize}
+
+\section{Integração com o Claude e o driver}
+\begin{itemize}
+  \item \textbf{Gate só pela forma exata.} O \texttt{--allowedTools} libera
+        \texttt{Bash(powershell:*)}; em \texttt{claude -p} as outras formas
+        voltam ``requires approval'' sem diálogo. Três estágios perdidos; só
+        nas duas tentativas do CLEAN-015 a própria sessão contou seis negações
+        (\texttt{86803b6}).
+  \item \textbf{A nota ``o driver só aceita o alias'' do \texttt{AGENTS.md}
+        está invertida:} às 13:38 o driver recusou \texttt{sonnet}/\texttt{opus}
+        com \texttt{model has no version}; ele exige \texttt{sonnet-5} e
+        \texttt{opus-5.5}.
+  \item \textbf{\texttt{Reset-Tree} descarta trabalho sem commit} (o conserto
+        do CLEAN-015). O foreman passou a prender os vermelhos em
+        \texttt{refs/keep/*}.
+  \item \textbf{Preflight recusou} um relançamento às 14:58 porque o foreman
+        deixou o repositório na branch de sessão depois de commitar.
+  \item \textbf{O driver morre com o processo do Claude Code} que o lançou
+        (17:04). O estado ficou limpo; o restart retomou pela revisão.
+  \item \textbf{Proxy rodou \texttt{git} no repositório real} (14:05, commit com
+        autor \texttt{t <t@t>}). Agora o proxy é o agente
+        \texttt{\textasciitilde/.claude/agents/proxy.md} (Opus 5.5 xhigh), com
+        a regra de só leitura na definição, e o \texttt{AGENTS.md} o nomeia em
+        vez de fixar modelo.
+  \item \textbf{O corpo do PR} ainda lista os \emph{Needs your call} do
+        CLEAN-013 e 014, já respondidos pelo proxy com CLEAN-016 e 017.
+\end{itemize}
+
+\section{Recomendações}
+\begin{enumerate}
+  \item \textbf{Ampliar o \texttt{--allowedTools} do driver} para aceitar
+        \texttt{Bash(powershell.exe:*)} e a ferramenta PowerShell no gate, ou
+        escrever no \texttt{AGENTS.md} a forma exata e as proibidas. É a causa
+        de toda a perda evitável do run.
+  \item \textbf{Corrigir a linha Models do \texttt{AGENTS.md}} para
+        \texttt{stage 2 sonnet-5 xhigh, stage 3 opus-5.5 xhigh} e tirar a nota
+        do alias.
+  \item \textbf{Stage 1 mais estreito:} um ticket, uma costura. O CLEAN-013
+        custou mais que três tickets pequenos juntos.
+  \item \textbf{Revisão grava o veredito antes do merge,} ou o limite de
+        revisão sobe para 30 min quando o gate Android roda duas vezes.
+  \item \textbf{Driver: commit automático de ``wip'' antes do
+        \texttt{Reset-Tree}} numa tentativa que parou para perguntar, para a
+        seguinte retomar.
+  \item \textbf{Corpo do PR:} marcar como respondido o \emph{Needs your call}
+        seguido de \texttt{Proxy decided}.
+\end{enumerate}
+
+\section{Débito humano}
+\begin{itemize}
+  \item CLEAN-013: critério 1 contra o PC real --- com um arquivo grande
+        chegando, o chat do celular segue ``Na rede'' e um texto do PC aparece
+        no meio do download (o teste prova contra um PC falso).
+  \item CLEAN-013/015: celular real contra PC real --- a janela do PC fica
+        ``presente'' durante o download inteiro, texto do PC chega antes do fim
+        da barra, e pausar o app no meio do download e voltar termina o
+        arquivo.
+  \item CLEAN-014: ANR ao abrir o app com muitas fotos Pendentes num celular
+        real (o teste prova só que o construtor não decodifica).
+\end{itemize}
+
+\end{document}
