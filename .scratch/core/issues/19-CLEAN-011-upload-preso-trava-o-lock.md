@@ -1,11 +1,12 @@
 # CLEAN-011: Upload preso trava todos os arquivos do celular
-Stage: to-implement
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
 
 - Primary files:
   - pc/src-tauri/src/server.rs (rota de arquivo: leitura do corpo e o lock dos uploads com id)
+  - pc/src-tauri/Cargo.toml (feature "time" do tokio, para o `tokio::time::timeout`)
   - pc/src-tauri/tests/server.rs
 
 #### What to build
@@ -23,7 +24,8 @@ travamento.
 
 A correção é um timeout de inatividade na leitura do corpo: sem receber bytes
 por 30 s, o upload é abortado como um corpo incompleto (o parcial sai da
-Pasta, nada entra na Sessão, o id não fica marcado como aceito) e o lock é
+Pasta, o Item que já nasceu na Sessão termina como falhou — igual a um corte
+de conexão, CLEAN-005 —, o id não fica marcado como aceito) e o lock é
 solto. O valor fica numa constante que o teste pode encurtar. Particionar o
 lock por id fica de fora: com o timeout, o pior caso é um upload esperar o
 timeout do anterior.
@@ -32,7 +34,9 @@ timeout do anterior.
 
 1. Um upload com id cujo corpo para no meio (conexão aberta, sem mais bytes)
    é abortado após o timeout de inatividade: o arquivo parcial não fica na
-   Pasta, e nenhum Item aparece na Sessão.
+   Pasta, e o Item que já nasceu na Sessão (a bolha com a barra de progresso)
+   termina como falhou, igual a um corte de conexão (CLEAN-005) — nenhum Item
+   concluído aparece na Sessão.
 2. Um segundo upload, com outro id, enviado enquanto o primeiro está preso,
    termina com 201 assim que o primeiro é abortado, sem precisar reiniciar.
 3. Reenviar o mesmo id do upload abortado grava o arquivo (o id não foi
@@ -59,3 +63,11 @@ Em `tests/server.rs`, com o timeout encurtado para o teste:
 
 - 2026-09-27 Criado a partir da revisão do PR #7 (Standards, bug 1). O stage 1
   foi feito na sessão interativa.
+- 2026-09-27 (stage 3) Proxy decided: critério 1 aceita o Item terminar como
+  falhou em vez de sumir da Sessão — o timeout é só outra detecção do mesmo
+  corpo incompleto do CLEAN-005, e remover o Item exigiria API nova em `Items`
+  e esconderia a falha do usuário. Critério 1 e a prosa foram emendados.
+- 2026-09-27 (stage 3) Proxy decided: `Cargo.toml` (feature "time" do tokio)
+  entra nos Primary files — é consequência mecânica do fix, com precedente no
+  SYN-003. Desvio de processo registrado: a linha entrou no commit vermelho
+  `eb592a1`, não no de código `b6c131a`; sem reescrita de histórico.

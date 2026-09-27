@@ -294,6 +294,26 @@ fn sobe() -> (String, Items, Outbox, tempfile::TempDir) {
     (format!("http://{}", running.addr), items, outbox, raiz)
 }
 
+/// Como `sobe()`, mas com o timeout de inatividade do upload encurtado, para
+/// os testes de travamento não esperarem os 30 s de verdade.
+fn sobe_com_timeout_de_upload(timeout: Duration) -> (String, Items, Outbox, tempfile::TempDir) {
+    let raiz = tempfile::tempdir().expect("tempdir");
+    let pasta = raiz.path().join("pasta");
+    std::fs::create_dir_all(&pasta).expect("cria Pasta");
+    let items = Items::new();
+    let outbox = Outbox::new(raiz.path().join("outbox")).expect("cria fila de saída");
+    let running = server::spawn_with_upload_timeout(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        items.clone(),
+        outbox.clone(),
+        Some(pasta.clone()),
+        timeout,
+    )
+    .expect("servidor sobe em porta aleatória");
+    (format!("http://{}", running.addr), items, outbox, raiz)
+}
+
 /// Como `sobe()`, mas autentica com o token vivo de `par` em vez de um
 /// `TOKEN` fixo — rotacionar `par` depois já vale para o servidor, sem
 /// reiniciá-lo (SYN-005).
@@ -1088,6 +1108,124 @@ fn envio_cortado_nao_consume_o_id_e_pode_ser_repetido() {
         std::fs::read(raiz.path().join("pasta/cortado.bin")).unwrap(),
         b"completo"
     );
+}
+
+#[test]
+fn upload_preso_libera_o_lock_e_o_id_pode_ser_reenviado() {
+    let (base, items, _outbox, raiz) = sobe_com_timeout_de_upload(Duration::from_millis(200));
+    let pasta = raiz.path().join("pasta");
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    let corpo = vec![b'A'; 4096];
+    let pedido = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-Item-Id: preso\r\n\
+         X-File-Name: preso.bin\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        corpo.len()
+    );
+    let mut travado = TcpStream::connect(addr).expect("conecta upload que vai travar");
+    travado
+        .write_all(pedido.as_bytes())
+        .expect("escreve cabeçalhos");
+    travado
+        .write_all(&corpo[..10])
+        .expect("escreve só um pedaço");
+    // Conexão fica aberta sem mais bytes: só o timeout de inatividade pode
+    // abortá-la, não um fechamento do lado do cliente.
+    std::thread::sleep(Duration::from_millis(50));
+
+    // Numa thread com prazo: sem o timeout do servidor o segundo upload
+    // espera o lock para sempre, e o teste tem que falhar, não travar o gate.
+    let segundo_base = base.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(post_arquivo_com_id(
+            &segundo_base,
+            TOKEN,
+            "outro-id",
+            "segundo.bin",
+            b"conteudo do segundo",
+        ));
+    });
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("segundo upload não pode esperar o lock para sempre"),
+        201,
+        "segundo upload deve passar assim que o primeiro estourar o timeout, sem reiniciar"
+    );
+    assert!(
+        std::fs::read_dir(&pasta).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".part-")),
+        "upload travado não pode deixar .part na Pasta"
+    );
+    // O Item que nasceu no início do upload termina como falhou, igual a um
+    // corte de conexão — nunca como concluído.
+    let status = items
+        .snapshot()
+        .into_iter()
+        .find_map(|i| match i.body {
+            ItemBody::File { name, status, .. } if name == "preso.bin" => Some(status),
+            _ => None,
+        })
+        .expect("item do upload travado");
+    assert_eq!(status, FileStatus::Failed);
+
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "preso", "preso.bin", b"reenviado"),
+        201,
+        "o id do upload abortado não pode ter ficado marcado como aceito"
+    );
+    assert_eq!(
+        std::fs::read(pasta.join("preso.bin")).unwrap(),
+        b"reenviado"
+    );
+
+    drop(travado);
+}
+
+#[test]
+fn upload_lento_mas_continuo_nao_e_abortado_pelo_timeout() {
+    let (base, _items, _outbox, raiz) = sobe_com_timeout_de_upload(Duration::from_millis(150));
+    let pasta = raiz.path().join("pasta");
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    let pedaco = vec![b'B'; 16];
+    let total = pedaco.len() * 6;
+    let pedido = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-File-Name: lento.bin\r\n\
+         Content-Length: {total}\r\n\
+         Connection: close\r\n\
+         \r\n"
+    );
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .write_all(pedido.as_bytes())
+        .expect("escreve cabeçalhos");
+    for _ in 0..6 {
+        // Cada intervalo fica abaixo do timeout de 150ms; a soma (~480ms) o
+        // ultrapassa de sobra — só o intervalo isolado pode importar.
+        std::thread::sleep(Duration::from_millis(80));
+        stream.write_all(&pedaco).expect("escreve pedaço");
+    }
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+    assert_eq!(std::fs::read(pasta.join("lento.bin")).unwrap().len(), total);
 }
 
 // SYN-004: direção PC -> celular. O PC é o remetente e gera o id do Item
