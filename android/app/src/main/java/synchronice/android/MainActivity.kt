@@ -230,6 +230,7 @@ internal class AppState(
         messages.clear()
         receivedIds.clear()
         receivedFiles.clear()
+        inFlightFiles.clear()
         protocolClient = null
         clientFor = null
         return true
@@ -273,6 +274,7 @@ internal class AppState(
                             submitted.clear()
                             receivedIds.clear()
                             receivedFiles.clear()
+                            inFlightFiles.clear()
                         }
                     }
                 }
@@ -454,8 +456,13 @@ internal class AppState(
                             throw error
                         } catch (_: Exception) {
                             // receiveFile already recorded the failure in connectionError and delivery.
+                            // Keep the id in flight a moment so a fast, repeating failure doesn't
+                            // spin the listen loop hot on the same re-announced file.
+                            delay(1_000)
                         } finally {
-                            withContext(Dispatchers.Main.immediate) { inFlightFiles.remove(file.id) }
+                            // NonCancellable: a cancelled listen loop (ON_PAUSE) must still free the
+                            // id, or the relaunched loop ignores the re-announced file forever.
+                            withContext(Dispatchers.Main.immediate + NonCancellable) { inFlightFiles.remove(file.id) }
                         }
                     }
                 }
@@ -507,6 +514,7 @@ internal class AppState(
         for ((key, value) in receipts) {
             if (client !== protocolClient || pairing != currentPair) return@withContext
             val itemId = key.removePrefix(prefix).toLong()
+            if (itemId in inFlightFiles) continue
             try {
                 withContext(Dispatchers.IO) {
                     kotlinx.coroutines.runInterruptible {
