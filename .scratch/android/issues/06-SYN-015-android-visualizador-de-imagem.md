@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -55,6 +55,8 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
   manual, conforme a spec.
 
 ## Comments
+
+- 2026-09-26 Stage 2: teste `SentImageTest` exercita AppState real, HTTP 201, prévia limitada em RAM, reconstrução de Pendente e ausência de payload/prévia em disco após entrega. Gate TestsOnly vermelho: `ChatMessage.preview` ainda não existe (compileDebugUnitTestKotlin). Ambiente de execução usa JDK 17 e user.home temporário conforme SYN-012.
 
 - 2026-09-26 Proxy decidiu: preservar a imagem enviada apenas como prévia em RAM da Sessão, sem prolongar a cópia de Pendentes nem criar cache em disco. A fila deve continuar removendo seu payload após 201; a bolha mantém a prévia até o processo morrer. Isso permite abrir a imagem entregue e respeita "Guardar fotos tiradas" desligado, que não deixa foto persistente no celular. A prévia dos Pendentes é refeita da fila no início do processo. O teste novo cobre retenção da fonte, não gestos de interface. Android não garante `onDestroy()` quando mata o processo, portanto limpeza de arquivo temporário nesse callback não seria contrato suficiente: https://developer.android.com/guide/components/activities/process-lifecycle.
 
