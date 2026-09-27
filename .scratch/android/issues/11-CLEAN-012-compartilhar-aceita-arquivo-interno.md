@@ -1,5 +1,5 @@
 # CLEAN-012: Compartilhar aceita arquivos internos do próprio app
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -138,3 +138,50 @@ Notas que não bloqueiam (fazer só se o stage 2 já estiver mexendo no trecho):
   leitura do diff, os testes 1, 2 e 4 ficam vermelhos sem a correção e o 3 é
   de regressão (verde antes e depois). Registre as contagens reais na próxima
   passada.
+
+#### Resolution (2026-09-27)
+
+Verdict: Approve
+
+Re-revisão dos dois ❌ da passada anterior e do diff desde `d9e5300`. Os dois
+foram fechados, e nenhum achado novo bloqueia.
+
+- ✅ **Critério 2.** `isForeignContentUri` tira o prefixo com
+  `substringAfterLast('@')`, que é o mesmo corte de
+  `ContentProvider.getAuthorityWithoutUserId` que o `ContentResolver` usa antes
+  de adquirir o provider. Os dois lados partem do `uri.authority`
+  decodificado, então `0%40` também não escapa. A pergunta ao
+  `PackageManager` recusa a câmera e qualquer provider mesclado do próprio app,
+  como o androidx-startup. Um provider de outro app que o Android 11+ esconde
+  por package visibility volta `null` e é aceito, como pede o critério 3. Só
+  passa o scheme `content` exato, então `file://`, `android.resource://` e
+  `CONTENT://` são recusados.
+- ✅ **Teste do critério 4.** O `SEND_MULTIPLE` agora leva as três URIs. A
+  própria é a variante `0@`; a sem prefixo segue coberta pelo teste isolado.
+- Separação teste-antes-de-código: `4178923` e `f9a48d1` tocam só
+  `ShareActivityTest.kt`; `c2f1b4c` e `d753ec2` tocam só `ShareActivity.kt` e
+  o ticket. Nada fora dos Primary files.
+- Não há linha `Proxy decided` neste ticket.
+
+Correção pequena do stage 3 (`ae30d43`, dentro dos Primary files, sem teste
+novo). `sharedUris` virou `internal`, que é a convenção do repo, e as duas
+cópias da reflection no teste saíram. O overload depreciado
+`resolveContentProvider(String, Int)` ganhou `@Suppress("DEPRECATION")`,
+como o arquivo já faz no `getParcelableExtra`. O KDoc que falava em
+"comparação" foi acertado, e os nomes de teste perderam as crases. O teste do
+lote ganhou um comentário dizendo por que a URI própria vai primeiro.
+
+Fica sem bloquear: o critério 1 ("nada do arquivo é lido") é provado de forma
+indireta. O teste vê a fila vazia, e o código filtra antes de
+`copyToStaging`, mas nenhum teste observa a leitura em si. O "Tests stage 2
+writes" pedia só "fila vazia".
+
+Vermelho-verde, reconferido pelo stage 3 numa worktree com os testes de
+`d753ec2` sobre o `ShareActivity.kt` de `c2f1b4c`. Resultado: 29 testes, 2
+falhas por `AssertionError`.
+`contentUriWithUserIdPrefixForOwnFileProviderIsFilteredOutBeforeReading`
+falha com "Expected value to be false", e
+`sendMultipleOnlyQueuesTheAcceptedUri` com `expected:<1> but was:<0>`.
+
+Gate completo em `ae30d43`: `gate: passou`. Android 29 testes
+(`ShareActivityTest` 5), PC 44 Rust + 32 node, 0 falhas.
