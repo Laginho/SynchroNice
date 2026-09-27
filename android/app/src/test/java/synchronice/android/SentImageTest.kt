@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -17,6 +18,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.Executor
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -102,6 +104,96 @@ class SentImageTest {
             assertNull(restored.messages.single().preview, "the decode must not run on the constructing thread")
             while (queuedPreviewWork.isNotEmpty()) queuedPreviewWork.removeFirst().run()
             assertEquals(Color.RED, assertNotNull(restored.messages.single().preview).getPixel(0, 0))
+        } finally {
+            original.delete()
+            Dispatchers.resetMain()
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun deliveryWaitsForThePreviewOfAPendingImage() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        WorkManagerTestInitHelper.initializeTestWorkManager(context)
+        val uploads = AtomicInteger(0)
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/items/file") { exchange ->
+            exchange.requestBody.readBytes()
+            uploads.incrementAndGet()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        server.start()
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        val original = context.cacheDir.resolve("photo.png")
+        try {
+            val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.RED)
+            original.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+            val seed = AppState(context)
+            seed.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"0123456789abcdef0123456789abcdef"}""")
+            seed.knownAddress.save("127.0.0.1")
+            val before = context.filesDir.walkTopDown().filter { it.isFile }.toSet()
+            seed.queueFile(original)
+            original.delete()
+
+            val queuedPreviewWork = ArrayDeque<Runnable>()
+            val restored = AppState(context, previewExecutor = Executor { queuedPreviewWork.addLast(it) })
+            restored.resolver.resolve("synchronice-1234abcd")
+
+            val delivery = launch(Dispatchers.IO) { restored.retryPending() }
+            delay(500)
+            assertEquals(0, uploads.get(), "delivery must wait for the preview")
+            assertTrue(delivery.isActive)
+            while (queuedPreviewWork.isNotEmpty()) queuedPreviewWork.removeFirst().run()
+            withTimeout(5_000) { delivery.join() }
+            assertEquals(1, uploads.get())
+            assertEquals(Delivery.DELIVERED, restored.messages.single().delivery)
+            assertFalse(restored.hasPending())
+            assertEquals(Color.RED, assertNotNull(restored.messages.single().preview).getPixel(0, 0))
+            val remaining = context.filesDir.walkTopDown().filter { it.isFile }.toSet() - before
+            assertTrue(remaining.all { it.name == "pending-items.txt" }, "No payload or preview may remain: $remaining")
+        } finally {
+            original.delete()
+            Dispatchers.resetMain()
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun anUndecodablePendingImageDoesNotHoldDelivery() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        WorkManagerTestInitHelper.initializeTestWorkManager(context)
+        val uploads = AtomicInteger(0)
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/items/file") { exchange ->
+            exchange.requestBody.readBytes()
+            uploads.incrementAndGet()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        server.start()
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        val original = context.cacheDir.resolve("broken.png")
+        try {
+            original.writeBytes("nao e png".toByteArray())
+            val seed = AppState(context)
+            seed.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"0123456789abcdef0123456789abcdef"}""")
+            seed.knownAddress.save("127.0.0.1")
+            seed.queueFile(original)
+            original.delete()
+
+            val queuedPreviewWork = ArrayDeque<Runnable>()
+            val restored = AppState(context, previewExecutor = Executor { queuedPreviewWork.addLast(it) })
+            restored.resolver.resolve("synchronice-1234abcd")
+
+            val delivery = launch(Dispatchers.IO) { restored.retryPending() }
+            while (queuedPreviewWork.isNotEmpty()) queuedPreviewWork.removeFirst().run()
+            withTimeout(5_000) { delivery.join() }
+            assertEquals(Delivery.DELIVERED, restored.messages.single().delivery)
+            assertNull(restored.messages.single().preview)
+            assertEquals(1, uploads.get())
         } finally {
             original.delete()
             Dispatchers.resetMain()

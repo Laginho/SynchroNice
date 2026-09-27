@@ -70,6 +70,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -153,6 +154,7 @@ internal class AppState(
     private var clientFor: PairingInfo? = null
     private var protocolClient: ProtocolClient? = null
     private val submitted = ArrayDeque<Long>()
+    private val previewsPending = mutableListOf<CompletableDeferred<Unit>>()
 
     var pairing by mutableStateOf(readPairing())
         private set
@@ -183,18 +185,24 @@ internal class AppState(
             messages.add(if (pending is PendingItem.File) outgoingFile(id, pending, decodeNow = false)
                 else ChatMessage(id, label, true, Delivery.PENDING))
             if (pending is PendingItem.File && fileMimeType(pending.name).startsWith("image/")) {
-                schedulePreviewDecode(id, File(pending.path))
+                val previewDone = CompletableDeferred<Unit>()
+                previewsPending.add(previewDone)
+                schedulePreviewDecode(id, File(pending.path), previewDone)
             }
             submitted.addLast(id)
         }
     }
 
-    private fun schedulePreviewDecode(id: Long, file: File) {
+    private fun schedulePreviewDecode(id: Long, file: File, done: CompletableDeferred<Unit>) {
         previewExecutor.execute {
-            val preview = decodePreview(ImageDecoder.createSource(file))
-            kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
-                val index = messages.indexOfFirst { it.localId == id }
-                if (index >= 0) messages[index] = messages[index].copy(preview = preview)
+            try {
+                val preview = decodePreview(ImageDecoder.createSource(file))
+                kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                    val index = messages.indexOfFirst { it.localId == id }
+                    if (index >= 0) messages[index] = messages[index].copy(preview = preview)
+                }
+            } finally {
+                done.complete(Unit)
             }
         }
     }
@@ -406,6 +414,8 @@ internal class AppState(
         onFileProgress: (Int) -> Unit = {},
         onFileStart: (Long) -> Unit = {},
     ) {
+        // ponytail: delivery waits for every restored preview (N × ~150 ms); wait per item if the delay shows.
+        previewsPending.forEach { it.await() }
         val currentPair = pairing
         val currentClient = client() ?: run { unpair(); return }
         try {
