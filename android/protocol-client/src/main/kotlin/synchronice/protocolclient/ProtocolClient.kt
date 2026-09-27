@@ -57,7 +57,7 @@ class ProtocolClient(
      * vez de ficar Pendente, porque recusa não é indisponibilidade.
      */
     fun sendText(text: String) {
-        send(makePending = { PendingItem.Text(text) }, attempt = { trySendText(text) })
+        send(PendingItem.Text(text)) { id -> trySendText(text, id) }
     }
 
     /**
@@ -74,10 +74,7 @@ class ProtocolClient(
      * chamou, em vez de virar perda silenciosa.
      */
     fun sendFile(file: File, onProgress: (Int) -> Unit = {}) {
-        send(
-            makePending = { PendingItem.File(file.absolutePath, file.name) },
-            attempt = { trySendFile(file, file.name, onProgress) },
-        )
+        send(PendingItem.File(file.absolutePath, file.name)) { id -> trySendFile(file, file.name, onProgress, id) }
     }
 
     /** Persiste um Item antes de entregá-lo a um executor em segundo plano. */
@@ -89,17 +86,19 @@ class ProtocolClient(
     /**
      * Caminho único de envio: drena o Pendente antes, nunca fura a fila; se
      * ainda houver Pendente à frente ou o PC estiver indisponível, o Item
-     * novo entra no fim da fila. [makePending] é chamado no máximo uma vez.
+     * novo entra no fim da fila. A tentativa direta já leva o id de [item]:
+     * se o PC gravou mas a resposta se perdeu, o reenvio da fila é
+     * reconhecido pelo mesmo id em vez de virar outro Item.
      */
-    private fun send(makePending: () -> PendingItem, attempt: () -> SendOutcome) {
+    private fun send(item: PendingItem, attempt: (id: String) -> SendOutcome) {
         retryPending()
         if (pending.isNotEmpty()) {
-            enqueue(makePending())
+            enqueue(item)
             return
         }
-        when (val outcome = attempt()) {
+        when (val outcome = attempt(item.id)) {
             SendOutcome.Success -> {}
-            SendOutcome.Unreachable -> enqueue(makePending())
+            SendOutcome.Unreachable -> enqueue(item)
             is SendOutcome.Rejected -> throw ProtocolRejectedException(outcome.code)
         }
     }
