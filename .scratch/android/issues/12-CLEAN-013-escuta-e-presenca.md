@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: to-review
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -161,6 +161,77 @@ Se o gate completo (fmt/lint) reclamar de algo em `MainActivity.kt` ou
 `ReceivedFiles.kt`, é fix pequeno dentro do Primary files; qualquer outra
 falha volta como `blocked` com o nome do teste.
 
+## Review stage 3 (2026-09-27)
+
+Verdict: Needs your call: o critério 1 não é atendido contra o PC real, e
+nenhuma mudança dentro do Primary files o atende — o stage 1 precisa escolher
+a costura (ou reescrever o critério) antes de o ticket voltar ao stage 2.
+
+Revisado `sweatshop/2026-09-25-2127...75e13ae` (`5405b33`, `1208d55`,
+`980148e`). Separação teste-primeiro correta: `5405b33` só `ListenLoopTest.kt`
+e a ficha, `1208d55` só `MainActivity.kt`/`ReceivedFiles.kt`, `980148e` só o
+sinal de espera permitido em `ReceivedFileRestartTest.kt`. Gate verde conforme
+a tentativa 5 (não rodado de novo: não há merge).
+
+- ❌ **Critério 1, metade da presença.** Contra o PC real a escuta não fica
+  aberta durante o download. `get_listen` responde na hora quando há Pendentes
+  (`pc/src-tauri/src/server.rs:618`), e o arquivo baixando é Pendente até o ACK
+  (`outbox.rs:233` devolve o manifesto inteiro). O laço novo faz então:
+  `/listen` → [42] → dispara o download → reabre → [42] na hora (em voo,
+  ignorado) → `delay(1_500)` sem conexão aberta → repete. A `Presence` do PC é
+  um contador de conexões vivas (`server.rs:166`), então fica em 1 só pelos
+  poucos ms de cada volta; o `isListening()` que o Android sonda a cada 1 s
+  (`MainActivity.kt:985`) vê 204 quase sempre e o chat segue "Fora da rede" — o
+  sintoma do item 1 do "What to build". E o `on_change` do PC (`lib.rs:254`)
+  agora pisca presente/ausente a cada ~1,5 s durante o download, onde antes
+  ficava ausente estável. A metade do texto está atendida (chega em até 1,5 s,
+  antes de o download acabar). O teste não pega: o PC falso responde `""` na
+  hora da 3ª escuta em diante e nada consulta presença. O `Débito humano:` do
+  critério 1 não é débito — o código responde, e a resposta é não. O próprio
+  ticket se contradiz: "um lote sem nada novo conta como lote vazio (a mesma
+  espera de 1,5 s)" contra um PC que nunca bloqueia enquanto há Pendente.
+- ❌ **Regressão: pausar no meio do download trava o arquivo para sempre.** O
+  `finally { withContext(Dispatchers.Main.immediate) { inFlightFiles.remove(file.id) } }`
+  (`MainActivity.kt:457-458`) não roda no cancelamento: `withContext` faz
+  `ensureActive()` antes do bloco e lança. `repeatOnLifecycle(RESUMED)`
+  (`:964`) cancela a escuta a cada ON_PAUSE, e o `AppState` sobrevive
+  (`:103`), então na volta `inFlightFiles.add` devolve `false` para esse id, o
+  lote conta como "nada novo" e o Item nunca mais é baixado até a Activity ser
+  recriada. Antes, a próxima escuta retomava o download pelo recibo
+  `writing:`. Fere "o Item volta a ser baixado quando o PC o devolver".
+  `inFlightFiles` também não é limpo em `unpair`/`acceptQr` (`:231`, `:274`),
+  ao contrário de `receivedIds`/`receivedFiles`. Precisa de teste que cancele e
+  relance o laço.
+- ❌ **Regressão: download que falha rápido vira laço quente.** Antes, um
+  `receiveFile` que lançava caía no `catch` externo e esperava 1 s ou 1,5 s.
+  Agora o filho engole o erro e solta o id; se a falha é local e mais rápida
+  que uma volta de `/listen` (Pasta revogada → `createDocument` lança; `insert`
+  do MediaStore devolve `null`), a escuta seguinte devolve o mesmo Pendente, o
+  id já não está em voo, `startedDownload = true` e o laço reabre sem espera:
+  `/listen` + tentativa de download em loop apertado, cada volta piscando a
+  presença do PC. O "What to build" pede o contrário ("para não virar laço
+  quente"). Precisa de teste.
+- Lacunas de teste (nenhuma reprova sozinha; o código está certo): critério 5,
+  segunda metade (tirar a condição de em voo em `:462` não quebra teste
+  nenhum); critério 4, ramo `savedUri` do `receiveFile` (`:565-570`) nunca é
+  exercitado, porque a repetição apaga o recibo antes do primeiro `/listen`;
+  critério 3, "tentado de novo depois" e "os outros recibos do mesmo lote
+  seguem" (um recibo só, sem contar tentativas).
+- Menores, dentro do Primary files: `retryReceivedReceipts` não pula ids em
+  `inFlightFiles`, então entre o `onSaved` e o ACK do download uma volta pode
+  publicar, confirmar e apagar o mesmo recibo (inofensivo hoje: ACK é
+  idempotente, `server.rs:45`); se `removeReceipt` lança dentro do
+  `catch (FileGoneException)` (`:523-524`), o erro escapa, pula os outros
+  recibos e cai no `IOException` do laço, que não chega ao `listen()` (item 3);
+  `dropStaleReceipt` em `:568` contorna o guarda de troca de Par de
+  `update`/`saveReceipt`; mensagem de asserção invertida em
+  `ListenLoopTest.kt:227` (afirma `acks == 1`, que é o ACK do download novo,
+  dizendo "must never be acknowledged"); um 401 durante o download agora é
+  engolido pelo filho (`:455`) — a próxima escuta ainda despareia.
+- ✅ Critérios 2 e 6. Critérios 3, 4 e 5 atendidos no código.
+- Decisões do proxy nesta ficha: "dividir" (achado 4 virou CLEAN-014) e "(a)"
+  (`ReceivedFileRestartTest.kt` no Primary files só para o sinal de espera).
+
 ## Comments
 
 - 2026-09-27 Criado a partir da revisão do PR #7 (Spec (c) e Standards, bug 3).
@@ -183,3 +254,20 @@ falha volta como `blocked` com o nome do teste.
 - 2026-09-27 Foreman: a tentativa 4 falhou pelo ambiente, não pelo ticket. A recuperação e o fix ficaram prontos (`61342b4` vermelho, `859e8d7` fix, `5a522d7` o ajuste do `ReceivedFileRestartTest`, pinados em `refs/keep/clean-013-a4`), mas o gate foi negado: a sessão o chamou pela ferramenta PowerShell e por `powershell.exe` no Bash, e nenhum dos dois está no allowlist do driver. Só passa a ferramenta **Bash** com o comando exato `powershell -ExecutionPolicy Bypass -File .\gate.ps1` (ou `... -TestsOnly`), primeiro token `powershell`, sem `.exe`, sem `cd ... &&` na frente. Retomada: `git checkout -b clean-013 5a522d7`, `git rebase sweatshop/2026-09-25-2127` (o CLEAN-014 mergeou mudanças no `AppState` depois; resolva conflito, se houver, mantendo os dois), rode o gate completo e siga para `to-review`. Não refaça o vermelho: a prova vermelho→verde já está nos commits da tentativa 3/4.
 
 - 2026-09-27 Tentativa 5: recuperado `refs/keep/clean-013-a4` (`5a522d7`) em `clean-013`, rebase limpo sobre `sweatshop/2026-09-25-2127` sem conflito (CLEAN-014 não toca as mesmas linhas). Gate completo (`powershell -ExecutionPolicy Bypass -File .\gate.ps1`, ferramenta Bash, primeiro token `powershell`) rodou em primeiro plano e passou: cargo fmt/clippy/test (pc) verde, tsc + node --test (pc/ui) 32/32, `gradle check` (android) BUILD SUCCESSFUL incluindo `testDebugUnitTest` e `lintDebug`. `Stage: to-review`.
+
+- 2026-09-27 Stage 3: `blocked`, pergunta para o stage 1. O critério 1 pede
+  que o `HEAD /listen` do PC responda que há escuta durante o download, mas o
+  PC responde o `GET /listen` na hora enquanto houver Pendente, então nada no
+  Android mantém uma escuta aberta (ver "Review stage 3"). Qual caminho?
+  (a) No PC, um `GET /outbox/{id}/file` em andamento também conta como
+  presença (`server.rs`, `get_outbox_file` entra na `Presence` como o
+  `get_listen`): o critério 1 fica como está, `server.rs` entra no Primary
+  files com teste do lado do PC, e a espera de 1,5 s fica só para o texto.
+  (b) No Android, o sondador de presença trata download em voo como presença
+  (`online = active || inFlightFiles.isNotEmpty()`): cabe no Primary files,
+  mas conserta só o chat do celular — o `HEAD` e o piscar do PC continuam, e o
+  critério 1 tem de ser reescrito para dizer isso. (c) Outra leitura.
+  Qualquer que seja a escolha, os dois ❌ de regressão (id preso em
+  `inFlightFiles` no cancelamento; laço quente em download que falha rápido) e
+  as lacunas de teste listadas cabem no Primary files atual e devem entrar em
+  "Tests stage 2 writes" na mesma passada.
