@@ -5,6 +5,9 @@
 //!   Authorization: Bearer <token>
 //!   X-Item-Id: <id gerado pelo remetente> (opcional para clientes antigos)
 //!   201 sem corpo ao criar o Item; 401 sem token ou com token errado.
+//!   Um id já aceito responde 201 sem criar outro Item: é o reenvio de uma
+//!   resposta perdida. Id vazio, com mais de 128 bytes ou fora de ASCII
+//!   visível: 400.
 //!
 //! Protocolo (SYN-003):
 //!   POST /items/file        corpo: os bytes do arquivo, em stream
@@ -20,7 +23,11 @@
 //!                                       deste cabeçalho, o tamanho vem do
 //!                                       Content-Length)
 //!   201 sem corpo ao gravar o arquivo; 401 sem token ou com token errado;
-//!   503 se a Pasta ainda não foi escolhida.
+//!   503 se a Pasta ainda não foi escolhida. Um id já aceito responde 201 sem
+//!   outro Item nem outro arquivo, também depois de o PC reiniciar (os ids de
+//!   arquivo ficam em disco); id inválido é 400, como no texto. 400 também
+//!   quando o corpo fica 30 s sem nenhum byte (o lock do id é solto), chega
+//!   incompleto ou passa do tamanho declarado.
 //!
 //! Protocolo (SYN-004): direção PC -> celular. O PC é o remetente e gera o
 //! id do Item (spec, "Protocolo de Itens"); só a confirmação do celular
@@ -42,7 +49,8 @@
 //!                                 Pendente; 404 se o id não existir ou já
 //!                                 ter sido confirmado. Enquanto o corpo está
 //!                                 saindo, a conexão também é presença
-//!                                 (CLEAN-015).
+//!                                 (CLEAN-015). HEAD responde os mesmos
+//!                                 cabeçalhos sem corpo e sem presença.
 //!   Authorization: Bearer <token>
 //!
 //!   POST /outbox/{id}/ack        confirma o recebimento do Item `id` — só
@@ -74,8 +82,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use futures_util::StreamExt;
-use std::collections::{HashMap, HashSet};
-use std::io;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
@@ -89,6 +97,54 @@ pub const PORT: u16 = 47820;
 /// corpo incompleto e soltar o lock do id — sem isso, uma conexão que morre
 /// no meio do arquivo prende o lock para sempre.
 const UPLOAD_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// ponytail: só os últimos 1000 ids de arquivo aceitos; o celular reenvia o
+/// que ainda está na própria fila logo depois, não semanas depois.
+const ACCEPTED_FILE_IDS_KEPT: usize = 1000;
+
+/// Ids de arquivo aceitos, também em disco (ADR-0002): a Sessão e os ids de
+/// texto somem com o processo, mas o arquivo fica na Pasta, e o reenvio de um
+/// 201 que se perdeu antes de o PC reiniciar viraria `nome (1)`.
+struct AcceptedFileLog {
+    path: PathBuf,
+    recent: VecDeque<String>,
+}
+
+impl AcceptedFileLog {
+    fn load(path: &Path) -> io::Result<Self> {
+        let recent = match std::fs::read_to_string(path) {
+            Ok(text) => text.lines().map(str::to_string).collect(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => VecDeque::new(),
+            Err(e) => return Err(e),
+        };
+        Ok(AcceptedFileLog {
+            path: path.to_path_buf(),
+            recent,
+        })
+    }
+
+    /// Falhar aqui não recusa o arquivo, que já está na Pasta: no pior caso,
+    /// o reenvio depois de um reinício duplica, como antes deste registro.
+    fn record(&mut self, id: &str) {
+        self.recent.push_back(id.to_string());
+        let result = if self.recent.len() > 2 * ACCEPTED_FILE_IDS_KEPT {
+            let excess = self.recent.len() - ACCEPTED_FILE_IDS_KEPT;
+            self.recent.drain(..excess);
+            let temp = self.path.with_extension("tmp");
+            let text: String = self.recent.iter().map(|id| format!("{id}\n")).collect();
+            std::fs::write(&temp, text).and_then(|()| std::fs::rename(&temp, &self.path))
+        } else {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .and_then(|mut file| writeln!(file, "{id}"))
+        };
+        if let Err(e) = result {
+            eprintln!("não foi possível guardar o id de arquivo aceito {id}: {e}");
+        }
+    }
+}
 
 /// Fonte do token que autentica as requisições: um `String` fixo (a maioria
 /// dos testes de integração) ou um `Par` (SYN-005). Vindo de um `Par`,
@@ -133,6 +189,8 @@ struct AppState {
     /// Ids que este processo já aceitou do remetente. A Sessão é em memória,
     /// portanto a deduplicação tem o mesmo ciclo de vida dos Itens visíveis.
     accepted_item_ids: Arc<Mutex<HashSet<String>>>,
+    /// `None` nos testes que não reiniciam o PC; o app sempre guarda.
+    accepted_file_log: Option<Arc<Mutex<AcceptedFileLog>>>,
     /// ponytail: um lock global basta para os uploads com id — o timeout de
     /// inatividade da leitura do corpo garante que o pior caso é esperar o
     /// upload anterior estourar o timeout, nunca travar para sempre;
@@ -267,7 +325,37 @@ pub fn spawn(
     outbox: Outbox,
     pasta: Option<PathBuf>,
 ) -> io::Result<Running> {
-    spawn_with_upload_timeout(addr, token, items, outbox, pasta, UPLOAD_INACTIVITY_TIMEOUT)
+    spawn_inner(
+        addr,
+        token,
+        items,
+        outbox,
+        pasta,
+        UPLOAD_INACTIVITY_TIMEOUT,
+        None,
+    )
+}
+
+/// Como `spawn`, guardando em `accepted_ids_file` os ids de arquivo aceitos,
+/// para o reenvio depois de um reinício do PC não duplicar o arquivo na Pasta.
+/// É o que o app usa.
+pub fn spawn_with_accepted_ids(
+    addr: SocketAddr,
+    token: impl Into<TokenCell>,
+    items: Items,
+    outbox: Outbox,
+    pasta: Option<PathBuf>,
+    accepted_ids_file: &Path,
+) -> io::Result<Running> {
+    spawn_inner(
+        addr,
+        token,
+        items,
+        outbox,
+        pasta,
+        UPLOAD_INACTIVITY_TIMEOUT,
+        Some(accepted_ids_file),
+    )
 }
 
 /// Como `spawn`, mas com o timeout de inatividade do upload configurável —
@@ -280,6 +368,32 @@ pub fn spawn_with_upload_timeout(
     pasta: Option<PathBuf>,
     upload_inactivity_timeout: Duration,
 ) -> io::Result<Running> {
+    spawn_inner(
+        addr,
+        token,
+        items,
+        outbox,
+        pasta,
+        upload_inactivity_timeout,
+        None,
+    )
+}
+
+fn spawn_inner(
+    addr: SocketAddr,
+    token: impl Into<TokenCell>,
+    items: Items,
+    outbox: Outbox,
+    pasta: Option<PathBuf>,
+    upload_inactivity_timeout: Duration,
+    accepted_ids_file: Option<&Path>,
+) -> io::Result<Running> {
+    let accepted_file_log = accepted_ids_file.map(AcceptedFileLog::load).transpose()?;
+    let accepted_item_ids: HashSet<String> = accepted_file_log
+        .iter()
+        .flat_map(|log| log.recent.iter().cloned())
+        .collect();
+    let accepted_file_log = accepted_file_log.map(|log| Arc::new(Mutex::new(log)));
     let token = token.into();
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
@@ -320,7 +434,8 @@ pub fn spawn_with_upload_timeout(
                     pasta: pasta_da_thread,
                     leases: Arc::new(Mutex::new(HashSet::new())),
                     received_files: received_files_da_thread,
-                    accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
+                    accepted_item_ids: Arc::new(Mutex::new(accepted_item_ids)),
+                    accepted_file_log,
                     file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
                     upload_inactivity_timeout,
                     #[cfg(test)]
@@ -546,6 +661,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     let items = state.items.clone();
     let received_files = state.received_files.clone();
     let accepted_item_ids = state.accepted_item_ids.clone();
+    let accepted_file_log = state.accepted_file_log.clone();
     let final_path_bg = final_path.clone();
     let temp_path_bg = temp_path.clone();
     let concluido = tokio::spawn(async move {
@@ -583,6 +699,11 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                     .insert(item.id, final_path_bg.clone());
                 items.file_done(item.id);
                 if let Some(id) = item_id {
+                    // Depois do rename: um crash entre os dois duplica, nunca
+                    // dá 201 a um reenvio cujo arquivo não chegou à Pasta.
+                    if let Some(log) = &accepted_file_log {
+                        log.lock().expect("ids de arquivo sem panic").record(&id);
+                    }
                     accepted_item_ids
                         .lock()
                         .expect("ids aceitos sem panic")
@@ -665,6 +786,7 @@ async fn head_listen(State(state): State<AppState>, headers: HeaderMap) -> Statu
 /// terminar, e o guarda cair, na primeira leitura.
 async fn get_outbox_file(
     State(state): State<AppState>,
+    method: axum::http::Method,
     headers: HeaderMap,
     AxPath(id): AxPath<u64>,
 ) -> impl IntoResponse {
@@ -673,9 +795,24 @@ async fn get_outbox_file(
     }
     match state.outbox.file_bytes(id) {
         Ok(bytes) => {
-            let guard = state.presence.enter();
             const CHUNK: usize = 64 * 1024;
             let tamanho = bytes.len();
+            // Content-Length explícito: sem ele o hyper não sabe o tamanho de
+            // um corpo em stream e usa Transfer-Encoding: chunked, que muda o
+            // formato dos bytes na rede. Content-Type é o que a tupla
+            // `(StatusCode, Vec<u8>)` mandava antes.
+            let resposta = axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header(axum::http::header::CONTENT_LENGTH, tamanho)
+                .header(axum::http::header::CONTENT_TYPE, "application/octet-stream");
+            // O axum manda HEAD para este handler, mas sem corpo não há
+            // download: entrar e sair da presença piscaria a janela.
+            if method == axum::http::Method::HEAD {
+                return resposta
+                    .body(axum::body::Body::empty())
+                    .expect("resposta HEAD com Content-Length é válida");
+            }
+            let guard = state.presence.enter();
             // `Bytes::slice` fatia sem copiar: o arquivo fica uma vez só na
             // memória, como antes do stream.
             let bytes = axum::body::Bytes::from(bytes);
@@ -684,14 +821,7 @@ async fn get_outbox_file(
                     let _presenca = &guard;
                     Ok::<_, io::Error>(bytes.slice(inicio..(inicio + CHUNK).min(tamanho)))
                 });
-            // Content-Length explícito: sem ele o hyper não sabe o tamanho de
-            // um corpo em stream e usa Transfer-Encoding: chunked, que muda o
-            // formato dos bytes na rede. Content-Type é o que a tupla
-            // `(StatusCode, Vec<u8>)` mandava antes.
-            axum::response::Response::builder()
-                .status(StatusCode::OK)
-                .header(axum::http::header::CONTENT_LENGTH, tamanho)
-                .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+            resposta
                 .body(axum::body::Body::from_stream(stream))
                 .expect("resposta com Content-Length e corpo em stream é válida")
         }
@@ -878,6 +1008,7 @@ mod tests {
                 leases: Arc::new(Mutex::new(HashSet::new())),
                 received_files: Arc::new(Mutex::new(HashMap::new())),
                 accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
+                accepted_file_log: None,
                 file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
                 upload_inactivity_timeout: UPLOAD_INACTIVITY_TIMEOUT,
                 before_file_item_id_lock: Arc::new(Mutex::new(None)),
@@ -914,6 +1045,23 @@ mod tests {
             assert_eq!(state.items.snapshot().len(), 1);
             assert_eq!(std::fs::read_dir(pasta).unwrap().count(), 1);
         });
+    }
+
+    #[test]
+    fn ids_de_arquivo_aceitos_guardam_so_os_ultimos() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("accepted-file-ids.txt");
+        let mut log = AcceptedFileLog::load(&path).unwrap();
+        for i in 0..=2 * ACCEPTED_FILE_IDS_KEPT {
+            log.record(&format!("id-{i}"));
+        }
+
+        let reloaded = AcceptedFileLog::load(&path).unwrap();
+        assert_eq!(reloaded.recent.len(), ACCEPTED_FILE_IDS_KEPT);
+        assert_eq!(
+            reloaded.recent.back().unwrap(),
+            &format!("id-{}", 2 * ACCEPTED_FILE_IDS_KEPT)
+        );
     }
 
     const TOKEN_FOR_TEST: &str = "segredo-de-teste";

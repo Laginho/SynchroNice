@@ -241,7 +241,8 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     });
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], server::PORT));
-    match server::spawn(addr, par.clone(), items, outbox, pasta) {
+    let accepted_ids = config_dir.join("accepted-file-ids.txt");
+    match server::spawn_with_accepted_ids(addr, par.clone(), items, outbox, pasta, &accepted_ids) {
         Ok(running) => {
             println!("servidor HTTP em {}", running.addr);
             match anuncio::Anuncio::subir(par.nome_instancia(), server::PORT) {
