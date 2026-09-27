@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: reviewing
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -339,3 +339,5 @@ a tentativa 5 (não rodado de novo: não há merge).
   try/catch sem teste cobrindo, não cabia na mesma passada). `Stage: to-review`.
 
 - Débito humano: celular real contra PC real, depois de CLEAN-013 e CLEAN-015 mergeados — mandar um arquivo grande do PC, conferir que a janela do PC fica "presente" e o chat do celular "Na rede" durante o download inteiro (um piscar de ≤ 1,5 s no fim é o aceito), e que um texto mandado do PC no meio aparece no celular antes de a barra de progresso terminar; pausar o app no meio do download (Home) e voltar, conferir que o arquivo termina de chegar. Os testes provam cada metade contra um PC falso ou um celular falso, nunca os dois reais juntos.
+
+- 2026-09-27 Review ended at reviewing (timeout); branch clean-013 holds the review; left for a human
