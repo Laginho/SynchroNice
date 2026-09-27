@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -341,3 +341,5 @@ a tentativa 5 (não rodado de novo: não há merge).
 - Débito humano: celular real contra PC real, depois de CLEAN-013 e CLEAN-015 mergeados — mandar um arquivo grande do PC, conferir que a janela do PC fica "presente" e o chat do celular "Na rede" durante o download inteiro (um piscar de ≤ 1,5 s no fim é o aceito), e que um texto mandado do PC no meio aparece no celular antes de a barra de progresso terminar; pausar o app no meio do download (Home) e voltar, conferir que o arquivo termina de chegar. Os testes provam cada metade contra um PC falso ou um celular falso, nunca os dois reais juntos.
 
 - 2026-09-27 Review ended at reviewing (timeout); branch clean-013 holds the review; left for a human
+
+- 2026-09-27 Foreman: a revisão das 15:31 estourou os 20 min, mas antes disso já tinha feito o conserto pequeno `92c4d62` (id de download que falhou fica em voo 2 s) e mergeado `clean-013` na sessão (`16c90be`, 15:51:29), sem chegar a gravar o veredito nem `Stage: done`. O log dela está vazio, então não se sabe se o gate rodou depois de `92c4d62`. `Stage: to-review` de novo: a próxima revisão confere o código já mergeado na sessão, roda o gate completo em primeiro plano (ferramenta Bash, comando exato `powershell -ExecutionPolicy Bypass -File .\gate.ps1`) e fecha. Não reabra pela passada 1 ou 2 já aprovada; o que faltar é conserto pequeno ou `CLEAN-*` novo.
