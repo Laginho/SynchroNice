@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -181,3 +181,5 @@ falha volta como `blocked` com o nome do teste.
 - 2026-09-27 Attempt 3 failed: exit 0; blocked after two attempts. Log tail: The gate command (`powershell -File .\gate.ps1`) needs your approval to run — it keeps coming back "requires approval" rather than prompting through. Recovery is otherwise complete on branch `clean-013`: /  / - `61342b4` test: red (`ListenLoopTest.kt`, 4 cases) / - `859e8d7` fix: `MainActivity.kt` / `ReceivedFiles.kt` / - `5a522d7` test: `ReceivedFileRestartTest.kt` signal fix (proxy-decided, own commit) /  / Can you approve the gate run, or run `powershell -ExecutionPolicy Bypass -File .\gate.ps1` yourself and paste the result? Once it's green I'll set `Stage: to-review` and commit.
 
 - 2026-09-27 Foreman: a tentativa 4 falhou pelo ambiente, não pelo ticket. A recuperação e o fix ficaram prontos (`61342b4` vermelho, `859e8d7` fix, `5a522d7` o ajuste do `ReceivedFileRestartTest`, pinados em `refs/keep/clean-013-a4`), mas o gate foi negado: a sessão o chamou pela ferramenta PowerShell e por `powershell.exe` no Bash, e nenhum dos dois está no allowlist do driver. Só passa a ferramenta **Bash** com o comando exato `powershell -ExecutionPolicy Bypass -File .\gate.ps1` (ou `... -TestsOnly`), primeiro token `powershell`, sem `.exe`, sem `cd ... &&` na frente. Retomada: `git checkout -b clean-013 5a522d7`, `git rebase sweatshop/2026-09-25-2127` (o CLEAN-014 mergeou mudanças no `AppState` depois; resolva conflito, se houver, mantendo os dois), rode o gate completo e siga para `to-review`. Não refaça o vermelho: a prova vermelho→verde já está nos commits da tentativa 3/4.
+
+- 2026-09-27 Tentativa 5: recuperado `refs/keep/clean-013-a4` (`5a522d7`) em `clean-013`, rebase limpo sobre `sweatshop/2026-09-25-2127` sem conflito (CLEAN-014 não toca as mesmas linhas). Gate completo (`powershell -ExecutionPolicy Bypass -File .\gate.ps1`, ferramenta Bash, primeiro token `powershell`) rodou em primeiro plano e passou: cargo fmt/clippy/test (pc) verde, tsc + node --test (pc/ui) 32/32, `gradle check` (android) BUILD SUCCESSFUL incluindo `testDebugUnitTest` e `lintDebug`. `Stage: to-review`.
