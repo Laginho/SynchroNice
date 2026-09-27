@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent

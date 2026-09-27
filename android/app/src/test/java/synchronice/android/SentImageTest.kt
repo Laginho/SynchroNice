@@ -2,6 +2,7 @@ package synchronice.android
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import androidx.work.testing.WorkManagerTestInitHelper
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -28,6 +29,7 @@ class SentImageTest {
     @Test
     fun sentImageSurvivesDeliveryOnlyInTheSessionIncludingRestoredPending() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
+        WorkManagerTestInitHelper.initializeTestWorkManager(context)
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/items/file") { exchange ->
             exchange.requestBody.readBytes()
