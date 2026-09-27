@@ -360,7 +360,9 @@ fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
     )
     .unwrap();
     let base = format!("http://{}", running.addr);
-    assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b"foto"), 503);
+    // Corpo vazio de propósito: sem Pasta o 503 sai antes de ler o corpo, e no Windows
+    // fechar o socket com bytes não lidos pode virar RST (10053) antes de o cliente ler o 503.
+    assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b""), 503);
     running.escolher_pasta(raiz.path(), &pasta).unwrap();
     assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b"foto"), 201);
     assert_eq!(std::fs::read(pasta.join("foto.png")).unwrap(), b"foto");
