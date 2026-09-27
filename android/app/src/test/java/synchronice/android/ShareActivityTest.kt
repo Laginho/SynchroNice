@@ -115,13 +115,31 @@ class ShareActivityTest {
         assertEquals("arquivo.txt", state.messages.single().text)
     }
 
+    // O ContentResolver do AOSP tira o prefixo "<userId>@" da authority antes de resolver o
+    // provider (ContentProvider.getAuthorityWithoutUserId), então esta URI cai no FileProvider
+    // da câmera tanto quanto a sem prefixo -- só que uma comparação de string crua não enxerga
+    // isso. Mesma técnica da authority sem prefixo: filtragem testada direto, sem ContentResolver.
+    @Test
+    fun contentUriWithUserIdPrefixForOwnFileProviderIsFilteredOutBeforeReading() {
+        val application = RuntimeEnvironment.getApplication()
+        val prefixedUri = Uri.parse("content://0@${application.packageName}.camera/camera/foto.jpg")
+        val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, prefixedUri)
+        val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).get()
+        val method = ShareActivity::class.java.getDeclaredMethod("sharedUris", Intent::class.java)
+        method.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val accepted = method.invoke(activity, intent) as List<Uri>
+        assertFalse(accepted.contains(prefixedUri))
+    }
+
     @Test
     fun `sendMultipleOnlyQueuesTheAcceptedUri`() {
         registerForeignProvider("test.provider", "arquivo.txt", "conteudo")
         val application = RuntimeEnvironment.getApplication()
         val state = share(
-            Uri.parse("content://test.provider/arquivo.txt"),
+            Uri.parse("content://0@${application.packageName}.camera/camera/foto.jpg"),
             ownInternalFileUri(application),
+            Uri.parse("content://test.provider/arquivo.txt"),
         )
         assertEquals(1, state.messages.size)
         assertEquals("arquivo.txt", state.messages.single().text)
