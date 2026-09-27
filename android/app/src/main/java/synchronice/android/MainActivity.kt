@@ -193,7 +193,7 @@ internal class AppState(
         }
     }
 
-    private fun schedulePreviewDecode(id: Long, file: File, done: CompletableDeferred<Unit>? = null) {
+    private fun schedulePreviewDecode(id: Long, file: File, done: CompletableDeferred<Unit>) {
         previewExecutor.execute {
             try {
                 val preview = decodePreview(ImageDecoder.createSource(file))
@@ -202,7 +202,7 @@ internal class AppState(
                     if (index >= 0) messages[index] = messages[index].copy(preview = preview)
                 }
             } finally {
-                done?.complete(Unit)
+                done.complete(Unit)
             }
         }
     }
@@ -414,6 +414,7 @@ internal class AppState(
         onFileProgress: (Int) -> Unit = {},
         onFileStart: (Long) -> Unit = {},
     ) {
+        // ponytail: delivery waits for every restored preview (N × ~150 ms); wait per item if the delay shows.
         previewsPending.forEach { it.await() }
         val currentPair = pairing
         val currentClient = client() ?: run { unpair(); return }

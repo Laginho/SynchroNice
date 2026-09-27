@@ -1,5 +1,5 @@
 # CLEAN-017: A entrega espera a prévia dos Pendentes de imagem
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
