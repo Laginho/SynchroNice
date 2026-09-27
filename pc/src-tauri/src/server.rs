@@ -76,10 +76,16 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 /// Porta fixa na rede local. O celular a conhece pelo QR (SYN-005).
 pub const PORT: u16 = 47820;
+
+/// Tempo sem receber nenhum byte do corpo de um upload até abortá-lo como
+/// corpo incompleto e soltar o lock do id — sem isso, uma conexão que morre
+/// no meio do arquivo prende o lock para sempre.
+const UPLOAD_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Fonte do token que autentica as requisições: um `String` fixo (a maioria
 /// dos testes de integração) ou um `Par` (SYN-005). Vindo de um `Par`,
@@ -124,9 +130,12 @@ struct AppState {
     /// Ids que este processo já aceitou do remetente. A Sessão é em memória,
     /// portanto a deduplicação tem o mesmo ciclo de vida dos Itens visíveis.
     accepted_item_ids: Arc<Mutex<HashSet<String>>>,
-    /// ponytail: um lock global basta para os uploads com id; particionar por
-    /// id se envios paralelos do mesmo celular virarem gargalo mensurável.
+    /// ponytail: um lock global basta para os uploads com id — o timeout de
+    /// inatividade da leitura do corpo garante que o pior caso é esperar o
+    /// upload anterior estourar o timeout, nunca travar para sempre;
+    /// particionar por id se isso virar gargalo mensurável.
     file_item_id_lock: Arc<tokio::sync::Mutex<()>>,
+    upload_inactivity_timeout: Duration,
     #[cfg(test)]
     before_file_item_id_lock: Arc<Mutex<Option<TestPause>>>,
     #[cfg(test)]
@@ -253,6 +262,19 @@ pub fn spawn(
     outbox: Outbox,
     pasta: Option<PathBuf>,
 ) -> io::Result<Running> {
+    spawn_with_upload_timeout(addr, token, items, outbox, pasta, UPLOAD_INACTIVITY_TIMEOUT)
+}
+
+/// Como `spawn`, mas com o timeout de inatividade do upload configurável —
+/// só para os testes de integração encurtarem sem esperar os 30s de verdade.
+pub fn spawn_with_upload_timeout(
+    addr: SocketAddr,
+    token: impl Into<TokenCell>,
+    items: Items,
+    outbox: Outbox,
+    pasta: Option<PathBuf>,
+    upload_inactivity_timeout: Duration,
+) -> io::Result<Running> {
     let token = token.into();
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
@@ -295,6 +317,7 @@ pub fn spawn(
                     received_files: received_files_da_thread,
                     accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
                     file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+                    upload_inactivity_timeout,
                     #[cfg(test)]
                     before_file_item_id_lock: Arc::new(Mutex::new(None)),
                     #[cfg(test)]
@@ -470,7 +493,18 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 
     let mut stream = request.into_body().into_data_stream();
     let mut received: u64 = 0;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = match tokio::time::timeout(state.upload_inactivity_timeout, stream.next()).await
+        {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_elapsed) => {
+                // Sem nenhum byte por muito tempo: aborta como corpo
+                // incompleto e solta o lock do id. fail_guard e o guarda do
+                // lease cuidam do resto ao sair de escopo.
+                return StatusCode::BAD_REQUEST;
+            }
+        };
         let bytes = match chunk {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -811,6 +845,7 @@ mod tests {
                 received_files: Arc::new(Mutex::new(HashMap::new())),
                 accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
                 file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+                upload_inactivity_timeout: UPLOAD_INACTIVITY_TIMEOUT,
                 before_file_item_id_lock: Arc::new(Mutex::new(None)),
                 after_file_rename: Arc::new(Mutex::new(Some(finalization.clone()))),
             };
