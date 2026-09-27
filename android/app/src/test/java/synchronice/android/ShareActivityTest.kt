@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import androidx.work.testing.WorkManagerTestInitHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -25,9 +26,10 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** URI de outro app apontando para dentro do próprio SynchroNice: nunca deve virar Pendente. */
@@ -35,14 +37,15 @@ import kotlin.test.assertTrue
 @Config(sdk = [34])
 @OptIn(ExperimentalCoroutinesApi::class)
 class ShareActivityTest {
-    /** Um provider de outro app, servindo `content` sob `name`. */
-    private fun registerForeignProvider(authority: String, name: String, content: String) {
+    /** Um provider de outro app, servindo `content` sob `name`; [onOpen] roda antes de cada leitura. */
+    private fun registerForeignProvider(authority: String, name: String, content: String, onOpen: () -> Unit = {}) {
         val application = RuntimeEnvironment.getApplication()
         ShadowContentResolver.registerProviderInternal(authority, object : ContentProvider() {
             override fun onCreate() = true
             override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
                 MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME)).apply { addRow(arrayOf(name)) }
             override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+                onOpen()
                 val source = File(application.cacheDir, "source-$authority-$name").apply { writeText(content) }
                 return ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
             }
@@ -89,20 +92,6 @@ class ShareActivityTest {
         assertTrue(state.messages.isEmpty())
     }
 
-    // A resolução real do FileProvider (mesma authority do app) não é fiável sob Robolectric
-    // em Windows: SimplePathStrategy compara o caminho canônico (barras invertidas) com a raiz
-    // configurada usando barra normal, e nunca casa. Testa a filtragem diretamente, sem depender
-    // do ContentResolver: URI é excluída antes de qualquer leitura, então nenhum provider real
-    // precisa responder.
-    @Test
-    fun contentUriFromOwnFileProviderIsFilteredOutBeforeReading() {
-        val application = RuntimeEnvironment.getApplication()
-        val ownAuthorityUri = Uri.parse("content://${application.packageName}.camera/camera/foto.jpg")
-        val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, ownAuthorityUri)
-        val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).get()
-        assertFalse(activity.sharedUris(intent).contains(ownAuthorityUri))
-    }
-
     @Test
     fun contentUriFromAnotherProviderQueuesNormally() {
         registerForeignProvider("test.provider", "arquivo.txt", "conteudo")
@@ -112,30 +101,64 @@ class ShareActivityTest {
     }
 
     // O ContentResolver do AOSP tira o prefixo "<userId>@" da authority antes de resolver o
-    // provider (ContentProvider.getAuthorityWithoutUserId), então esta URI cai no FileProvider
-    // da câmera tanto quanto a sem prefixo -- só que uma comparação de string crua não enxerga
-    // isso. Mesma técnica da authority sem prefixo: filtragem testada direto, sem ContentResolver.
-    @Test
-    fun contentUriWithUserIdPrefixForOwnFileProviderIsFilteredOutBeforeReading() {
-        val application = RuntimeEnvironment.getApplication()
-        val prefixedUri = Uri.parse("content://0@${application.packageName}.camera/camera/foto.jpg")
-        val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, prefixedUri)
-        val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).get()
-        assertFalse(activity.sharedUris(intent).contains(prefixedUri))
-    }
-
+    // provider (ContentProvider.getAuthorityWithoutUserId), então a URI prefixada cai no
+    // FileProvider da câmera tanto quanto a sem prefixo -- só que uma comparação de string crua
+    // não enxerga isso.
     @Test
     fun sendMultipleOnlyQueuesTheAcceptedUri() {
         registerForeignProvider("test.provider", "arquivo.txt", "conteudo")
         val application = RuntimeEnvironment.getApplication()
-        // A URI própria vai primeiro de propósito: se o filtro a deixar passar, a leitura dela
-        // lança sob Robolectric e aborta o lote antes do Pendente de test.provider.
+        // As URIs próprias vão primeiro de propósito: se o filtro deixar passar qualquer uma, a
+        // leitura dela lança sob Robolectric (o FileProvider não resolve caminhos no Windows) e
+        // aborta o lote antes do Pendente de test.provider.
         val state = share(
+            Uri.parse("content://${application.packageName}.camera/camera/foto.jpg"),
             Uri.parse("content://0@${application.packageName}.camera/camera/foto.jpg"),
             ownInternalFileUri(application),
             Uri.parse("content://test.provider/arquivo.txt"),
         )
         assertEquals(1, state.messages.size)
         assertEquals("arquivo.txt", state.messages.single().text)
+    }
+
+    @Test
+    fun rotatingWhileSharingDoesNotQueueTheSameFilesAgain() = runBlocking {
+        val secondOpened = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        registerForeignProvider("test.provider", "um.txt", "1")
+        registerForeignProvider("slow.provider", "dois.txt", "2") {
+            secondOpened.countDown()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val application = RuntimeEnvironment.getApplication() as SynchroNiceApplication
+        // Sem WorkManager, queueFile lança depois de pôr a bolha e o lote para no primeiro arquivo.
+        WorkManagerTestInitHelper.initializeTestWorkManager(application)
+        application.state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":7777,"token":"0123456789abcdef0123456789abcdef"}""")
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(
+            Intent.EXTRA_STREAM,
+            arrayListOf(Uri.parse("content://test.provider/um.txt"), Uri.parse("content://slow.provider/dois.txt")),
+        )
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        try {
+            val controller = Robolectric.buildActivity(ShareActivity::class.java, intent).create()
+            withTimeout(5_000) {
+                while (secondOpened.count > 0) {
+                    shadowOf(Looper.getMainLooper()).idle()
+                    delay(10)
+                }
+            }
+            controller.recreate()
+            release.countDown()
+            withTimeout(5_000) {
+                while (!controller.get().isFinishing) {
+                    shadowOf(Looper.getMainLooper()).idle()
+                    delay(10)
+                }
+            }
+        } finally {
+            release.countDown()
+            Dispatchers.resetMain()
+        }
+        assertEquals(listOf("um.txt", "dois.txt"), application.state.messages.map { it.text })
     }
 }
