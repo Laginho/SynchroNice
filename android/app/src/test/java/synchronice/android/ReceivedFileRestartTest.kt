@@ -99,6 +99,10 @@ class ReceivedFileRestartTest {
         exerciseRestart(null, normalSaf = true, keepMarker = true)
 
     @Test
+    fun providerWithoutRenameKeepsTheMarkedNameAndDelivers() =
+        exerciseRestart(null, normalSaf = true, keepMarker = true, renameUnsupported = true)
+
+    @Test
     fun restartingInTheMiddleOfTheSafRenameFinishesWithoutAnotherCopy() =
         exerciseRestart(null, safCrash = true, renameCrash = true)
 
@@ -110,7 +114,7 @@ class ReceivedFileRestartTest {
     fun choosingTheFolderAgainRestartsAStuckReceipt() =
         exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "hidden", intervene = true)
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null, listenRecovery: Boolean = false, normalSaf: Boolean = false, keepMarker: Boolean = false, renameCrash: Boolean = false, destinationGone: Boolean = false, intervene: Boolean = false) = runBlocking {
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null, listenRecovery: Boolean = false, normalSaf: Boolean = false, keepMarker: Boolean = false, renameCrash: Boolean = false, destinationGone: Boolean = false, intervene: Boolean = false, renameUnsupported: Boolean = false) = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         var rejectRemoval = failRemoval
         var crashBeforeReceipt = safCrash && !beforeWrite && !renameCrash
@@ -168,6 +172,7 @@ class ReceivedFileRestartTest {
             override fun onCreate() = true
             override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
                 if (method == "android:renameDocument") {
+                    if (renameUnsupported) throw UnsupportedOperationException("Rename not supported")
                     @Suppress("DEPRECATION") val uri = extras!!.getParcelable<Uri>("uri")!!
                     names[uri.lastPathSegment!!.toInt() - 1] = extras.getString(DocumentsContract.Document.COLUMN_DISPLAY_NAME)!!
                     if (crashAtRename) {
@@ -282,7 +287,8 @@ class ReceivedFileRestartTest {
                 assertEquals("payload", copies.single().readText())
                 assertEquals(Delivery.DELIVERED, state.messages.single().delivery)
                 assertTrue(preferences.all.keys.none { it.startsWith("received-file:") })
-                if (keepMarker) assertEquals(listOf("received.bin"), names)
+                if (keepMarker && !renameUnsupported) assertEquals(listOf("received.bin"), names)
+                if (renameUnsupported) assertTrue(names.single().startsWith("received [syn-"))
                 return@runBlocking
             }
             if (failRemoval) {
