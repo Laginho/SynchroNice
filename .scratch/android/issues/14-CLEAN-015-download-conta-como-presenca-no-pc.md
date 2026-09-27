@@ -1,5 +1,5 @@
 # CLEAN-015: Download em andamento conta como presença no PC
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent

@@ -33,8 +33,9 @@
 //!                                 para continuar escutando. A conexão viva
 //!                                 é o sinal de presença.
 //!   Authorization: Bearer <token>
-//!   HEAD /listen                 200 se há GET autenticado ativo; 204 se
-//!                                 não há; 401 com token inválido.
+//!   HEAD /listen                 200 se há presença (um GET /listen ou um
+//!                                 download autenticado ativo); 204 se não
+//!                                 há; 401 com token inválido.
 //!   Authorization: Bearer <token>
 //!
 //!   GET  /outbox/{id}/file       bytes de um Item de arquivo ainda
@@ -182,7 +183,8 @@ impl Presence {
     }
 
     /// Chamado a cada vez que a presença muda (de ausente para presente ou
-    /// vice-versa), na thread que fechou ou abriu a conexão `/listen`.
+    /// vice-versa), na thread que fechou ou abriu a conexão (`/listen` ou
+    /// download).
     pub fn on_change(&self, listener: impl Fn(bool) + Send + Sync + 'static) {
         self.inner
             .lock()
@@ -191,8 +193,8 @@ impl Presence {
             .push(Box::new(listener));
     }
 
-    /// Marca uma conexão `/listen` como viva; solta a presença sozinha
-    /// quando o guarda sair de escopo (a conexão fechar).
+    /// Marca uma conexão (`/listen` ou download) como viva; solta a presença
+    /// sozinha quando o guarda sair de escopo (a conexão fechar).
     fn enter(&self) -> PresenceGuard {
         let mut inner = self.inner.lock().expect("presença sem panic");
         inner.count += 1;
@@ -674,21 +676,24 @@ async fn get_outbox_file(
             let guard = state.presence.enter();
             const CHUNK: usize = 64 * 1024;
             let tamanho = bytes.len();
-            let pedacos: Vec<Result<Vec<u8>, io::Error>> =
-                bytes.chunks(CHUNK).map(|c| Ok(c.to_vec())).collect();
-            let stream = futures_util::stream::iter(pedacos).map(move |pedaco| {
-                let _presenca = &guard;
-                pedaco
-            });
+            // `Bytes::slice` fatia sem copiar: o arquivo fica uma vez só na
+            // memória, como antes do stream.
+            let bytes = axum::body::Bytes::from(bytes);
+            let stream =
+                futures_util::stream::iter((0..tamanho).step_by(CHUNK)).map(move |inicio| {
+                    let _presenca = &guard;
+                    Ok::<_, io::Error>(bytes.slice(inicio..(inicio + CHUNK).min(tamanho)))
+                });
             // Content-Length explícito: sem ele o hyper não sabe o tamanho de
             // um corpo em stream e usa Transfer-Encoding: chunked, que muda o
-            // formato dos bytes na rede.
+            // formato dos bytes na rede. Content-Type é o que a tupla
+            // `(StatusCode, Vec<u8>)` mandava antes.
             axum::response::Response::builder()
                 .status(StatusCode::OK)
                 .header(axum::http::header::CONTENT_LENGTH, tamanho)
+                .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
                 .body(axum::body::Body::from_stream(stream))
                 .expect("resposta com Content-Length e corpo em stream é válida")
-                .into_response()
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
