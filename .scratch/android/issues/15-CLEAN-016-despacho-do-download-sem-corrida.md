@@ -1,5 +1,5 @@
 # CLEAN-016: Despacho do download sem corrida com o cancelamento
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -143,3 +143,54 @@ Primary files; qualquer outra falha volta como `blocked` com o nome do teste.
   final do CLEAN-013 (achado "corrida no despacho"). Independente do
   CLEAN-013 no código, que já está `done`; a verificação à mão do laço contra
   o PC real continua sendo o `Débito humano:` registrado lá.
+
+#### Resolution (2026-09-27)
+
+Verdict: Approve
+
+Revisado `d6b7bc0...57bc1a4` (`766257a` teste, `57bc1a4` fix), mergeado na
+sessão em `9e20072`. Sem rebase: a branch já partia do HEAD da sessão.
+
+- ✅ **Critério 1.** `aLoopCancelledBeforeTheDownloadChildStartsFreesTheId`
+  força a janela 2 de forma determinística: o `StandardTestDispatcher` só
+  roda dentro do `runCurrent()`, o filho fica na fila enquanto o `/listen` #2
+  cancela o job, e o `withContext` espera o filho (já cancelado, corpo nunca
+  executado) antes do `join()` voltar. O laço relançado baixa e a bolha chega
+  a `DELIVERED`.
+- ✅ **Critério 2.** De `inFlightFiles.add` (`MainActivity.kt:451`) ao
+  `.invokeOnCompletion` (`:465`) só há `continue`, a atribuição de
+  `startedDownload` e o `launch`, nenhum ponto de suspensão. Se o filho
+  termina no IO antes do registro, o handler roda na hora.
+- ✅ **Critério 3.** `ListenLoopTest` 8/8 (os sete antigos sem mudança) e
+  `ReceivedFileRestartTest` 14/14. O critério 8 do CLEAN-013 se mantém: o
+  `delay(2_000)` está no corpo do filho e o handler (`onCancelling = false`)
+  só roda depois dele. `acceptQr`/`unpair` (`:235`, `:279`) e o `in` de
+  `retryReceivedReceipts` (`:520`) não dependiam do salto para a main.
+- Separação teste-primeiro: `766257a` toca `ListenLoopTest.kt`, a ficha e só
+  a assinatura de `listen` em `MainActivity.kt` (import + parâmetro), como o
+  ticket permite; `57bc1a4` toca só `MainActivity.kt` e a ficha. Nada fora
+  do Primary files. `NonCancellable` continua em uso (`:244`, `:658`).
+- Não feito, e o ticket diz que não reabre: as constantes nomeadas para o
+  `2_000`/`1_500`.
+- Standards, julgamento, sem conserto: o handler de `/listen` do teste novo
+  usa `if/else` onde o vizinho usa `when`; o campo `inFlightFiles` não diz
+  por que é o único conjunto concorrente da classe (o handler roda na thread
+  que completa o filho) — a razão está só na mensagem de `57bc1a4`.
+- Sem linhas `Proxy decided` nesta ficha; ela mesma foi escrita pelo proxy
+  (ver o comentário acima).
+- **Processo.** O stage 2 nunca viu o vermelho: os três `gate.ps1 -TestsOnly`
+  que tentou pelo tool PowerShell caíram em `permission_denials`
+  (`.scratch/run-log/CLEAN-016-implement-20260927-165547.txt`). O mesmo
+  comando pelo tool Bash, com `./gate.ps1` (barra normal; `.\\gate.ps1` vira
+  `.gate.ps1` no sh), passou nesta revisão.
+
+Red-green (`powershell -ExecutionPolicy Bypass -File ./gate.ps1 -TestsOnly`,
+primeiro plano, nesta revisão):
+
+- `766257a`: `ListenLoopTest > aLoopCancelledBeforeTheDownloadChildStartsFreesTheId FAILED`,
+  `kotlinx.coroutines.TimeoutCancellationException`; `38 tests completed, 1 failed`.
+- `57bc1a4`: gate completo `gate: passou`. pc: 1 + 0 + 6 + 40 testes Rust,
+  32 node; android: 38/38 (`ListenLoopTest` 8, `ReceivedFileRestartTest` 14,
+  `ShareActivityTest` 5, `UnpairTest` 3, `DeliveryWorkerTest` 2,
+  `PendingDeliveryTest` 2, `SentImageTest` 2, `CopiaveisTest` 1,
+  `PresenceLifecycleTest` 1), lint e clippy limpos.
