@@ -6,19 +6,23 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeout
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.net.InetSocketAddress
+import java.util.concurrent.Executor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
@@ -53,6 +57,7 @@ class SentImageTest {
             val pendingFiles = context.filesDir.walkTopDown().filter { it.isFile }.toSet()
             val restored = AppState(context)
             assertEquals(pendingFiles, context.filesDir.walkTopDown().filter { it.isFile }.toSet())
+            withTimeout(5_000) { while (restored.messages.single().preview == null) delay(10) }
             for (session in listOf(state, restored)) {
                 assertEquals(Delivery.PENDING, session.messages.single().delivery)
                 val preview = assertNotNull(session.messages.single().preview)
@@ -66,6 +71,37 @@ class SentImageTest {
             val remaining = context.filesDir.walkTopDown().filter { it.isFile }.toSet() - before
             assertTrue(remaining.all { it.name == "pending-items.txt" }, "No payload or preview may remain: $remaining")
             assertTrue(AppState(context).messages.isEmpty())
+        } finally {
+            original.delete()
+            Dispatchers.resetMain()
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun previewForAPendingImageIsDecodedAfterConstructionNotDuringIt() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        WorkManagerTestInitHelper.initializeTestWorkManager(context)
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.start()
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        val original = context.cacheDir.resolve("startup.png")
+        try {
+            val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.RED)
+            original.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+            val seed = AppState(context)
+            seed.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"0123456789abcdef0123456789abcdef"}""")
+            seed.knownAddress.save("127.0.0.1")
+            seed.queueFile(original)
+            original.delete()
+
+            val queuedPreviewWork = ArrayDeque<Runnable>()
+            val restored = AppState(context, previewExecutor = Executor { queuedPreviewWork.addLast(it) })
+            assertNull(restored.messages.single().preview, "the decode must not run on the constructing thread")
+            while (queuedPreviewWork.isNotEmpty()) queuedPreviewWork.removeFirst().run()
+            assertEquals(Color.RED, assertNotNull(restored.messages.single().preview).getPixel(0, 0))
         } finally {
             original.delete()
             Dispatchers.resetMain()
