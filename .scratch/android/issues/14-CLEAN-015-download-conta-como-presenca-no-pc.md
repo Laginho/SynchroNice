@@ -111,3 +111,5 @@ files; qualquer outra falha volta como `blocked` com o nome do teste.
   CLEAN-013 (opção (a) daquela pergunta, como ticket próprio). Independente do
   CLEAN-013 no código: os dois entram no mesmo PR de sessão, e a verificação
   à mão dos dois juntos é o `Débito humano:` registrado lá.
+
+- 2026-09-27 Attempt 1 failed: exit 0. Log tail: Running `.\gate.ps1 -TestsOnly` keeps getting blocked before it reaches you for approval — 4 attempts, none actually prompted, just auto-denied. Per AGENTS.md, gate.ps1 is the only allowed path (no `cargo` direct), so I can't route around it. /  / Can you confirm the permission prompt is reaching you, or would you rather grant it another way (e.g. approve manually in your terminal, or trust the workspace)? I've stopped retrying so I don't spam the same denied call — the red test commit (`f4bba21`) is in place on `clean-015`, waiting on this to prove red-before-green.
