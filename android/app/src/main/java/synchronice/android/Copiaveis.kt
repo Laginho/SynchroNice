@@ -1,6 +1,7 @@
 package synchronice.android
 
-import java.net.URI
+import java.io.ByteArrayOutputStream
+import java.math.BigInteger
 
 internal data class Trecho(
     val type: String,
@@ -20,10 +21,12 @@ private val ddds = """
 private const val emailAtom = """[A-Z0-9!#$%&'*+/=?^_\x60{|}~-]+"""
 private const val emailSource = """$emailAtom(?:\.$emailAtom)*@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+"""
 private const val uuidSource = """[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
+// O \s do JavaScript (flag u) também pega estes; o do Java, não.
+private const val jsSpaces = """\s\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}"""
 private val email = Regex(emailSource, RegexOption.IGNORE_CASE)
 private val uuid = Regex(uuidSource, RegexOption.IGNORE_CASE)
 private val candidatos = Regex(
-    """(?<![\p{L}\d])(?:(https?://[^\s<>"']+)|(?<!\.)(?:$emailSource)|(?:$uuidSource|\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}|\d{3}\.\d{3}\.\d{3}-\d{2}|(?:\+?55[ \t]*)?(?:\(\d{2}\)|\d{2})[ \t.-]*\d{4,5}[ \t.-]*\d{4}|\d{14})(?![\p{L}\d]))""",
+    """(?<![\p{L}\d])(?:(https?://[^$jsSpaces<>"']+)|(?<!\.)(?:$emailSource)|(?:$uuidSource|\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}|\d{3}\.\d{3}\.\d{3}-\d{2}|(?:\+?55[ \t]*)?(?:\(\d{2}\)|\d{2})[ \t.-]*\d{4,5}[ \t.-]*\d{4}|\d{14})(?![\p{L}\d]))""",
     RegexOption.IGNORE_CASE,
 )
 
@@ -49,12 +52,105 @@ private fun criarLink(bruto: String): Trecho? {
             url = url.dropLast(1)
         }
     }
-    // URI exige escapes válidos; URL do PC aceita percentuais literais fora do host.
-    // Só a validação usa esta cópia: exibição e navegação preservam o texto original.
-    val uri = try { URI(url.replace("%", "%25")) } catch (_: java.net.URISyntaxException) { return null }
-    if (uri.host.isNullOrEmpty() || uri.scheme.lowercase() !in listOf("http", "https")) return null
-    if (uri.port != -1 && uri.port !in 0..65535) return null
-    return Trecho("link", url, href = url)
+    return if (isWebLink(url)) Trecho("link", url, href = url) else null
+}
+
+/**
+ * Decide "é link" como o `new URL()` do PC (WHATWG) para http(s): caminho, query e fragmento valem
+ * como vierem; recusa host vazio ou com caractere proibido, IPv4/IPv6 inválido e porta que não seja
+ * número até 65535. O java.net.URI de antes recusava `|`, `{}`, `^` e crase no caminho e `_` ou
+ * acento no host, que o PC aceita.
+ * ponytail: sem IDNA de verdade; um rótulo punycode inválido (`xn--`) vira link aqui e não no PC.
+ */
+private fun isWebLink(url: String): Boolean {
+    val schemeEnd = url.indexOf("://")
+    if (schemeEnd < 0 || url.substring(0, schemeEnd).lowercase() !in setOf("http", "https")) return false
+    val rest = url.substring(schemeEnd + 3)
+    val authorityEnd = rest.indexOfAny(charArrayOf('/', '?', '#', '\\'))
+    val hostAndPort = rest.substring(0, if (authorityEnd < 0) rest.length else authorityEnd).substringAfterLast('@')
+    val port: String
+    if (hostAndPort.startsWith('[')) {
+        val close = hostAndPort.indexOf(']')
+        if (close < 0 || !isIpv6(hostAndPort.substring(1, close))) return false
+        val after = hostAndPort.substring(close + 1)
+        if (after.isNotEmpty() && !after.startsWith(':')) return false
+        port = after.removePrefix(":")
+    } else {
+        val host = percentDecode(hostAndPort.substringBefore(':')) ?: return false
+        if (host.isEmpty() || forbiddenHost.containsMatchIn(host)) return false
+        if (endsInNumber(host) && !isIpv4(host)) return false
+        port = hostAndPort.substringAfter(':', "")
+    }
+    return port.all { it in '0'..'9' } && port.trimStart('0').let { it.length <= 5 && (it.toIntOrNull() ?: 0) <= 65535 }
+}
+
+private val forbiddenHost = Regex("""[\x{0}-\x{20}#%/:<>?@\[\\\]^|\x{7f}]""")
+
+/** Bytes `%XX` viram UTF-8; sequência inválida recusa o host, como o IDNA do PC. */
+private fun percentDecode(value: String): String? {
+    if ('%' !in value) return value
+    val bytes = ByteArrayOutputStream()
+    var i = 0
+    while (i < value.length) {
+        val hex = value.substring(minOf(i + 1, value.length), minOf(i + 3, value.length))
+        if (value[i] == '%' && hex.length == 2 && hex.all { it.isAsciiHex() }) {
+            bytes.write(hex.toInt(16))
+            i += 3
+        } else {
+            bytes.write(value[i].toString().toByteArray(Charsets.UTF_8))
+            i++
+        }
+    }
+    return bytes.toByteArray().toString(Charsets.UTF_8).takeUnless { it.contains(Char(0xfffd)) }
+}
+
+private fun Char.isAsciiHex() = this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
+
+private fun hostLabels(host: String): List<String> =
+    host.split('.').let { if (it.size > 1 && it.last().isEmpty()) it.dropLast(1) else it }
+
+private fun endsInNumber(host: String): Boolean {
+    val last = hostLabels(host).last()
+    return (last.isNotEmpty() && last.all { it in '0'..'9' }) ||
+        (last.startsWith("0x", ignoreCase = true) && last.drop(2).all { it.isAsciiHex() })
+}
+
+/** O IPv4 do WHATWG: até 4 partes, decimal, `0x` hex ou octal com zero à esquerda (`127.1` vale). */
+private fun isIpv4(host: String): Boolean {
+    val parts = hostLabels(host)
+    if (parts.size > 4 || parts.any { it.isEmpty() }) return false
+    val numbers = parts.map { part ->
+        val (digits, radix) = when {
+            part.startsWith("0x", ignoreCase = true) -> part.drop(2) to 16
+            part.length > 1 && part.startsWith('0') -> part.drop(1) to 8
+            else -> part to 10
+        }
+        if (digits.isEmpty()) BigInteger.ZERO else digits.toBigIntegerOrNull(radix) ?: return false
+    }
+    if (numbers.dropLast(1).any { it > BigInteger.valueOf(255) }) return false
+    return numbers.last() < BigInteger.valueOf(256).pow(5 - numbers.size)
+}
+
+private fun isIpv6(address: String): Boolean {
+    if (address.isEmpty() || address.any { !it.isAsciiHex() && it != ':' && it != '.' }) return false
+    val halves = address.split("::")
+    if (halves.size > 2) return false
+    val groups = halves.flatMap { if (it.isEmpty()) emptyList() else it.split(':') }
+    var count = 0
+    for ((index, group) in groups.withIndex()) {
+        count += if (index == groups.lastIndex && '.' in group) {
+            val octets = group.split('.')
+            val valid = octets.size == 4 && octets.all { octet ->
+                octet.length in 1..3 && octet.all { it in '0'..'9' } && !(octet.length > 1 && octet[0] == '0') && octet.toInt() <= 255
+            }
+            if (!valid) return false
+            2
+        } else {
+            if (group.length !in 1..4 || '.' in group) return false
+            1
+        }
+    }
+    return if (halves.size == 2) count <= 7 else count == 8
 }
 
 private fun copiavel(kind: String, text: String, plain: String = text) =
