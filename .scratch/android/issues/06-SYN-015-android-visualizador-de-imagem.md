@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -62,6 +62,8 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
 
 ## Comments
 
+- 2026-09-26 Proxy decidiu: o conflito do rebase é documental, neste ticket fora de `Primary files`; não há achado acionável de código nas revisões Standards e Spec. O contrato do stage 2 e seus commits permanecem válidos. Incorporar aqui a prova e o débito humano da branch `syn-015`, preservar também os comentários da sessão e integrar as branches resolvendo somente este Markdown. Retomar o Stage 3 em `to-review`; ele ainda deve verificar o gate e emitir seu próprio veredito, sem considerar esta decisão uma aprovação do código.
+
 - 2026-09-26 Stage 3 bloqueado: o rebase de `syn-015` sobre `sweatshop/2026-09-25-2127` conflita neste arquivo do ticket ao reaplicar `ba8d7f0`; a branch de sessão acrescentou em paralelo `a76272e` e `287e789` ao mesmo contrato/comentários. Como o arquivo do ticket não está em `Primary files`, a regra de merge do `ticket-flow` proíbe o revisor de resolver o conflito. O rebase foi abortado sem alterar a implementação. A revisão de Standards não encontrou violação documentada; a revisão de Spec não deixou achado acionável. É preciso incorporar na branch de sessão o estado final deste ticket (incluindo `Stage: to-review`, prova red-green e débito humano), ou autorizar explicitamente o arquivo do ticket como fronteira de resolução, antes de repetir o Stage 3.
 
 - 2026-09-26 Stage 2 retomado: `ec0f420` corrige somente o preparo do `SentImageTest`, inicializando `WorkManagerTestInitHelper` antes de `queueFile`, sem acionar o trabalho agendado e sem alterar produção. Implementação `e475559` preservada. Prova vermelha: retirar temporariamente os dois arquivos de produção de `e475559` fez `gate.ps1 -TestsOnly` falhar em `compileDebugUnitTestKotlin`, com `Unresolved reference 'preview'` no teste; os arquivos foram restaurados ao HEAD em `finally`. Prova verde: `gate.ps1 -TestsOnly` passou com 24/24 testes do app, 56/56 do protocolo, 44/44 Rust e 32/32 TypeScript. Gate completo passou (fmt, clippy, tsc, testes e Android lint); nenhuma mudança no gate. A primeira execução no sandbox falhou antes dos testes Android por resolver o diretório de usuário como `C:\`; a execução no ambiente normal passou.
@@ -78,3 +80,7 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
 - 2026-09-26 Attempt 1 failed: exit 0. Log tail: SYN-015 ficou `blocked` na branch `syn-015`, commit `2f88413`. /  / Imagens enviadas são apagadas após a entrega; visualizá-las exige definir retenção e testes no contrato. Nenhum código foi alterado. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) determina: “Stop only if the ticket needs a seam it does not name”. Registrei a decisão necessária no ticket para Stage 1.
 
 - 2026-09-26 Attempt 2 failed: exit 0; blocked after two attempts. Log tail: SYN-015 ficou `blocked` na branch `syn-015`, commit `50e7c68`. Imagens enviadas são apagadas após a entrega; falta definir retenção ou limitar o ticket às recebidas. /  / A [skill ticket-flow](/C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige: “Stop only if the ticket needs a seam it does not name”. Essa decisão continua fora do contrato. Nenhum código foi alterado.
+
+- 2026-09-26 Attempt 3 failed: exit 0; blocked after two attempts. Log tail: SYN-015 ficou `blocked` na branch `syn-015`, commit `318d877`. Implementação preservada; 23/24 testes Android passaram. O novo teste precisa inicializar o WorkManager. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando “a test proves wrong after being committed”. O motivo e os passos para retomar estão no ticket.
+
+- 2026-09-26 Review ended at blocked (exit 0); branch syn-015 holds the review; left for a human
