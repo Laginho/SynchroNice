@@ -48,7 +48,7 @@ class ShareActivity : ComponentActivity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun sharedUris(incoming: Intent): List<Uri> = when (incoming.action) {
+    internal fun sharedUris(incoming: Intent): List<Uri> = when (incoming.action) {
         Intent.ACTION_SEND -> listOfNotNull(incoming.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
         Intent.ACTION_SEND_MULTIPLE -> incoming.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM) ?: emptyList()
         else -> emptyList()
@@ -59,10 +59,11 @@ class ShareActivity : ComponentActivity() {
     /**
      * Recusa file:// e content:// do próprio app: nem as preferências, nem a fila, nem o
      * FileProvider da câmera. O ContentResolver do AOSP endereça um provider por
-     * "<userId>@authority" e tira o prefixo antes de resolver, então a comparação também
-     * precisa tirar -- senão um Intent malicioso disfarça a authority própria com um prefixo
-     * e o filtro deixa passar.
+     * "<userId>@authority" e tira o prefixo antes de resolver, então a busca pelo provider
+     * também precisa tirar -- senão um Intent malicioso disfarça a authority própria com um
+     * prefixo e o filtro deixa passar.
      */
+    @Suppress("DEPRECATION")
     private fun isForeignContentUri(uri: Uri): Boolean {
         if (uri.scheme != "content") return false
         val authority = uri.authority?.substringAfterLast('@') ?: return false

@@ -83,7 +83,7 @@ class ShareActivityTest {
     }
 
     @Test
-    fun `fileUriForOwnInternalFilesDoesNotQueue`() {
+    fun fileUriForOwnInternalFilesDoesNotQueue() {
         val application = RuntimeEnvironment.getApplication()
         val state = share(ownInternalFileUri(application))
         assertTrue(state.messages.isEmpty())
@@ -95,20 +95,16 @@ class ShareActivityTest {
     // do ContentResolver: URI é excluída antes de qualquer leitura, então nenhum provider real
     // precisa responder.
     @Test
-    fun `contentUriFromOwnFileProviderIsFilteredOutBeforeReading`() {
+    fun contentUriFromOwnFileProviderIsFilteredOutBeforeReading() {
         val application = RuntimeEnvironment.getApplication()
         val ownAuthorityUri = Uri.parse("content://${application.packageName}.camera/camera/foto.jpg")
         val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, ownAuthorityUri)
         val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).get()
-        val method = ShareActivity::class.java.getDeclaredMethod("sharedUris", Intent::class.java)
-        method.isAccessible = true
-        @Suppress("UNCHECKED_CAST")
-        val accepted = method.invoke(activity, intent) as List<Uri>
-        assertFalse(accepted.contains(ownAuthorityUri))
+        assertFalse(activity.sharedUris(intent).contains(ownAuthorityUri))
     }
 
     @Test
-    fun `contentUriFromAnotherProviderQueuesNormally`() {
+    fun contentUriFromAnotherProviderQueuesNormally() {
         registerForeignProvider("test.provider", "arquivo.txt", "conteudo")
         val state = share(Uri.parse("content://test.provider/arquivo.txt"))
         assertEquals(1, state.messages.size)
@@ -125,17 +121,15 @@ class ShareActivityTest {
         val prefixedUri = Uri.parse("content://0@${application.packageName}.camera/camera/foto.jpg")
         val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, prefixedUri)
         val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).get()
-        val method = ShareActivity::class.java.getDeclaredMethod("sharedUris", Intent::class.java)
-        method.isAccessible = true
-        @Suppress("UNCHECKED_CAST")
-        val accepted = method.invoke(activity, intent) as List<Uri>
-        assertFalse(accepted.contains(prefixedUri))
+        assertFalse(activity.sharedUris(intent).contains(prefixedUri))
     }
 
     @Test
-    fun `sendMultipleOnlyQueuesTheAcceptedUri`() {
+    fun sendMultipleOnlyQueuesTheAcceptedUri() {
         registerForeignProvider("test.provider", "arquivo.txt", "conteudo")
         val application = RuntimeEnvironment.getApplication()
+        // A URI própria vai primeiro de propósito: se o filtro a deixar passar, a leitura dela
+        // lança sob Robolectric e aborta o lote antes do Pendente de test.provider.
         val state = share(
             Uri.parse("content://0@${application.packageName}.camera/camera/foto.jpg"),
             ownInternalFileUri(application),
