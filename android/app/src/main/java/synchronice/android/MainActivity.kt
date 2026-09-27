@@ -92,6 +92,7 @@ import synchronice.protocolclient.parsePairingQr
 import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
@@ -146,7 +147,7 @@ internal class AppState(
     private val outboundMutex = Mutex()
     private val receivedIds = mutableSetOf<Long>()
     private val receivedFiles = mutableMapOf<Long, Long>()
-    private val inFlightFiles = mutableSetOf<Long>()
+    private val inFlightFiles = ConcurrentHashMap.newKeySet<Long>()
     internal val files = ReceivedFiles(appContext)
     private var nextMessageId = 1L
     private var clientFor: PairingInfo? = null
@@ -447,7 +448,7 @@ internal class AppState(
                 items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }
                 var startedDownload = false
                 for (file in items.filterIsInstance<Item.FileMeta>()) {
-                    val isNew = withContext(Dispatchers.Main.immediate) { inFlightFiles.add(file.id) }
+                    val isNew = inFlightFiles.add(file.id)
                     if (!isNew) continue
                     startedDownload = true
                     launch {
@@ -460,11 +461,12 @@ internal class AppState(
                             // Keep the id in flight past the loop's 1.5 s empty-batch wait, so a fast,
                             // repeating failure doesn't spin the listen loop hot on the same re-announced file.
                             delay(2_000)
-                        } finally {
-                            // NonCancellable: a cancelled listen loop (ON_PAUSE) must still free the
-                            // id, or the relaunched loop ignores the re-announced file forever.
-                            withContext(Dispatchers.Main.immediate + NonCancellable) { inFlightFiles.remove(file.id) }
                         }
+                    }.invokeOnCompletion {
+                        // Runs on any completion path, including a job cancelled before its body ever
+                        // ran: a cancelled listen loop (ON_PAUSE) must still free the id, or the
+                        // relaunched loop ignores the re-announced file forever.
+                        inFlightFiles.remove(file.id)
                     }
                 }
                 if (!startedDownload && items.none { it is Item.Text }) delay(1_500)

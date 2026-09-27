@@ -1,5 +1,5 @@
 # CLEAN-016: Despacho do download sem corrida com o cancelamento
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
