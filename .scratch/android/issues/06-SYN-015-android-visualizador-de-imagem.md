@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: implementing
+Stage: blocked
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -55,6 +55,8 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
   manual, conforme a spec.
 
 ## Comments
+
+- 2026-09-26 Stage 2 interrompido: o teste já commitado em `ba8d7f0` precisa corrigir seu preparo. Com gráficos nativos, `SentImageTest` chega a `AppState.queueFile`, mas `scheduleDelivery` lança `IllegalStateException: WorkManager is not initialized properly` antes das asserções. É necessário inicializar explicitamente o WorkManager de teste (dependência work-testing já existe), preservando a costura AppState real + HTTP falso, e repetir a prova vermelha comportamental antes do verde. Não alterei o teste após o commit, conforme ticket-flow. Implementação parcial preservada em `e475559`: prévia Bitmap limitada a 2048px obtida da cópia da fila sob mutex, reconstrução dos Pendentes, visualizador Compose com pinça/arraste/Voltar e imagens recebidas via URI. Não está aprovada: falta gate verde e validação visual. Última execução TestsOnly: 44 testes Rust e 32 Node passaram; app Android 24 testes, 23 passaram e 1 falhou no preparo citado. Para reproduzir neste ambiente: JDK `C:\Users\bruno\.jdks\jdk-17.0.20.1+1`, `JAVA_TOOL_OPTIONS=-Duser.home=C:\Users\bruno`, gate fora do sandbox para carregar o runtime nativo do Robolectric. O user.home temporário falhou com classes Android stub fora do sandbox; no sandbox houve AccessDeniedException no JAR nativeruntime. Computer Use inicializou e listou apps, mas não havia janela Android; adb devices confirmou nenhum dispositivo conectado. O emulador instalado lista SynchroNice_API37, não iniciado nesta etapa. Próximo passo: autorizar a correção do preparo do teste e retomar Stage 2 na branch `syn-015`.
 
 - 2026-09-26 Stage 2: teste `SentImageTest` exercita AppState real, HTTP 201, prévia limitada em RAM, reconstrução de Pendente e ausência de payload/prévia em disco após entrega. Gate TestsOnly vermelho: `ChatMessage.preview` ainda não existe (compileDebugUnitTestKotlin). Ambiente de execução usa JDK 17 e user.home temporário conforme SYN-012.
 
