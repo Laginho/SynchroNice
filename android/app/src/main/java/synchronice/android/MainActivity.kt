@@ -299,6 +299,23 @@ internal class AppState(
         }
     }
 
+    /**
+     * "Mudar pasta…" é também a intervenção que um recebimento preso pede (SYN-014, critério 3:
+     * marcador que o provedor escondeu, Pasta sem permissão): o que ainda não tinha conteúdo
+     * completo recomeça na Pasta escolhida. O parcial antigo fica onde estava, com o marcador.
+     */
+    fun chooseFolder(uri: Uri) {
+        files.chooseFolder(uri)
+        val editor = pairingPreferences.edit()
+        pairingPreferences.all.forEach { (key, value) ->
+            val unfinished = value is String && (value.startsWith("creating:") || value.startsWith("writing:"))
+            if (key.startsWith("received-file:") && unfinished && key.substringAfterLast(':').toLongOrNull() !in inFlightFiles) {
+                editor.remove(key)
+            }
+        }
+        editor.apply()
+    }
+
     @Synchronized
     fun client(): ProtocolClient? {
         val currentPair = pairing ?: return null
@@ -530,6 +547,7 @@ internal class AppState(
         val receipt = pairingPreferences.getString(receiptKey, null)
         val incompleteUri = receipt?.takeIf { it.startsWith("writing:") }?.removePrefix("writing:")?.let(Uri::parse)
         val creationIntent = receipt?.takeIf { it.startsWith("creating:") }?.removePrefix("creating:")
+        val renamingUri = receipt?.takeIf { it.startsWith("renaming:") }?.removePrefix("renaming:")?.let(Uri::parse)
         val persistedUri = receipt?.takeIf { it.startsWith("content:") }?.let(Uri::parse)
         val id = receivedFiles.getOrPut(item.id) {
             val id = nextMessageId++
@@ -565,6 +583,15 @@ internal class AppState(
                         }
                         currentClient.acknowledgeFile(item.id)
                     }
+                    else if (renamingUri != null) {
+                        // O conteúdo já estava completo quando o rename começou: só falta terminar e confirmar.
+                        val saved = files.finishRenaming(renamingUri, item.name)
+                        kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                            if (saved != null) saveReceipt(saved.toString())
+                            update { it.copy(uri = saved) }
+                        }
+                        currentClient.acknowledgeFile(item.id)
+                    }
                     else files.receive(currentClient, item, existingUri = incompleteUri, creationIntent = creationIntent, onCreating = { intent ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
                             saveReceipt("creating:$intent")
@@ -572,6 +599,10 @@ internal class AppState(
                     }, onCreated = { uri ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
                             saveReceipt("writing:$uri")
+                        }
+                    }, onRenaming = { uri ->
+                        kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                            saveReceipt("renaming:$uri")
                         }
                     }, onSaved = { uri ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
@@ -822,7 +853,7 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
     val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             try {
-                state.files.chooseFolder(uri)
+                state.chooseFolder(uri)
                 folder = uri
                 folderError = null
             } catch (error: Exception) {

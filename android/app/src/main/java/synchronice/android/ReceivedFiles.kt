@@ -10,11 +10,14 @@ import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import synchronice.protocolclient.Item
 import synchronice.protocolclient.ProtocolClient
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
 
 internal class FileGoneException : IOException("o arquivo não existe mais")
+
+private val receiptMarker = Regex(""" \[syn-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}]""")
 
 internal fun fileMimeType(name: String): String =
     MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
@@ -64,11 +67,14 @@ internal class ReceivedFiles(context: Context) {
         }
     }
 
-    fun receive(client: ProtocolClient, item: Item.FileMeta, existingUri: Uri?, creationIntent: String?, onCreating: (String) -> Unit, onCreated: (Uri) -> Unit, onSaved: (Uri) -> Unit, onProgress: (Int) -> Unit) {
+    fun receive(client: ProtocolClient, item: Item.FileMeta, existingUri: Uri?, creationIntent: String?, onCreating: (String) -> Unit, onCreated: (Uri) -> Unit, onRenaming: (Uri) -> Unit, onSaved: (Uri) -> Unit, onProgress: (Int) -> Unit) {
         val tree = folder()
         val mime = fileMimeType(item.name)
         val name = safeFileName(item.name)
-        val uri = existingUri ?: if (tree == null && creationIntent == null) {
+        // O recibo identifica o destino pela URI, sem ambiguidade: se ele sumiu (o usuário apagou o
+        // parcial, o MediaStore expirou a linha pendente), recomeçar num novo não duplica nada.
+        val resumed = existingUri?.takeIf(::exists)
+        val uri = resumed ?: if (tree == null && creationIntent == null) {
             // MediaStore allocates a unique filename atomically, including for repeated names.
             resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -92,16 +98,17 @@ internal class ReceivedFiles(context: Context) {
             } else recoverCreatedDocument(targetTree, intent.getString("marker"))
         } ?: throw IOException("não foi possível criar o arquivo na Pasta")
 
-        var tracked = existingUri != null || tree != null || creationIntent != null
+        var tracked = resumed != null || tree != null || creationIntent != null
         try {
             onCreated(uri)
             // Keep interrupted destinations so a restart writes to the same file, including SAF.
             tracked = true
             val complete = {
-                onSaved(uri)
-                publish(uri)
+                val saved = unmark(uri, name, onRenaming)
+                onSaved(saved)
+                publish(saved)
             }
-            if (existingUri != null && hasCompleteContent(uri, item.size)) {
+            if (resumed != null && hasCompleteContent(uri, item.size)) {
                 complete()
                 onProgress(100)
                 client.acknowledgeFile(item.id)
@@ -123,6 +130,43 @@ internal class ReceivedFiles(context: Context) {
         }
     }
 
+    /**
+     * O marcador só identifica o documento SAF enquanto ele está incompleto (critério 3); com o
+     * conteúdo completo, o nome volta a ser o do PC e o provedor resolve colisão como `nome (1)`.
+     * [onRenaming] guarda o recibo antes do rename: um provedor de ids por caminho troca a URI, e a
+     * retomada ([finishRenaming]) precisa saber que o conteúdo já estava completo.
+     */
+    private fun unmark(uri: Uri, name: String, onRenaming: (Uri) -> Unit): Uri {
+        if (uri.authority == MediaStore.AUTHORITY) return uri
+        val current = displayName(uri) ?: return uri
+        if (!receiptMarker.containsMatchIn(current)) return uri
+        onRenaming(uri)
+        return DocumentsContract.renameDocument(resolver, uri, name) ?: uri
+    }
+
+    /** Retoma um [unmark] interrompido; `null` se o documento antigo sumiu, ou seja, o rename já aconteceu. */
+    fun finishRenaming(uri: Uri, name: String): Uri? {
+        val current = displayName(uri) ?: return null
+        if (!receiptMarker.containsMatchIn(current)) return uri
+        return DocumentsContract.renameDocument(resolver, uri, safeFileName(name)) ?: uri
+    }
+
+    private fun displayName(uri: Uri): String? = try {
+        resolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    } catch (_: FileNotFoundException) {
+        null
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+
+    private fun exists(uri: Uri): Boolean = try {
+        resolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+    } catch (_: FileNotFoundException) {
+        false
+    }
+
     private fun recoverCreatedDocument(tree: Uri, marker: String): Uri {
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val columns = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
@@ -137,7 +181,7 @@ internal class ReceivedFiles(context: Context) {
             }
         }
         val documentId = candidates.singleOrNull()
-            ?: throw IOException("não foi possível identificar o arquivo recebido na Pasta; verifique o provedor e tente novamente")
+            ?: throw IOException("não foi possível identificar o arquivo recebido na Pasta; escolha a Pasta de novo em Mudar pasta… para recomeçar")
         return DocumentsContract.buildDocumentUriUsingTree(tree, documentId)
     }
 
