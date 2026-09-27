@@ -1,5 +1,5 @@
 # CLEAN-011: Upload preso trava todos os arquivos do celular
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
