@@ -1,5 +1,5 @@
 # CLEAN-014: Prévia de imagem Pendente fora da main thread
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent

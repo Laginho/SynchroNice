@@ -91,6 +91,8 @@ import synchronice.protocolclient.parsePairingQr
 import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 class SynchroNiceApplication : Application() {
     internal lateinit var state: AppState
@@ -116,7 +118,10 @@ internal data class ChatMessage(
     val preview: Bitmap? = null,
 )
 
-internal class AppState(context: Context) {
+internal class AppState(
+    context: Context,
+    private val previewExecutor: Executor = Executors.newSingleThreadExecutor(),
+) {
     private val appContext = context.applicationContext
     private val pairingPreferences = appContext.getSharedPreferences("pairing", Context.MODE_PRIVATE)
     private val networkPreferences = appContext.getSharedPreferences("network", Context.MODE_PRIVATE)
@@ -172,9 +177,22 @@ internal class AppState(context: Context) {
                 is PendingItem.Text -> pending.text
                 is PendingItem.File -> pending.name
             }
-            messages.add(if (pending is PendingItem.File) outgoingFile(id, pending)
+            messages.add(if (pending is PendingItem.File) outgoingFile(id, pending, decodeNow = false)
                 else ChatMessage(id, label, true, Delivery.PENDING))
+            if (pending is PendingItem.File && fileMimeType(pending.name).startsWith("image/")) {
+                schedulePreviewDecode(id, File(pending.path))
+            }
             submitted.addLast(id)
+        }
+    }
+
+    private fun schedulePreviewDecode(id: Long, file: File) {
+        previewExecutor.execute {
+            val preview = decodePreview(ImageDecoder.createSource(file))
+            kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
+                val index = messages.indexOfFirst { it.localId == id }
+                if (index >= 0) messages[index] = messages[index].copy(preview = preview)
+            }
         }
     }
 
@@ -320,12 +338,12 @@ internal class AppState(context: Context) {
         scheduleDelivery(appContext)
     }
 
-    private fun outgoingFile(id: Long, pending: PendingItem.File): ChatMessage {
+    private fun outgoingFile(id: Long, pending: PendingItem.File, decodeNow: Boolean = true): ChatMessage {
         val file = File(pending.path)
         return ChatMessage(
             id, pending.name, true, Delivery.PENDING,
             file = Item.FileMeta(id, 0, pending.name, file.length()),
-            preview = if (fileMimeType(pending.name).startsWith("image/"))
+            preview = if (decodeNow && fileMimeType(pending.name).startsWith("image/"))
                 decodePreview(ImageDecoder.createSource(file)) else null,
         )
     }
