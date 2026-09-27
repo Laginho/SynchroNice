@@ -93,10 +93,28 @@ class ReceivedFileRestartTest {
     fun uninterruptedSafCreationUsesReturnedUriEvenWhenProviderChangesMarker() =
         exerciseRestart(null, normalSaf = true)
 
-    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null, listenRecovery: Boolean = false, normalSaf: Boolean = false) = runBlocking {
+    // O marcador só identifica o documento enquanto ele está incompleto; o nome final é o do PC.
+    @Test
+    fun completedSafReceiptDropsTheMarkerFromTheName() =
+        exerciseRestart(null, normalSaf = true, keepMarker = true)
+
+    @Test
+    fun restartingInTheMiddleOfTheSafRenameFinishesWithoutAnotherCopy() =
+        exerciseRestart(null, safCrash = true, renameCrash = true)
+
+    @Test
+    fun restartingAfterTheUnfinishedDestinationWasDeletedDownloadsAgain() =
+        exerciseRestart(null, safCrash = true, destinationGone = true)
+
+    @Test
+    fun choosingTheFolderAgainRestartsAStuckReceipt() =
+        exerciseRestart(null, safCrash = true, beforeWrite = true, beforeUri = true, recovery = "hidden", intervene = true)
+
+    private fun exerciseRestart(crashAfterPublication: Boolean?, failRemoval: Boolean = false, safCrash: Boolean = false, beforeWrite: Boolean = false, beforeUri: Boolean = false, recovery: String? = null, listenRecovery: Boolean = false, normalSaf: Boolean = false, keepMarker: Boolean = false, renameCrash: Boolean = false, destinationGone: Boolean = false, intervene: Boolean = false) = runBlocking {
         val application = RuntimeEnvironment.getApplication()
         var rejectRemoval = failRemoval
-        var crashBeforeReceipt = safCrash && !beforeWrite
+        var crashBeforeReceipt = safCrash && !beforeWrite && !renameCrash
+        var crashAtRename = renameCrash
         var crashBeforeWrite = beforeWrite && !beforeUri
         var crashBeforeUri = beforeUri
         val names = mutableListOf<String>()
@@ -149,11 +167,20 @@ class ReceivedFileRestartTest {
         ShadowContentResolver.registerProviderInternal(authority, object : ContentProvider() {
             override fun onCreate() = true
             override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+                if (method == "android:renameDocument") {
+                    @Suppress("DEPRECATION") val uri = extras!!.getParcelable<Uri>("uri")!!
+                    names[uri.lastPathSegment!!.toInt() - 1] = extras.getString(DocumentsContract.Document.COLUMN_DISPLAY_NAME)!!
+                    if (crashAtRename) {
+                        crashAtRename = false
+                        throw SimulatedProcessDeath()
+                    }
+                    return Bundle().apply { putParcelable("uri", uri) }
+                }
                 check(method == "android:createDocument")
                 copies.add(File(context.cacheDir, "received-${copies.size}.bin"))
                 copies.last().writeText("")
                 names.add(extras!!.getString(DocumentsContract.Document.COLUMN_DISPLAY_NAME)!!)
-                if (normalSaf) names[names.lastIndex] = "received.bin"
+                if (normalSaf && !keepMarker) names[names.lastIndex] = "received.bin"
                 if (crashBeforeUri) {
                     crashBeforeUri = false
                     throw SimulatedProcessDeath()
@@ -196,6 +223,10 @@ class ReceivedFileRestartTest {
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int =
                 if (copies[uri.lastPathSegment!!.toInt() - 1].delete()) 1 else 0
             override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? {
+                if (uri.pathSegments.first() == "document") return MatrixCursor(projection!!).apply {
+                    val index = uri.lastPathSegment!!.toInt() - 1
+                    if (copies[index].exists()) addRow(projection.map { if (it == DocumentsContract.Document.COLUMN_DISPLAY_NAME) names[index] else null })
+                }
                 if (recovering) assertEquals("root", DocumentsContract.getTreeDocumentId(uri))
                 if (recovering && recovery == "unavailable") return null
                 return MatrixCursor(projection!!).apply {
@@ -251,6 +282,7 @@ class ReceivedFileRestartTest {
                 assertEquals("payload", copies.single().readText())
                 assertEquals(Delivery.DELIVERED, state.messages.single().delivery)
                 assertTrue(preferences.all.keys.none { it.startsWith("received-file:") })
+                if (keepMarker) assertEquals(listOf("received.bin"), names)
                 return@runBlocking
             }
             if (failRemoval) {
@@ -296,6 +328,18 @@ class ReceivedFileRestartTest {
                 assertEquals("", copies.first().readText())
                 assertEquals("foreign", copies.last().readText())
                 assertTrue(preferences.all.keys.any { it.startsWith("received-file:") })
+                if (intervene) {
+                    // "Mudar pasta…" é a intervenção que o critério 3 pede: o recebimento recomeça na Pasta escolhida.
+                    reopened.chooseFolder(Uri.parse("content://test.documents/tree/other"))
+                    reopened.receiveFile(item, reopened.client()!!)
+                    assertEquals(1, gets.get())
+                    assertEquals(1, acks.get())
+                    assertEquals(3, copies.size)
+                    assertEquals("payload", copies.last().readText())
+                    assertEquals("received.bin", names.last())
+                    assertEquals(Delivery.DELIVERED, reopened.messages.single().delivery)
+                    assertTrue(preferences.all.keys.none { it.startsWith("received-file:") })
+                }
                 return@runBlocking
             }
             if (listenRecovery) {
@@ -311,7 +355,20 @@ class ReceivedFileRestartTest {
                 } finally { listening.cancelAndJoin() }
                 return@runBlocking
             }
+            if (destinationGone) {
+                // O usuário apagou o arquivo inacabado enquanto o app estava morto: a URI do recibo
+                // identifica o destino sem ambiguidade, então recomeçar num novo não duplica nada.
+                copies.single().delete()
+                reopened.receiveFile(item, reopened.client()!!)
+                assertEquals(2, gets.get())
+                assertEquals(1, acks.get())
+                assertEquals("payload", copies.last().readText())
+                assertEquals(Delivery.DELIVERED, reopened.messages.single().delivery)
+                assertTrue(preferences.all.keys.none { it.startsWith("received-file:") })
+                return@runBlocking
+            }
             reopened.receiveFile(item, reopened.client()!!)
+            if (renameCrash) assertEquals(listOf("received.bin"), names)
             assertEquals(if (crashAfterPublication == null && !safCrash) 2 else 1, acks.get())
             assertEquals(1, gets.get(), "A saved Item only needs another ACK")
             assertEquals(if (beforeUri) 2 else 1, copies.size, "Restarting must not create another copy")
