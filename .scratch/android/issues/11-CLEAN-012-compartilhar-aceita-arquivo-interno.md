@@ -73,9 +73,11 @@ Teste Robolectric do Compartilhar, com Par gravado e a fila observada:
   (Par gravado, fila observada) como o plano previa. Nenhuma verificação
   manual ficou pendente disto — é um bug de ambiente (Windows), não de
   comportamento no dispositivo real.
-- 2026-09-27 Stage 3: reescrita a frase acima, que dizia "Débito humano:
-  nenhuma…". O foreman junta toda linha com esse marcador em
-  `grep -rh 'Débito humano:'`, e ela entraria na lista como débito sem ser.
+- 2026-09-27 Stage 3: reescrita a frase acima, que declarava com o marcador de
+  débito humano que não havia nenhum. O foreman junta toda linha com esse
+  marcador (ver AGENTS.md, "Humano simulado"), e ela entraria na lista como
+  débito sem ser. Revisão do PR 7: esta nota também citava o marcador literal
+  e caía no mesmo grep; reescrita.
 - 2026-09-27 Stage 2 (retomada após reabertura): trocado o filtro por uma
   consulta ao PackageManager pela authority sem o prefixo `<userId>@`
   (`packageManager.resolveContentProvider`), fechando o desvio

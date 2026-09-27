@@ -326,3 +326,5 @@ Verdict: Approve
   verificação no celular físico registrado acima permanece para o QA final.
 - Totais: Standards — 0 violações e 1 sugestão não bloqueante; Spec —
   0 falhas bloqueantes e 1 ressalva não bloqueante sobre a prova do teste.
+
+- Débito humano: com o app em segundo plano no Android 12+, arquivo de 10 MB ou mais é entregue sem a notificação; girar o celular durante um Compartilhar de várias fotos enfileira cada foto uma vez (revisão do PR 7).

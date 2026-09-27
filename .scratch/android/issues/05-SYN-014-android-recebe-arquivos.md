@@ -314,3 +314,16 @@ Verdict: Approve
   testes do protocolo Android e 23 do app, compilação e lint; zero falhas.
 - **Verificação visual:** permanece o `Débito humano` dos critérios 3–7 para
   o QA conjunto no aparelho, conforme a regra do repositório.
+
+- 2026-09-27 Humano (revisão do PR 7): o nome final no SAF é o do PC. Com o
+  conteúdo completo, o documento é renomeado sem o marcador, e colisão fica
+  com o `(1)` do provedor; isto substitui a frase "Não remover o marcador
+  por rename automático" do critério 3, que contrariava a spec ("Nome
+  repetido recebe sufixo, como no PC"). Um recibo `renaming:` gravado antes
+  do rename deixa a retomada terminar e confirmar sem outra cópia. "Mudar
+  pasta…" passa a ser a intervenção que o critério 3 pede: recomeça na Pasta
+  escolhida os recebimentos que não chegaram a ter conteúdo completo. Destino
+  de recibo `writing:` que sumiu recomeça sozinho, porque a URI o identifica
+  sem ambiguidade.
+
+- Débito humano: numa Pasta SAF real (Downloads, pendrive, Drive), o arquivo recebido termina com o nome limpo, e um segundo de mesmo nome vira `(1)` (revisão do PR 7).

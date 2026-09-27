@@ -272,3 +272,5 @@ Verdict: Approve
 - Red-green: `20b9ffb` substituiu as provas internas e deixou vermelho o reset de presença ao retomar; `19d2981` limpou a presença no `ON_RESUME`. As rodadas anteriores do ticket registram os vermelhos do parser JSON, presença autenticada, reconexão da escuta e entrega parcial.
 - Gate: após o rebase, `gate.ps1` passou com fmt, clippy, 38 testes Rust, typecheck, 24 testes Node e Gradle `check` com testes Kotlin, compilação e lint. A primeira tentativa falhou apenas porque o AGP tentou gravar `C:\.android`; a repetição usou o diretório Android temporário já documentado.
 - Verificação visual: Computer Use retornou `apps=[]`, sem emulador ou app Android acessível. O `Débito humano` dos critérios 3–9 permanece para o QA conjunto.
+
+- Débito humano: com o chat aberto, desligar e religar o PC faz o Pendente sair assim que o topo mostra "Na rede" (revisão do PR 7).
