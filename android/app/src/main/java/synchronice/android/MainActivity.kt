@@ -70,6 +70,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
@@ -435,7 +436,7 @@ internal class AppState(
         online = value
     }
 
-    suspend fun listen(currentPair: PairingInfo, client: ProtocolClient) = withContext(Dispatchers.IO) {
+    suspend fun listen(currentPair: PairingInfo, client: ProtocolClient, dispatcher: CoroutineDispatcher = Dispatchers.IO) = withContext(dispatcher) {
         while (isActive) {
             try {
                 retryReceivedReceipts(currentPair, client)
