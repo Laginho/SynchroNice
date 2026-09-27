@@ -299,9 +299,10 @@ class ReceivedFileRestartTest {
                 return@runBlocking
             }
             if (listenRecovery) {
+                val listensBefore = listens.get()
                 val listening = launch { reopened.listen(reopened.pairing!!, reopened.client()!!) }
                 try {
-                    withTimeout(5_000) { while (listens.get() < 2) delay(10) }
+                    withTimeout(5_000) { while (listens.get() == listensBefore) delay(10) }
                     assertTrue(preferences.all.keys.none { it.startsWith("received-file:") }, "Cleanup cannot depend on another file announcement")
                     assertTrue(reopened.messages.isEmpty(), "Receipt recovery must not restore chat history")
                     assertEquals(1, gets.get())

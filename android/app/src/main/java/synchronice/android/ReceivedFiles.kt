@@ -14,6 +14,8 @@ import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
 
+internal class FileGoneException : IOException("o arquivo não existe mais")
+
 internal fun fileMimeType(name: String): String =
     MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
         ?: "application/octet-stream"
@@ -149,8 +151,9 @@ internal class ReceivedFiles(context: Context) {
     }
 
     fun publish(uri: Uri) {
-        if (uri.authority == MediaStore.AUTHORITY && resolver.update(uri, ContentValues().apply {
-            put(MediaStore.MediaColumns.IS_PENDING, 0)
-        }, null, null) != 1) throw IOException("não foi possível publicar o arquivo")
+        if (uri.authority != MediaStore.AUTHORITY) return
+        val updated = resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        if (updated == 0) throw FileGoneException()
+        if (updated != 1) throw IOException("não foi possível publicar o arquivo")
     }
 }

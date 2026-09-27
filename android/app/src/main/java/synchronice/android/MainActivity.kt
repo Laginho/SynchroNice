@@ -145,6 +145,7 @@ internal class AppState(
     private val outboundMutex = Mutex()
     private val receivedIds = mutableSetOf<Long>()
     private val receivedFiles = mutableMapOf<Long, Long>()
+    private val inFlightFiles = mutableSetOf<Long>()
     internal val files = ReceivedFiles(appContext)
     private var nextMessageId = 1L
     private var clientFor: PairingInfo? = null
@@ -229,6 +230,7 @@ internal class AppState(
         messages.clear()
         receivedIds.clear()
         receivedFiles.clear()
+        inFlightFiles.clear()
         protocolClient = null
         clientFor = null
         return true
@@ -272,6 +274,7 @@ internal class AppState(
                             submitted.clear()
                             receivedIds.clear()
                             receivedFiles.clear()
+                            inFlightFiles.clear()
                         }
                     }
                 }
@@ -438,12 +441,32 @@ internal class AppState(
                 retryReceivedReceipts(currentPair, client)
                 val items = kotlinx.coroutines.runInterruptible { client.listen() }
                 withContext(Dispatchers.Main.immediate) {
-                    updateOnline(false)
                     items.filterIsInstance<Item.Text>().forEach(::receive)
                 }
                 items.filterIsInstance<Item.Text>().forEach { client.acknowledgeText(it) }
-                items.filterIsInstance<Item.FileMeta>().forEach { receiveFile(it, client) }
-                if (items.isEmpty()) delay(1_500)
+                var startedDownload = false
+                for (file in items.filterIsInstance<Item.FileMeta>()) {
+                    val isNew = withContext(Dispatchers.Main.immediate) { inFlightFiles.add(file.id) }
+                    if (!isNew) continue
+                    startedDownload = true
+                    launch {
+                        try {
+                            receiveFile(file, client)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            // receiveFile already recorded the failure in connectionError and delivery.
+                            // Keep the id in flight past the loop's 1.5 s empty-batch wait, so a fast,
+                            // repeating failure doesn't spin the listen loop hot on the same re-announced file.
+                            delay(2_000)
+                        } finally {
+                            // NonCancellable: a cancelled listen loop (ON_PAUSE) must still free the
+                            // id, or the relaunched loop ignores the re-announced file forever.
+                            withContext(Dispatchers.Main.immediate + NonCancellable) { inFlightFiles.remove(file.id) }
+                        }
+                    }
+                }
+                if (!startedDownload && items.none { it is Item.Text }) delay(1_500)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: SocketTimeoutException) {
@@ -474,6 +497,14 @@ internal class AppState(
         }
     }
 
+    private fun dropStaleReceipt(itemId: Long, key: String) {
+        receivedFiles[itemId]?.let { localId ->
+            val index = messages.indexOfFirst { it.localId == localId }
+            if (index >= 0) messages[index] = messages[index].copy(delivery = Delivery.FAILED, uri = null)
+        }
+        removeReceipt(key)
+    }
+
     private suspend fun retryReceivedReceipts(currentPair: PairingInfo, client: ProtocolClient) = withContext(Dispatchers.Main.immediate) {
         if (client !== protocolClient || pairing != currentPair) return@withContext
         val prefix = "received-file:${currentPair.token}:"
@@ -481,7 +512,9 @@ internal class AppState(
             key.startsWith(prefix) && value is String && value.startsWith("content:")
         }
         for ((key, value) in receipts) {
+            if (client !== protocolClient || pairing != currentPair) return@withContext
             val itemId = key.removePrefix(prefix).toLong()
+            if (itemId in inFlightFiles) continue
             try {
                 withContext(Dispatchers.IO) {
                     kotlinx.coroutines.runInterruptible {
@@ -493,9 +526,13 @@ internal class AppState(
                 receivedFiles[itemId]?.let { setDelivery(it, Delivery.DELIVERED) }
                 removeReceipt(key)
                 connectionError = null
-            } catch (error: Exception) {
-                if (error !is CancellationException) connectionError = "Não foi possível concluir o recebimento: ${error.message}"
+            } catch (error: CancellationException) {
                 throw error
+            } catch (error: FileGoneException) {
+                dropStaleReceipt(itemId, key)
+            } catch (error: Exception) {
+                // A receipt that keeps failing stays queued for the next attempt; it must not stop listening.
+                connectionError = "Não foi possível concluir o recebimento: ${error.message}"
             }
         }
     }
@@ -533,7 +570,12 @@ internal class AppState(
                 kotlinx.coroutines.runInterruptible {
                     var lastProgress = -1
                     if (savedUri != null) {
-                        files.publish(savedUri)
+                        try {
+                            files.publish(savedUri)
+                        } catch (error: FileGoneException) {
+                            kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) { dropStaleReceipt(item.id, receiptKey) }
+                            throw error
+                        }
                         currentClient.acknowledgeFile(item)
                     }
                     else files.receive(currentClient, item, existingUri = incompleteUri, creationIntent = creationIntent, onCreating = { intent ->
