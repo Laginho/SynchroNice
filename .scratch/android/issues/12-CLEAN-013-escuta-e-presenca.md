@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -343,3 +343,30 @@ a tentativa 5 (não rodado de novo: não há merge).
 - 2026-09-27 Review ended at reviewing (timeout); branch clean-013 holds the review; left for a human
 
 - 2026-09-27 Foreman: a revisão das 15:31 estourou os 20 min, mas antes disso já tinha feito o conserto pequeno `92c4d62` (id de download que falhou fica em voo 2 s) e mergeado `clean-013` na sessão (`16c90be`, 15:51:29), sem chegar a gravar o veredito nem `Stage: done`. O log dela está vazio, então não se sabe se o gate rodou depois de `92c4d62`. `Stage: to-review` de novo: a próxima revisão confere o código já mergeado na sessão, roda o gate completo em primeiro plano (ferramenta Bash, comando exato `powershell -ExecutionPolicy Bypass -File .\gate.ps1`) e fecha. Não reabra pela passada 1 ou 2 já aprovada; o que faltar é conserto pequeno ou `CLEAN-*` novo.
+
+#### Resolution (2026-09-27)
+
+Verdict: Needs your call: os critérios 1–8 passam e o gate está verde, mas sobra uma corrida estreita em que pausar o app no instante em que um download novo é despachado prende o id em `inFlightFiles` — o sintoma do critério 7, numa janela que o `NonCancellable` não cobre.
+
+Revisado `53868f2...92c4d62` (passada 2 e os dois commits da revisão que estourou o tempo), já mergeado na sessão em `16c90be`; o código do HEAD da sessão é o mesmo.
+
+- ✅ **Critério 7.** O `finally` do filho usa `Dispatchers.Main.immediate + NonCancellable` (`MainActivity.kt:465`). `acceptQr` (`:233`) e `unpair` (`:277`) limpam `inFlightFiles`; essa metade está só no código, e o "Tests stage 2 writes" não pedia teste dela.
+- ✅ **Critério 8.** O id fica em voo 2 s depois de uma falha (`:461`). Com 1 s, como diz o item 5 do "What to build": `/listen` em 0 s, reabertura imediata, ~1,55 s (id já solto, download novo) e reabertura imediata, 4 numa janela de 2 s. Com 2 s, no máximo 3 em qualquer janela de 2 s, e o arquivo é tentado de novo a cada ~3,1 s, o que mantém "o Item volta a ser baixado quando o PC o devolver". A prosa do item 5 ficou velha; o critério é o contrato.
+- ✅ **Critérios 3, 4 e 5 ampliados.** Os testes exercitam o que o critério diz e chamam código de produção. O do critério 3 depende da ordem de iteração do `SharedPreferences` (o 99, que falha, vem antes do 98 para este token, `ListenLoopTest.kt:192`): determinístico hoje, mas trocar token ou ids o enfraquece sem avermelhar.
+- ✅ **Critério 6.** `ReceivedFileRestartTest.kt` fora do diff, verde. ✅ Critérios 1 e 2: passada 1, sem mudança aqui.
+- Separação teste-primeiro: `34a7e42` e `d696148` tocam só `ListenLoopTest.kt` (`d696148` também a ficha); `1fc2f4e` e `92c4d62`, só `MainActivity.kt`. Nada fora do Primary files.
+- **Desvio de processo da revisão anterior.** `d696148` (teste) e `92c4d62` (código) foram escritos no stage 3. Pela regra mecânica, um conserto que precisa mexer em teste volta ao stage 2; não é conserto pequeno. Fica como está: a separação vermelho→verde se manteve, o foreman pediu para não reabrir por passada 1 ou 2, e a mutação abaixo confere o verde. A mesma revisão mergeou `clean-013` na sessão antes de gravar o veredito.
+- Item 6: feitos o pulo de ids em voo em `retryReceivedReceipts` (`:517`) e a mensagem de `ListenLoopTest.kt:252`. Não feito: `removeReceipt` lançando dentro do `catch (FileGoneException)` (`:531-532`) ainda pula os outros recibos. O ticket diz que isso não reabre.
+- **Proxy decided** nesta ficha: "dividir" (o achado 4 virou CLEAN-014); "(a)" (`ReceivedFileRestartTest.kt` no Primary files só pelo sinal de espera); "(a), mas como ticket próprio" (presença do PC durante o download virou CLEAN-015, e o critério 1 foi reescrito para a metade do Android).
+
+**Achado que pede decisão (corrida no despacho, sem correção nesta passada).** O id entra em `inFlightFiles` antes de o filho começar (`MainActivity.kt:449-452`), e há duas janelas em que o cancelamento do ON_PAUSE (`repeatOnLifecycle`) cai entre o `add` e o `try` do filho: (1) `withContext(Dispatchers.Main.immediate) { inFlightFiles.add(file.id) }` tem garantia de cancelamento imediato na volta: se o job foi cancelado enquanto o bloco rodava, lança `CancellationException` com o `add` já feito, e o `launch` nunca roda; (2) um `launch` com start padrão cancelado antes de ser despachado não executa o corpo, então o `finally` com `NonCancellable` não roda. Nos dois casos o id fica preso enquanto o processo viver, e o reanúncio conta como "nada novo" para sempre. A janela vai de microssegundos a poucos ms (a volta da main para IO; o despacho do filho no pool IO), então é rara; o efeito é o arquivo parar de chegar até o app ser morto, sem perda (o PC mantém o Pendente). Conserto provável: `inFlightFiles` como conjunto concorrente (`add` sem `withContext`, que o item 4 já admitia) e `launch(start = CoroutineStart.ATOMIC)`. Não fiz: pede um teste que force a corrida, e forçá-la exige controlar o dispatcher do laço (`Dispatchers.IO` fixo em `listen`), que é costura nova, trabalho de stage 1. Sugestão: um `CLEAN-*` próprio, se valer o custo.
+
+**Standards, sem bloquear (a julgar):**
+- O `2_000` de `:461` e o `1_500` de `:469` estão acoplados só pelo comentário, e já derivaram uma vez (1 s → 2 s). Constantes nomeadas, uma definida pela outra, resolveriam.
+- `stallFirstDownload` (`ListenLoopTest.kt:270`, `:284`) nunca é solto: é uma espera de 5 s com cara de latch, e o `cancelAndJoin()` espera esse tempo porque leitura de socket bloqueante não obedece interrupção.
+- A mensagem de `1fc2f4e` diz que o id fica em voo "a second"; o código segura 2 s desde `92c4d62`.
+- As ~15 linhas de preparação (`HttpServer`, `setMain`, `acceptQr`, `try/finally`) se repetem em cada teste de `ListenLoopTest.kt`.
+
+Vermelho-verde, reconferido pelo stage 3 sobre o HEAD da sessão: `delay(2_000)` → `delay(1_000)` e `NonCancellable` tirado do `finally`, `gate.ps1 -TestsOnly`: 37 testes no app, 2 falhas, exatamente `aDownloadThatFailsFastDoesNotTurnIntoAHotLoop` (`AssertionError`, a asserção `listens <= 3` de `ListenLoopTest.kt:354`) e `aDownloadCancelledMidwayIsResumedByTheRelaunchedLoop` (`TimeoutCancellationException`). Revertido. As mutações dos outros três testes (critérios 3, 4 e 5) estão nomeadas em `34a7e42` e `d696148` e não foram reconferidas.
+
+Gate completo no HEAD da sessão (`6449826`), rodado de novo depois de reverter a mutação: `gate: passou`. PC 46 Rust (1 + 6 + 39) + 32 node; Android `gradle check` BUILD SUCCESSFUL, com `lintDebug` e os 37 testes do app, 0 falhas.
