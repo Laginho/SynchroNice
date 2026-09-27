@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -84,3 +84,13 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
 - 2026-09-26 Attempt 3 failed: exit 0; blocked after two attempts. Log tail: SYN-015 ficou `blocked` na branch `syn-015`, commit `318d877`. Implementação preservada; 23/24 testes Android passaram. O novo teste precisa inicializar o WorkManager. /  / A [skill ticket-flow](C:/Users/bruno/.agents/skills/ticket-flow/SKILL.md) exige parar quando “a test proves wrong after being committed”. O motivo e os passos para retomar estão no ticket.
 
 - 2026-09-26 Review ended at blocked (exit 0); branch syn-015 holds the review; left for a human
+
+#### Resolution (2026-09-26)
+
+Verdict: Approve
+
+- Standards: nenhum desvio documentado; as duas duplicações de expressão apontadas como julgamento não justificam novos helpers.
+- Spec: os cinco critérios estão implementados, sem escopo extra acionável.
+- Arquivos: `ImageViewer.kt`, `MainActivity.kt` e `SentImageTest.kt`.
+- Prova red-green: sem os arquivos de produção, o teste vermelho falhou em `ChatMessage.preview`; com a implementação, passaram 24/24 testes do app, 56/56 do protocolo, 44/44 Rust e 32/32 TypeScript.
+- Gate completo: passou em 2026-09-26 (fmt, clippy, Rust, TypeScript, Android e lint).
