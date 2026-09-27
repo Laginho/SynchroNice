@@ -375,44 +375,6 @@ internal class AppState(
         return true
     }
 
-    suspend fun sendText(id: Long, text: String) {
-        val currentPair = pairing ?: return
-        val currentClient = client() ?: return
-        try {
-            withContext(Dispatchers.IO) {
-                outboundMutex.withLock {
-                    if (currentClient !== protocolClient) return@withLock
-                    submitted.addLast(id)
-                    try {
-                        currentClient.sendText(text)
-                    } catch (error: Exception) {
-                        submitted.remove(id)
-                        throw error
-                    } finally {
-                        val remaining = queueStore.load().size
-                        withContext(Dispatchers.Main.immediate) {
-                            reconcilePendingDelivery(messages, submitted, remaining)
-                        }
-                    }
-                }
-            }
-        } catch (error: Exception) {
-            if (error is CancellationException) throw error
-            if (error is ProtocolRejectedException && error.code == 401) {
-                unpair(currentPair)
-                return
-            }
-            withContext(Dispatchers.Main.immediate) {
-                setDelivery(id, Delivery.FAILED)
-                connectionError = if (error is ProtocolRejectedException) {
-                    "O PC recusou a mensagem (HTTP ${error.code})."
-                } else {
-                    "Não foi possível guardar a mensagem: ${error.message ?: "erro de rede"}"
-                }
-            }
-        }
-    }
-
     suspend fun retryPending(
         onFileProgress: (Int) -> Unit = {},
         onFileStart: (Long) -> Unit = {},
