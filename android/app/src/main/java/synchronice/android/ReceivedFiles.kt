@@ -141,14 +141,20 @@ internal class ReceivedFiles(context: Context) {
         val current = displayName(uri) ?: return uri
         if (!receiptMarker.containsMatchIn(current)) return uri
         onRenaming(uri)
-        return DocumentsContract.renameDocument(resolver, uri, name) ?: uri
+        return rename(uri, name)
     }
 
     /** Retoma um [unmark] interrompido; `null` se o documento antigo sumiu, ou seja, o rename já aconteceu. */
     fun finishRenaming(uri: Uri, name: String): Uri? {
         val current = displayName(uri) ?: return null
         if (!receiptMarker.containsMatchIn(current)) return uri
-        return DocumentsContract.renameDocument(resolver, uri, safeFileName(name)) ?: uri
+        return rename(uri, safeFileName(name))
+    }
+
+    private fun rename(uri: Uri, name: String): Uri = try {
+        DocumentsContract.renameDocument(resolver, uri, name) ?: uri
+    } catch (_: UnsupportedOperationException) {
+        uri // Provedor sem rename: o arquivo está completo, só o nome fica com o marcador.
     }
 
     private fun displayName(uri: Uri): String? = try {
