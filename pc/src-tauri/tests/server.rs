@@ -1112,7 +1112,7 @@ fn envio_cortado_nao_consume_o_id_e_pode_ser_repetido() {
 
 #[test]
 fn upload_preso_libera_o_lock_e_o_id_pode_ser_reenviado() {
-    let (base, _items, _outbox, raiz) = sobe_com_timeout_de_upload(Duration::from_millis(200));
+    let (base, items, _outbox, raiz) = sobe_com_timeout_de_upload(Duration::from_millis(200));
     let pasta = raiz.path().join("pasta");
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
 
@@ -1139,14 +1139,22 @@ fn upload_preso_libera_o_lock_e_o_id_pode_ser_reenviado() {
     // abortá-la, não um fechamento do lado do cliente.
     std::thread::sleep(Duration::from_millis(50));
 
-    assert_eq!(
-        post_arquivo_com_id(
-            &base,
+    // Numa thread com prazo: sem o timeout do servidor o segundo upload
+    // espera o lock para sempre, e o teste tem que falhar, não travar o gate.
+    let segundo_base = base.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(post_arquivo_com_id(
+            &segundo_base,
             TOKEN,
             "outro-id",
             "segundo.bin",
-            b"conteudo do segundo"
-        ),
+            b"conteudo do segundo",
+        ));
+    });
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("segundo upload não pode esperar o lock para sempre"),
         201,
         "segundo upload deve passar assim que o primeiro estourar o timeout, sem reiniciar"
     );
@@ -1158,6 +1166,17 @@ fn upload_preso_libera_o_lock_e_o_id_pode_ser_reenviado() {
             .contains(".part-")),
         "upload travado não pode deixar .part na Pasta"
     );
+    // O Item que nasceu no início do upload termina como falhou, igual a um
+    // corte de conexão — nunca como concluído.
+    let status = items
+        .snapshot()
+        .into_iter()
+        .find_map(|i| match i.body {
+            ItemBody::File { name, status, .. } if name == "preso.bin" => Some(status),
+            _ => None,
+        })
+        .expect("item do upload travado");
+    assert_eq!(status, FileStatus::Failed);
 
     assert_eq!(
         post_arquivo_com_id(&base, TOKEN, "preso", "preso.bin", b"reenviado"),
