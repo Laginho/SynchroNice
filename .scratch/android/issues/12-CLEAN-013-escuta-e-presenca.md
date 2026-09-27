@@ -1,15 +1,15 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
 
 - Primary files:
-  - android/app/src/main/java/synchronice/android/MainActivity.kt (`AppState`: `listen`, `retryReceivedReceipts`, `receiveFile`; `ConnectionLifecycle`)
-  - android/app/src/main/java/synchronice/android/ReceivedFiles.kt (`publish`: sinalizar arquivo sumido)
-  - android/app/src/test/java/synchronice/android/ListenLoopTest.kt (novo; vem de `7c5ccbf`, ver abaixo)
+  - android/app/src/main/java/synchronice/android/MainActivity.kt (`AppState`: `listen`, `retryReceivedReceipts`, `receiveFile`, `dropStaleReceipt`, `inFlightFiles`; em `acceptQr` e `unpair` só a limpeza de `inFlightFiles`; `ConnectionLifecycle`)
+  - android/app/src/main/java/synchronice/android/ReceivedFiles.kt (`publish`: sinalizar arquivo sumido — já feito em `1208d55`)
+  - android/app/src/test/java/synchronice/android/ListenLoopTest.kt
   - android/app/src/test/java/synchronice/android/ReceivedFileRestartTest.kt (só o sinal de espera de
-    `realListenLoopCleansReceiptAfterAckWithoutAnotherAnnouncement`, ver "Retomada" abaixo; nenhuma asserção e
+    `realListenLoopCleansReceiptAfterAckWithoutAnotherAnnouncement`, já feito em `980148e`; nenhuma asserção e
     nenhum outro teste do arquivo muda)
 
 #### What to build
@@ -21,10 +21,10 @@ CLEAN-014: é outra costura (`init`/`outgoingFile`), e junto os dois não cabem
 numa passada de stage 2.
 
 1. **Presença falsa durante o download.** A spec diz "A presença é essa
-   conexão" (a escuta). O laço de escuta baixa cada arquivo recebido antes de
-   reabrir o `GET /listen`, então durante um download grande o `HEAD /listen`
-   do PC responde que não há escuta, e o chat mostra "Fora da rede" com o PC
-   na rede. Além disso, um texto do PC fica esperando o download acabar.
+   conexão" (a escuta). O laço de escuta baixava cada arquivo recebido antes de
+   reabrir o `GET /listen`, então durante um download grande um texto do PC
+   ficava esperando o download acabar, e o `HEAD /listen` do PC respondia que
+   não há escuta (chat "Fora da rede" com o PC na rede).
    O download de cada arquivo passa a correr ao lado do laço, e o laço reabre
    o `GET /listen` logo depois de despachar o lote. Como o PC devolve em cada
    `GET /listen` todos os Pendentes de agora (`server.rs`, `get_listen`), um
@@ -34,6 +34,19 @@ numa passada de stage 2.
    Um download que falha não derruba a escuta: o erro aparece em
    `connectionError` como hoje, e o Item volta a ser baixado quando o PC o
    devolver.
+   **A metade da presença não é deste ticket.** O PC responde o `GET /listen`
+   na hora enquanto houver qualquer Pendente (`server.rs:618`; o manifesto
+   inteiro, `outbox.rs:233`), e o arquivo baixando é Pendente até o ACK, então
+   durante um download nenhuma escuta fica aberta, faça o Android o que fizer.
+   Quem conserta o `HEAD /listen` (e o piscar da janela do PC) é o **CLEAN-015**:
+   um `GET /outbox/{id}/file` em andamento passa a contar como presença no PC.
+   Com ele, o sondador de presença do Android (`isListening()`, 1 s) vê 200
+   durante o download sem mudar nada aqui. Este ticket cobre só o que o laço do
+   Android controla: reabrir o `/listen` durante o download e o que vem abaixo.
+   Fica aceito, nos dois tickets, um vão de até 1,5 s entre o fim do download e
+   o `/listen` seguinte (o laço está na espera de lote sem nada novo); se
+   incomodar, vira um `CLEAN-*` próprio ("acordar o laço quando um download
+   termina"), não entra aqui.
 2. **Pisca "Fora da rede" a cada lote.** O laço marca `online = false` logo
    depois de cada lote que a escuta devolve. Quem decide a presença é o
    `HEAD /listen`; o laço não deve mexer nela ao receber Itens.
@@ -50,24 +63,73 @@ numa passada de stage 2.
    `savedUri` do `receiveFile`): nos dois casos o recibo sai, nada é
    confirmado, e o Item é baixado de novo.
 
+##### Passada 2 (2026-09-27): o que sobrou da revisão
+
+A passada 1 está na branch `clean-013` e fez os três itens acima (ver "Review
+stage 3"). Faltam os dois ❌ de regressão que ela introduziu e as lacunas de
+teste, todos dentro do Primary files:
+
+4. **Cancelar no meio do download prende o Item.** O `finally` do download
+   (`MainActivity.kt:457-458`) tira o id de `inFlightFiles` por
+   `withContext(Dispatchers.Main.immediate)`, que lança `CancellationException`
+   antes do bloco quando o job já foi cancelado — e o `repeatOnLifecycle(RESUMED)`
+   cancela a escuta a cada ON_PAUSE. O `AppState` sobrevive, o id fica no
+   conjunto, e na volta o reanúncio conta como "nada novo" para sempre. A
+   remoção do id não pode ser cancelável: `inFlightFiles` vira um conjunto
+   concorrente (`ConcurrentHashMap.newKeySet<Long>()`, sem `withContext` para
+   `add`/`remove`) ou o `finally` usa `NonCancellable`; o que der o diff menor.
+   `acceptQr` e `unpair` limpam `inFlightFiles` junto de `receivedFiles`.
+5. **Download que falha rápido vira laço quente.** O filho engole o erro e
+   solta o id na hora; se a falha é local ou HTTP 5xx e mais rápida que uma
+   volta de `/listen`, a escuta seguinte devolve o mesmo Pendente, o id já não
+   está em voo, `startedDownload = true` e o laço reabre sem espera, em loop
+   apertado. Um download que falha mantém o id em voo por 1 s antes de
+   soltá-lo (`delay(1_000)` no `catch` do filho, antes do `finally`): o
+   reanúncio seguinte conta como "nada novo" e o laço faz a espera de 1,5 s.
+   Cancelamento durante esse `delay` continua caindo no `finally` do item 4.
+6. **Menores, sem critério e sem teste** (uma linha cada; entram se couberem,
+   e o stage 3 não reabre por eles): `retryReceivedReceipts` pula ids que
+   estão em `inFlightFiles`; um `removeReceipt` que lança dentro do
+   `catch (FileGoneException)` da repetição não pula os outros recibos (cai no
+   `catch (Exception)` do mesmo laço); mensagem de asserção trocada em
+   `ListenLoopTest.kt:227` (o `acks == 1` é o ACK do download novo — a mensagem
+   deve dizer isso, não "must never be acknowledged"). O `dropStaleReceipt` sem
+   o guarda de troca de Par fica como está: `unpair` limpa `receivedFiles` e as
+   preferências, então não há o que ele corromper.
+
 #### Acceptance criteria
 
-1. Durante o download de um arquivo recebido, a escuta continua aberta: o
-   `HEAD /listen` do PC responde que há escuta, e um texto mandado pelo PC no
-   meio do download aparece no chat antes de o download terminar.
-2. Receber um lote de Itens não muda a presença mostrada.
+1. Durante o download de um arquivo recebido, o laço não espera o download
+   acabar: reabre o `GET /listen` logo depois de despachar o lote, e um texto
+   mandado pelo PC no meio do download aparece no chat antes de o download
+   terminar. (Contra o PC real o texto chega em até uma volta do laço, ≤ 1,5 s,
+   porque o PC responde o `/listen` na hora enquanto o arquivo é Pendente.) O
+   que o `HEAD /listen` do PC responde durante o download é o CLEAN-015, não
+   este critério.
+2. Receber um lote de Itens não muda a presença mostrada: o laço nunca escreve
+   `online = true`, e só escreve `false` em erro de rede, como antes.
 3. Com um recibo cuja confirmação falha, textos novos do PC continuam chegando;
-   o recibo é tentado de novo depois.
-4. Um recibo cujo arquivo não existe mais é descartado, e o Item é baixado de
-   novo quando o PC o devolve na escuta.
+   o recibo é tentado de novo antes de cada `/listen` seguinte (a segunda
+   tentativa é observável no provider falso), e outro recibo do mesmo lote de
+   repetição é confirmado e apagado mesmo com o primeiro falhando.
+4. Um recibo cujo arquivo não existe mais é descartado, sem ACK, e o Item é
+   baixado de novo — nos dois caminhos: na repetição antes do `/listen`, e no
+   ramo `savedUri` do `receiveFile` (Item anunciado de novo com recibo
+   `content:` gravado).
 5. Um arquivo anunciado de novo enquanto seu download corre não inicia um
-   segundo download, e um lote só com Itens em voo não reabre a escuta sem a
-   espera de um lote vazio.
+   segundo download, e um lote só com Itens em voo não reabre a escuta antes da
+   espera de lote vazio: nenhum `/listen` novo em até 1 s depois desse lote.
 6. `ReceivedFileRestartTest.realListenLoopCleansReceiptAfterAckWithoutAnotherAnnouncement`
    continua provando o que provava — o recibo que sobrou de um `remove` falho
    é limpo pela repetição antes do primeiro `/listen` do laço reaberto, sem
    novo anúncio e sem segundo download (`gets == 1`, `copies.size == 1`) —
    com o laço agora abrindo mais de um `/listen` por download.
+7. Cancelar a escuta no meio de um download e relançá-la no mesmo `AppState`
+   baixa o arquivo de novo quando o PC o devolve: o id sai de `inFlightFiles`
+   no cancelamento. `unpair` e `acceptQr` deixam `inFlightFiles` vazio.
+8. Um download que falha rápido não vira laço quente: com o PC devolvendo o
+   mesmo Pendente a cada `/listen` e o download falhando na hora, em 2 s
+   acontecem no máximo 3 `/listen` e no máximo 3 tentativas de download.
 
 #### Verification
 
@@ -75,91 +137,81 @@ numa passada de stage 2.
 
 ## Tests stage 2 writes (own commit, red)
 
-Os testes já existem: a tentativa 2 os commitou em `7c5ccbf` na branch
-`clean-013`, que o driver apagou. O commit ainda existe como objeto. Não faça
-cherry-pick (ele também traz um trecho de `SentImageTest.kt` que é do
-CLEAN-014); recupere só o arquivo deste ticket:
+**Continue na branch `clean-013`.** Ela já tem a passada 1: `5405b33`
+(vermelho, `ListenLoopTest.kt` com os quatro testes dos critérios 1–5),
+`1208d55` (fix em `MainActivity.kt` e `ReceivedFiles.kt`), `980148e` (só o
+sinal de espera do `ReceivedFileRestartTest`, critério 6), `75e13ae`
+(`to-review`) e `0fb880b` (revisão). Não refaça nada disso: o vermelho→verde
+dos critérios 1–6 está provado nesses commits, e o gate passou na tentativa 5.
+Se a ficha com esta resposta estiver só na base da sessão, traga-a para a
+branch antes de começar (`git checkout <base> -- .scratch/android/issues/12-CLEAN-013-escuta-e-presenca.md`,
+commit próprio). A seção "Retomada (tentativa 4)" das versões anteriores desta
+ficha já foi cumprida e saiu daqui.
 
-    git show 7c5ccbf:android/app/src/test/java/synchronice/android/ListenLoopTest.kt > android/app/src/test/java/synchronice/android/ListenLoopTest.kt
+Um commit só de teste (`test: ...`, com `Stage: implementing`), tudo em
+`ListenLoopTest.kt`, no estilo dos quatro testes que já existem (PC falso
+`HttpServer`, `Dispatchers.setMain(Dispatchers.Unconfined)`,
+`withTimeout(5_000)`, contadores `AtomicInteger`). Estender teste existente
+vale mais que escrever outro. Os dois primeiros são vermelhos hoje; os três
+seguintes cobrem lacunas de código que já está certo, então são verdes — entram
+no mesmo commit, e o corpo do commit nomeia, para cada um, a mutação de uma
+linha que o avermelha (rode a mutação localmente para conferir; não a commite).
 
-Robolectric contra um PC falso, no estilo de `ReceivedFileRestartTest`. Os
-quatro testes de `7c5ccbf` cobrem os critérios 1–4; dois ajustes antes de
-commitar, e um deles cobre o critério 5:
+- `aDownloadCancelledMidwayIsResumedByTheRelaunchedLoop` (critério 7).
+  `/listen` devolve `{"kind":"file","id":1,...}` enquanto `gets < 2`, depois
+  `""`. `/outbox/1/file` no primeiro `GET` manda metade do corpo e segura num
+  latch que o teste nunca solta; no segundo, o corpo inteiro. Lança
+  `state.listen(...)`, espera `gets == 1`, `listening.cancelAndJoin()`, lança
+  `state.listen(...)` de novo no mesmo `state`, espera `gets == 2` e a bolha
+  `DELIVERED`. **Vermelho hoje:** timeout — o `finally` não roda no
+  cancelamento, o id 1 fica em `inFlightFiles`, o reanúncio é ignorado.
+- `aDownloadThatFailsFastDoesNotTurnIntoAHotLoop` (critério 8). `/listen`
+  devolve sempre `{"kind":"file","id":5,...}`; `/outbox/5/file` responde 500
+  (se isso não lançar rápido de dentro de `receiveFile`, faça o `insert` do
+  provider falso lançar). Lança o laço, `delay(2_000)`, afirma
+  `listens.get() <= 3` e `gets.get() <= 3`. **Vermelho hoje:** dezenas de
+  `/listen` em 2 s.
+- Critério 5, segunda metade: estender
+  `listenReopensWhileALargeDownloadIsStillInProgress`. O terceiro `/listen`
+  devolve o arquivo 1 de novo (ainda em voo, o latch segue fechado) em vez de
+  `""`; depois de ver "meio", `delay(1_000)` e afirmar `listens.get() == 3`
+  (o quarto só vem depois dos 1,5 s). Só então soltar o latch e seguir com as
+  asserções que já existem. Verde hoje; mutação: tirar `!startedDownload &&`
+  de `MainActivity.kt:462` não basta — a mutação é trocar o `delay(1_500)`
+  dessa linha por nada (o lote em voo reabre na hora e `listens` passa de 3).
+- Critério 3, segunda metade: estender
+  `aReceiptThatKeepsFailingToPublishDoesNotBlockNewTextFromArriving`. Dois
+  recibos `content:` gravados, 98 e 99; o provider falso lança no `update` do
+  98 (contando as chamadas) e devolve 1 no do 99; `/outbox/99/ack` conta.
+  `/listen` devolve o texto na primeira chamada e `""` depois. Afirmar, depois
+  de `listens >= 2`: recibo 98 ainda gravado e `update` do 98 chamado ao
+  menos 2 vezes (tentado de novo), recibo 99 apagado e `acks99 == 1` (os
+  outros do lote seguem). Verde hoje; mutação: trocar o `catch (error:
+  Exception)` de `retryReceivedReceipts` (`:525`) por `throw error`.
+- Critério 4, ramo `savedUri`: novo
+  `aReAnnouncedItemWhoseSavedFileIsGoneIsDownloadedAgain`, sem laço, chamando
+  `state.receiveFile(item42, state.client()!!)` direto (como o
+  `ReceivedFileRestartTest` faz). Recibo `content://media/42` gravado antes;
+  o provider devolve 0 na primeira chamada de `update` e 1 depois;
+  `/outbox/42/file` com `"payload"` e `/outbox/42/ack` 204, ambos contando.
+  Primeira chamada: `assertFailsWith<FileGoneException>`, recibo apagado,
+  bolha `FAILED` com `uri == null`, `gets == 0`, `acks == 0`. Segunda chamada
+  (o reanúncio): `gets == 1`, `acks == 1`, bolha `DELIVERED`, recibo apagado.
+  Verde hoje; mutação: tirar o `try/catch (FileGoneException)` de
+  `MainActivity.kt:565-570` (a primeira chamada então deixa o recibo).
+- No mesmo commit, a mensagem da asserção de `ListenLoopTest.kt:227`.
 
-- `listenReopensWhileALargeDownloadIsStillInProgress` (critérios 1 e 5): o
-  handler de `/outbox/1/file` hoje solta a segunda metade do corpo quando o
-  segundo `/listen` chega, e a asserção de `PENDING` corre contra o fim do
-  download. Troque por um latch que o próprio teste solta depois de afirmar
-  que o arquivo ainda está `PENDING`. O segundo `/listen` devolve o arquivo 1
-  de novo (como o PC real faz) junto com o texto; depois de ver "meio",
-  `delay(200)` e `assertEquals(1, gets)` num contador de `/outbox/1/file`.
-- `receivingABatchOfItemsDoesNotChangeThePresence` (critério 2): como está.
-- `aReceiptThatKeepsFailingToPublishDoesNotBlockNewTextFromArriving`
-  (critério 3): como está.
-- `aReceiptPointingAtADeletedFileIsDroppedAndTheItemIsDownloadedAgain`
-  (critério 4): o `/listen` devolve o arquivo 99 só na primeira chamada
-  (contador de chamadas), não enquanto `acks == 0`; com o laço reabrindo a
-  escuta durante o download, a versão atual anuncia de novo e a asserção
-  `acks == 1` fica sujeita a corrida.
+Vermelho esperado (prova via `gate.ps1 -TestsOnly`, primeiro plano): os dois
+primeiros falham como descrito; os outros três passam; os quatro testes
+antigos do arquivo e o `ReceivedFileRestartTest` inteiro continuam verdes.
+Commite o vermelho antes de rodar qualquer gate; o gate nunca em segundo
+plano (AGENTS.md).
 
-Vermelho esperado (prova via `gate.ps1 -TestsOnly`): 1, 3 e 4 travam por
-timeout (a escuta nunca reabre / o texto nunca chega), 2 falha a asserção de
-presença. Commite o vermelho antes de rodar qualquer gate; o gate nunca em
-segundo plano (AGENTS.md).
-
-### Retomada (tentativa 4): o vermelho e o fix já existem
-
-A tentativa 3 fez tudo acima e commitou: `eadc104` (só `ListenLoopTest.kt`,
-vermelho, mais `Stage: implementing`) e `f4ec047` (o fix em `MainActivity.kt`
-e `ReceivedFiles.kt`, verde nos quatro testes de `ListenLoopTest`). O driver
-apagou a branch `clean-013`; os commits estão pinados como
-`refs/keep/clean-013-fix` (= `f4ec047`). Não reescreva nada disso — recupere
-sobre a ponta da sessão, mantendo a ficha desta versão (a de `f4ec047` tem
-a pergunta antiga em `## Comments` e conflita):
-
-    git checkout -b clean-013 sweatshop/2026-09-25-2127
-    git cherry-pick eadc104
-    git cherry-pick -n f4ec047
-    git checkout HEAD -- .scratch/android/issues/12-CLEAN-013-escuta-e-presenca.md
-    git commit -C f4ec047
-
-Confira `git diff --stat sweatshop/2026-09-25-2127..HEAD`: dois commits,
-`ListenLoopTest.kt` só no primeiro, `MainActivity.kt` e `ReceivedFiles.kt`
-só no segundo, a ficha com `Stage: implementing`.
-
-O que falta é um único teste fora deste ticket que ficou vermelho por um
-sinal de espera obsoleto, não por defeito do fix:
-`ReceivedFileRestartTest.realListenLoopCleansReceiptAfterAckWithoutAnotherAnnouncement`.
-O ramo `listenRecovery` espera `while (listens.get() < 2)` antes de afirmar
-que o recibo sumiu. No laço antigo isso significava "o laço reaberto já fez
-seu primeiro `/listen`, logo `retryReceivedReceipts` já rodou". Com o laço
-novo, a primeira fase do teste sozinha já deixa `listens == 2` (critério 1:
-o laço reabre o `/listen` enquanto o 42 ainda baixa; o reanúncio é ignorado
-pelo guarda de ids em voo), então a espera passa antes de `reopened.listen`
-começar e a asserção corre contra um recibo ainda não repetido.
-
-Mudança permitida em `ReceivedFileRestartTest.kt`, num commit próprio
-(`test: ...`), sem tocar em código: tirar a foto do contador antes de
-lançar o laço reaberto e esperar ele crescer —
-
-    val listensBefore = listens.get()
-    val listening = launch { reopened.listen(reopened.pairing!!, reopened.client()!!) }
-    try {
-        withTimeout(5_000) { while (listens.get() == listensBefore) delay(10) }
-
-— e mais nada: as cinco asserções que seguem ficam como estão (elas são o
-critério 6), a primeira fase do teste e os outros treze testes do arquivo
-não mudam. O sinal preserva a prova original: `retryReceivedReceipts` corre
-antes do `client.listen()` em cada volta, então o primeiro `/listen` novo
-implica recibo já repetido, e o `/listen` falso devolve vazio com
-`acks >= 1`, logo nenhum anúncio pode ter feito a limpeza. Sem corrida na
-foto: quando a primeira fase é cancelada, o laço está parado no
-`delay(1_500)` do lote sem nada novo, não no meio de um `/listen`.
-
-Depois: `gate.ps1` completo em primeiro plano, verde, `Stage: to-review`.
-Se o gate completo (fmt/lint) reclamar de algo em `MainActivity.kt` ou
-`ReceivedFiles.kt`, é fix pequeno dentro do Primary files; qualquer outra
-falha volta como `blocked` com o nome do teste.
+Depois, o fix em commit(s) só de código em `MainActivity.kt`: itens 4 e 5 do
+"What to build" (e os menores do item 6 que couberem). Em seguida `gate.ps1`
+completo em primeiro plano, verde, `Stage: to-review`. Se o gate completo
+(fmt/lint) reclamar de algo em `MainActivity.kt`, é fix pequeno dentro do
+Primary files; qualquer outra falha volta como `blocked` com o nome do teste.
 
 ## Review stage 3 (2026-09-27)
 
@@ -271,3 +323,6 @@ a tentativa 5 (não rodado de novo: não há merge).
   `inFlightFiles` no cancelamento; laço quente em download que falha rápido) e
   as lacunas de teste listadas cabem no Primary files atual e devem entrar em
   "Tests stage 2 writes" na mesma passada.
+
+- 2026-09-27 Proxy decided: (a), mas como ticket próprio — **CLEAN-015** (`14-CLEAN-015-download-conta-como-presenca-no-pc.md`): um `GET /outbox/{id}/file` em andamento entra na `Presence` do PC, com o guarda vivo pelo corpo da resposta (o handler devolve antes de o hyper escrever os bytes, então entrar só no handler não cobriria o download). Este ticket fica só com o Android: critério 1 reescrito para a metade que o laço controla (reabrir o `/listen` e entregar o texto durante o download), critérios 7 e 8 para as duas regressões, critérios 3, 4 e 5 ampliados para as lacunas, tudo em `ListenLoopTest.kt`; sem a opção (b). Por quê: conferi o código em `0fb880b` e a revisão está certa — `get_listen` devolve o manifesto inteiro na hora enquanto houver Pendente (`server.rs:618`, `outbox.rs:237`) e a `Presence` conta só guardas de `get_listen`, então nenhuma mudança no Android mantém escuta aberta durante um download; (a) é a correção na raiz (uma conexão viva do celular com a fila de saída é presença, seja `/listen` ou o próprio arquivo), conserta com uma mudança os dois sintomas (janela do PC piscando e chat do celular "Fora da rede", porque o sondador do Android só lê o `HEAD`), enquanto (b) criaria uma segunda fonte de presença no celular, contra o item 2 deste mesmo ticket, e deixaria o PC piscando; e `server.rs` é a costura 1 da spec, outra costura que o `ticket-flow` manda separar — este ticket já custou sete etapas, então a passada de stage 2 aqui é só o que sobrou da revisão (duas linhas de fix e cinco testes, três deles verdes por mutação), e o CLEAN-015 é umas dez linhas de Rust com um teste de integração, independente deste. O vão de até 1,5 s entre o fim de um download e o `/listen` seguinte fica aceito nos dois tickets (era ausente estável o download inteiro antes); se incomodar, é um `CLEAN-*` novo, não uma reabertura.
+- Débito humano: celular real contra PC real, depois de CLEAN-013 e CLEAN-015 mergeados — mandar um arquivo grande do PC, conferir que a janela do PC fica "presente" e o chat do celular "Na rede" durante o download inteiro (um piscar de ≤ 1,5 s no fim é o aceito), e que um texto mandado do PC no meio aparece no celular antes de a barra de progresso terminar; pausar o app no meio do download (Home) e voltar, conferir que o arquivo termina de chegar. Os testes provam cada metade contra um PC falso ou um celular falso, nunca os dois reais juntos.
