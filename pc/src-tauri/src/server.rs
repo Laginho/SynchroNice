@@ -39,7 +39,9 @@
 //!
 //!   GET  /outbox/{id}/file       bytes de um Item de arquivo ainda
 //!                                 Pendente; 404 se o id não existir ou já
-//!                                 ter sido confirmado.
+//!                                 ter sido confirmado. Enquanto o corpo está
+//!                                 saindo, a conexão também é presença
+//!                                 (CLEAN-015).
 //!   Authorization: Bearer <token>
 //!
 //!   POST /outbox/{id}/ack        confirma o recebimento do Item `id` — só
@@ -158,10 +160,11 @@ async fn pause_once(slot: &Mutex<Option<TestPause>>) {
     }
 }
 
-/// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
-/// lado está na rede". Um contador, não um booleano: uma segunda conexão
-/// enquanto a primeira ainda não fechou não pode fazer a desconexão dela
-/// apagar a presença por engano.
+/// Se há uma conexão viva agora com a fila de saída — `/listen` ou um
+/// download de `/outbox/{id}/file` em andamento — é o que a spec chama de "o
+/// outro lado está na rede" (CLEAN-015). Um contador, não um booleano: uma
+/// segunda conexão enquanto a primeira ainda não fechou não pode fazer a
+/// desconexão dela apagar a presença por engano.
 #[derive(Clone, Default)]
 pub struct Presence {
     inner: Arc<Mutex<PresenceInner>>,
@@ -607,7 +610,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 /// Bloqueia até a fila de saída ter ao menos um Pendente, devolve todos os
 /// que houver então (um por linha) e fecha — long-poll clássico: o celular
 /// reabre para continuar escutando. A conexão viva, do início ao fim desta
-/// função, é o sinal de presença.
+/// função, é um dos dois sinais de presença (o outro é um download em
+/// andamento, `get_outbox_file`, CLEAN-015).
 async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     let mut token_changes = state.token.0.subscribe();
     if !authorized(&headers, &state.token) {
@@ -650,7 +654,13 @@ async fn head_listen(State(state): State<AppState>, headers: HeaderMap) -> Statu
     }
 }
 
-/// Bytes de um Item de arquivo ainda Pendente na fila de saída.
+/// Bytes de um Item de arquivo ainda Pendente na fila de saída. O guarda de
+/// presença vai dentro do stream do corpo, não no handler: o hyper escreve o
+/// corpo depois de o handler retornar, então um guarda preso ao handler
+/// soltaria a presença antes de o primeiro byte sair (CLEAN-015). Em pedaços
+/// de 64 KiB para o guarda sobreviver até o stream acabar ou o cliente
+/// desconectar — um pedaço só (o arquivo inteiro de uma vez) faria o stream
+/// terminar, e o guarda cair, na primeira leitura.
 async fn get_outbox_file(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -660,7 +670,26 @@ async fn get_outbox_file(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     match state.outbox.file_bytes(id) {
-        Ok(bytes) => (StatusCode::OK, bytes).into_response(),
+        Ok(bytes) => {
+            let guard = state.presence.enter();
+            const CHUNK: usize = 64 * 1024;
+            let tamanho = bytes.len();
+            let pedacos: Vec<Result<Vec<u8>, io::Error>> =
+                bytes.chunks(CHUNK).map(|c| Ok(c.to_vec())).collect();
+            let stream = futures_util::stream::iter(pedacos).map(move |pedaco| {
+                let _presenca = &guard;
+                pedaco
+            });
+            // Content-Length explícito: sem ele o hyper não sabe o tamanho de
+            // um corpo em stream e usa Transfer-Encoding: chunked, que muda o
+            // formato dos bytes na rede.
+            axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header(axum::http::header::CONTENT_LENGTH, tamanho)
+                .body(axum::body::Body::from_stream(stream))
+                .expect("resposta com Content-Length e corpo em stream é válida")
+                .into_response()
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
             eprintln!("falha ao ler o arquivo de saída do Item {id}: {e}");
