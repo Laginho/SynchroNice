@@ -1,5 +1,5 @@
 # CLEAN-017: A entrega espera a prévia dos Pendentes de imagem
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -129,3 +129,58 @@ files volta como `blocked` com o nome do teste.
   CLEAN-014 (achado "possível regressão"). Independente do CLEAN-014 no
   código, que já está `done`; o ANR com muitas fotos num celular real
   continua sendo o `Débito humano:` registrado lá.
+
+#### Resolution (2026-09-27)
+
+Verdict: Approve
+
+Revisado `cb8f7e7...1044f0e` (`e97d652` teste, `bf57b22` fix), mais o
+conserto da revisão `fb6ec32`; mergeado na sessão em `f30d6aa`. Sem rebase:
+a branch já partia do HEAD da sessão.
+
+- ✅ **Critério 1.** `deliveryWaitsForThePreviewOfAPendingImage` esquenta o
+  cache do resolver, lança `retryPending` no IO e, 500 ms depois, vê
+  `uploads == 0` com a entrega ainda ativa. O `await` fica antes do
+  `client()` e do `outboundMutex` (`MainActivity.kt:418`), então
+  `sendText`/`queueFile` não esperam a decodificação.
+- ✅ **Critério 2.** Drenada a fila na thread do teste: 1 upload,
+  `DELIVERED`, `hasPending()` falso, prévia vermelha em (0,0), só
+  `pending-items.txt` sobra.
+- ✅ **Critério 3.** `anUndecodablePendingImageDoesNotHoldDelivery`: o
+  `complete` está no `finally` de `schedulePreviewDecode` (`:204-206`), a
+  entrega termina com `preview == null` e 1 upload. A mutação que o avermelha
+  está nomeada no corpo de `e97d652`.
+- ✅ **Critério 4.** Os dois testes antigos de `SentImageTest` não mudaram
+  e passam (4/4 no arquivo).
+- Separação teste-primeiro: `e97d652` toca só `SentImageTest.kt`; `bf57b22`
+  e `fb6ec32` só `MainActivity.kt` (e a ficha), dentro de `init`,
+  `schedulePreviewDecode` e `retryPending`. Nada fora do Primary files.
+- **Consertos da revisão (`fb6ec32`)**, pequenos pela regra (Primary files,
+  sem teste novo): o parâmetro `done` de `schedulePreviewDecode` deixou de
+  ser anulável com padrão `null` (o único chamador sempre passa um); o teto
+  "espera todas as prévias" ganhou o `ponytail:` no código, como o ticket
+  pedia no texto.
+- Outro caminho que drena a fila sem esperar as prévias: `AppState.sendText`
+  (`:375`) → `ProtocolClient.send` → `retryPending()`. Não morde hoje: em
+  produção ninguém chama `AppState.sendText` (só
+  `PendingDeliveryTest.kt:103,105`); a UI e o `ShareActivity` usam
+  `queueText`/`queueFile` + `DeliveryWorker`, que passa pelo `retryPending`
+  consertado. Fora dos critérios; sem ticket, porque não há defeito
+  alcançável. Se `sendText` voltar para a UI, precisa do mesmo `await`.
+- Standards, julgamento, sem conserto: `previewsPending` guarda sinais de
+  conclusão, não prévias (nome prescrito pelo ticket); os dois testes novos
+  repetem a preparação do vizinho (aceito pelo ticket).
+- Sem linhas `Proxy decided` nesta ficha; ela mesma foi escrita pelo proxy
+  (ver o comentário acima).
+
+Red-green (`powershell -ExecutionPolicy Bypass -File ./gate.ps1 -TestsOnly`,
+primeiro plano, nesta revisão):
+
+- `e97d652`: `SentImageTest > deliveryWaitsForThePreviewOfAPendingImage FAILED`,
+  `AssertionError: delivery must wait for the preview expected:<0> but was:<1>`;
+  `40 tests completed, 1 failed`.
+- `fb6ec32`: gate completo `gate: passou`. pc: 1 + 0 + 6 + 40 testes Rust,
+  suíte node verde; android: 40/40 (`ReceivedFileRestartTest` 14,
+  `ListenLoopTest` 8, `ShareActivityTest` 5, `SentImageTest` 4,
+  `UnpairTest` 3, `DeliveryWorkerTest` 2, `PendingDeliveryTest` 2,
+  `CopiaveisTest` 1, `PresenceLifecycleTest` 1), lint e clippy limpos.
