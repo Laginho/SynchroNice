@@ -54,11 +54,20 @@ class ShareActivity : ComponentActivity() {
         else -> emptyList()
     }.ifEmpty {
         incoming.clipData?.let { clips -> (0 until clips.itemCount).mapNotNull { clips.getItemAt(it).uri } } ?: emptyList()
-    }.filter(::isFromAnotherApp)
+    }.filter(::isForeignContentUri)
 
-    /** Recusa file:// e content:// do próprio app: nem as preferências, nem a fila, nem o FileProvider da câmera. */
-    private fun isFromAnotherApp(uri: Uri): Boolean =
-        uri.scheme == "content" && uri.authority != packageName && uri.authority != "$packageName.camera"
+    /**
+     * Recusa file:// e content:// do próprio app: nem as preferências, nem a fila, nem o
+     * FileProvider da câmera. O ContentResolver do AOSP endereça um provider por
+     * "<userId>@authority" e tira o prefixo antes de resolver, então a comparação também
+     * precisa tirar -- senão um Intent malicioso disfarça a authority própria com um prefixo
+     * e o filtro deixa passar.
+     */
+    private fun isForeignContentUri(uri: Uri): Boolean {
+        if (uri.scheme != "content") return false
+        val authority = uri.authority?.substringAfterLast('@') ?: return false
+        return packageManager.resolveContentProvider(authority, 0)?.packageName != packageName
+    }
 
     private fun copyToStaging(uri: Uri): File {
         val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor: Cursor ->

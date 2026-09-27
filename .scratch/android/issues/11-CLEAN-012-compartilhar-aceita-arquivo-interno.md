@@ -1,5 +1,5 @@
 # CLEAN-012: Compartilhar aceita arquivos internos do próprio app
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -76,6 +76,16 @@ Teste Robolectric do Compartilhar, com Par gravado e a fila observada:
 - 2026-09-27 Stage 3: reescrita a frase acima, que dizia "Débito humano:
   nenhuma…". O foreman junta toda linha com esse marcador em
   `grep -rh 'Débito humano:'`, e ela entraria na lista como débito sem ser.
+- 2026-09-27 Stage 2 (retomada após reabertura): trocado o filtro por uma
+  consulta ao PackageManager pela authority sem o prefixo `<userId>@`
+  (`packageManager.resolveContentProvider`), fechando o desvio
+  `content://0@<pacote>.camera/...`; a lista de authorities escrita à mão saiu
+  junto. Vermelho: 2 testes falharam antes da correção, por `AssertionError`
+  (`contentUriWithUserIdPrefixForOwnFileProviderIsFilteredOutBeforeReading` e
+  `sendMultipleOnlyQueuesTheAcceptedUri`) — Android 29 testes, 2 falhas. Verde:
+  gate completo (fmt/lint/typecheck/testes) — Android 29 testes, PC 44 Rust +
+  32 node, 0 falhas. Nada fora dos Primary files. Nenhuma verificação manual
+  ficou pendente disto.
 
 #### Review (2026-09-27, stage 3) — reaberto
 
