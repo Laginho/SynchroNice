@@ -33,6 +33,17 @@ class PairingInfoTest {
     }
 
     @Test
+    fun `escape unicode sem quatro digitos hex e recusado mesmo em campo extra`() {
+        for (escape in listOf("""\u-001""", """\u+041""")) {
+            val malformed = """{"instance_name":"synchronice-12345678","port":47820,"token":"0123456789abcdef0123456789abcdef","extra":"$escape"}"""
+
+            assertFailsWith<IllegalArgumentException>(escape) {
+                parsePairingQr(malformed)
+            }
+        }
+    }
+
+    @Test
     fun `numero JSON invalido e recusado mesmo em campo extra`() {
         val malformed = """{"instance_name":"synchronice-12345678","port":47820,"token":"0123456789abcdef0123456789abcdef","extra":01}"""
 
