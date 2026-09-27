@@ -33,13 +33,16 @@
 //!                                 para continuar escutando. A conexão viva
 //!                                 é o sinal de presença.
 //!   Authorization: Bearer <token>
-//!   HEAD /listen                 200 se há GET autenticado ativo; 204 se
-//!                                 não há; 401 com token inválido.
+//!   HEAD /listen                 200 se há presença (um GET /listen ou um
+//!                                 download autenticado ativo); 204 se não
+//!                                 há; 401 com token inválido.
 //!   Authorization: Bearer <token>
 //!
 //!   GET  /outbox/{id}/file       bytes de um Item de arquivo ainda
 //!                                 Pendente; 404 se o id não existir ou já
-//!                                 ter sido confirmado.
+//!                                 ter sido confirmado. Enquanto o corpo está
+//!                                 saindo, a conexão também é presença
+//!                                 (CLEAN-015).
 //!   Authorization: Bearer <token>
 //!
 //!   POST /outbox/{id}/ack        confirma o recebimento do Item `id` — só
@@ -158,10 +161,11 @@ async fn pause_once(slot: &Mutex<Option<TestPause>>) {
     }
 }
 
-/// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
-/// lado está na rede". Um contador, não um booleano: uma segunda conexão
-/// enquanto a primeira ainda não fechou não pode fazer a desconexão dela
-/// apagar a presença por engano.
+/// Se há uma conexão viva agora com a fila de saída — `/listen` ou um
+/// download de `/outbox/{id}/file` em andamento — é o que a spec chama de "o
+/// outro lado está na rede" (CLEAN-015). Um contador, não um booleano: uma
+/// segunda conexão enquanto a primeira ainda não fechou não pode fazer a
+/// desconexão dela apagar a presença por engano.
 #[derive(Clone, Default)]
 pub struct Presence {
     inner: Arc<Mutex<PresenceInner>>,
@@ -179,7 +183,8 @@ impl Presence {
     }
 
     /// Chamado a cada vez que a presença muda (de ausente para presente ou
-    /// vice-versa), na thread que fechou ou abriu a conexão `/listen`.
+    /// vice-versa), na thread que fechou ou abriu a conexão (`/listen` ou
+    /// download).
     pub fn on_change(&self, listener: impl Fn(bool) + Send + Sync + 'static) {
         self.inner
             .lock()
@@ -188,8 +193,8 @@ impl Presence {
             .push(Box::new(listener));
     }
 
-    /// Marca uma conexão `/listen` como viva; solta a presença sozinha
-    /// quando o guarda sair de escopo (a conexão fechar).
+    /// Marca uma conexão (`/listen` ou download) como viva; solta a presença
+    /// sozinha quando o guarda sair de escopo (a conexão fechar).
     fn enter(&self) -> PresenceGuard {
         let mut inner = self.inner.lock().expect("presença sem panic");
         inner.count += 1;
@@ -607,7 +612,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 /// Bloqueia até a fila de saída ter ao menos um Pendente, devolve todos os
 /// que houver então (um por linha) e fecha — long-poll clássico: o celular
 /// reabre para continuar escutando. A conexão viva, do início ao fim desta
-/// função, é o sinal de presença.
+/// função, é um dos dois sinais de presença (o outro é um download em
+/// andamento, `get_outbox_file`, CLEAN-015).
 async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     let mut token_changes = state.token.0.subscribe();
     if !authorized(&headers, &state.token) {
@@ -650,7 +656,13 @@ async fn head_listen(State(state): State<AppState>, headers: HeaderMap) -> Statu
     }
 }
 
-/// Bytes de um Item de arquivo ainda Pendente na fila de saída.
+/// Bytes de um Item de arquivo ainda Pendente na fila de saída. O guarda de
+/// presença vai dentro do stream do corpo, não no handler: o hyper escreve o
+/// corpo depois de o handler retornar, então um guarda preso ao handler
+/// soltaria a presença antes de o primeiro byte sair (CLEAN-015). Em pedaços
+/// de 64 KiB para o guarda sobreviver até o stream acabar ou o cliente
+/// desconectar — um pedaço só (o arquivo inteiro de uma vez) faria o stream
+/// terminar, e o guarda cair, na primeira leitura.
 async fn get_outbox_file(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -660,7 +672,29 @@ async fn get_outbox_file(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     match state.outbox.file_bytes(id) {
-        Ok(bytes) => (StatusCode::OK, bytes).into_response(),
+        Ok(bytes) => {
+            let guard = state.presence.enter();
+            const CHUNK: usize = 64 * 1024;
+            let tamanho = bytes.len();
+            // `Bytes::slice` fatia sem copiar: o arquivo fica uma vez só na
+            // memória, como antes do stream.
+            let bytes = axum::body::Bytes::from(bytes);
+            let stream =
+                futures_util::stream::iter((0..tamanho).step_by(CHUNK)).map(move |inicio| {
+                    let _presenca = &guard;
+                    Ok::<_, io::Error>(bytes.slice(inicio..(inicio + CHUNK).min(tamanho)))
+                });
+            // Content-Length explícito: sem ele o hyper não sabe o tamanho de
+            // um corpo em stream e usa Transfer-Encoding: chunked, que muda o
+            // formato dos bytes na rede. Content-Type é o que a tupla
+            // `(StatusCode, Vec<u8>)` mandava antes.
+            axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header(axum::http::header::CONTENT_LENGTH, tamanho)
+                .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+                .body(axum::body::Body::from_stream(stream))
+                .expect("resposta com Content-Length e corpo em stream é válida")
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
             eprintln!("falha ao ler o arquivo de saída do Item {id}: {e}");

@@ -187,6 +187,119 @@ fn head_listen_confirma_presenca_sem_consumir_o_long_poll() {
 }
 
 #[test]
+fn download_em_andamento_conta_como_presenca() {
+    let raiz = tempfile::tempdir().unwrap();
+    let par = Par::load_or_create(raiz.path()).unwrap();
+    let token = par.token();
+    let outbox = Outbox::new(raiz.path().join("outbox")).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        par,
+        Items::new(),
+        outbox.clone(),
+        None,
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+
+    // Grande o bastante para não caber nos buffers de socket — sem isso o GET
+    // termina antes de o teste conseguir segurar a conexão em andamento.
+    let bytes = vec![b'X'; 8 * 1024 * 1024];
+    let item = outbox
+        .enqueue_file("grande.bin".to_string(), &bytes)
+        .expect("enfileira arquivo");
+
+    let (online_tx, online_rx) = std::sync::mpsc::channel();
+    running.presence.on_change(move |online| {
+        let _ = online_tx.send(online);
+    });
+
+    let (status, stream) =
+        conecta_e_le_status_sem_ler_corpo(&base, &format!("/outbox/{}/file", item.id), &token);
+    assert_eq!(status, 200);
+
+    assert!(
+        online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "critério 1: download em andamento, sem /listen aberto, entra na presença"
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        200,
+        "critério 1: HEAD /listen confirma a presença do download"
+    );
+
+    // Solta o socket sem ler o corpo — desconecta no meio.
+    drop(stream);
+    assert!(
+        !online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "critério 2 (desconecta no meio): presença cai quando o cliente some"
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        204,
+        "critério 2: HEAD /listen volta a 204"
+    );
+
+    // Mesmo GET, lido até o fim desta vez: presença cai de novo, e os bytes
+    // continuam idênticos ao arquivo enfileirado (critério 4).
+    let (status, mut stream) =
+        conecta_e_le_status_sem_ler_corpo(&base, &format!("/outbox/{}/file", item.id), &token);
+    assert_eq!(status, 200);
+    assert!(online_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+
+    let mut corpo = Vec::new();
+    stream.read_to_end(&mut corpo).expect("lê corpo até o fim");
+    assert_eq!(
+        corpo, bytes,
+        "critério 4: bytes idênticos ao arquivo enfileirado"
+    );
+    assert!(
+        !online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "critério 2 (termina): presença cai quando o GET termina"
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        204
+    );
+
+    // Critério 3: recusado (401) ou id inexistente (404) não mexe na presença.
+    let (status, _) = requisicao_crua(
+        &base,
+        "GET",
+        &format!("/outbox/{}/file", item.id),
+        Some("token-errado"),
+    );
+    assert_eq!(status, 401);
+    let (status, _) = requisicao_crua(&base, "GET", "/outbox/99999/file", Some(&token));
+    assert_eq!(status, 404);
+    assert!(
+        online_rx.try_recv().is_err(),
+        "critério 3: 401 e 404 não disparam on_change"
+    );
+}
+
+#[test]
 fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
     let raiz = tempfile::tempdir().unwrap();
     let pasta = raiz.path().join("pasta");
@@ -453,6 +566,36 @@ fn requisicao_crua_com_timeout(
         .and_then(|c| c.parse().ok())
         .expect("linha de status");
     (status, bruto[fim_cabecalho + 4..].to_vec())
+}
+
+/// Como `requisicao_crua`, mas para quando o teste precisa segurar a conexão
+/// em andamento: lê só até o fim do cabeçalho, byte a byte, e devolve o
+/// `TcpStream` aberto sem tocar no corpo — quem chama decide se lê o resto,
+/// solta o socket (desconecta no meio) ou nem um nem outro.
+fn conecta_e_le_status_sem_ler_corpo(base: &str, path: &str, token: &str) -> (u16, TcpStream) {
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    let pedido = format!(
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(pedido.as_bytes()).expect("escreve pedido");
+
+    let mut cabecalho = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        stream.read_exact(&mut byte).expect("lê cabeçalho");
+        cabecalho.push(byte[0]);
+        if cabecalho.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let status = String::from_utf8_lossy(&cabecalho)
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse().ok())
+        .expect("linha de status");
+    (status, stream)
 }
 
 fn textos(items: &Items) -> Vec<String> {
