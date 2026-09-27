@@ -1,5 +1,5 @@
 # SYN-015: Android — visualizador de imagem
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-014
 Review: agent
@@ -61,6 +61,11 @@ da imagem enviada no critério 5 também tem teste JVM abaixo.
   nem alterar produção para acomodar o teste.
 
 ## Comments
+
+- 2026-09-26 Proxy decidiu: o conflito do rebase é documental, neste ticket fora de `Primary files`; não há achado acionável de código nas revisões Standards e Spec. O contrato do stage 2 e seus commits permanecem válidos. Incorporar aqui a prova e o débito humano da branch `syn-015`, preservar também os comentários da sessão e integrar as branches resolvendo somente este Markdown. Retomar o Stage 3 em `to-review`; ele ainda deve verificar o gate e emitir seu próprio veredito, sem considerar esta decisão uma aprovação do código.
+
+- 2026-09-26 Stage 2 retomado: `ec0f420` corrige somente o preparo do `SentImageTest`, inicializando `WorkManagerTestInitHelper` antes de `queueFile`, sem acionar o trabalho agendado e sem alterar produção. Implementação `e475559` preservada. Prova vermelha: retirar temporariamente os dois arquivos de produção de `e475559` fez `gate.ps1 -TestsOnly` falhar em `compileDebugUnitTestKotlin`, com `Unresolved reference 'preview'` no teste; os arquivos foram restaurados ao HEAD em `finally`. Prova verde: `gate.ps1 -TestsOnly` passou com 24/24 testes do app, 56/56 do protocolo, 44/44 Rust e 32/32 TypeScript. Gate completo passou (fmt, clippy, tsc, testes e Android lint); nenhuma mudança no gate. A primeira execução no sandbox falhou antes dos testes Android por resolver o diretório de usuário como `C:\\`; a execução no ambiente normal passou.
+- Débito humano: verificar os critérios 1–4 no aparelho (abrir imagem recebida em tela cheia, pinça, arrastar, Voltar preservando o chat e abrir outro arquivo no app padrão), além da abertura visual da imagem enviada do critério 5. Computer Use inicializou e listou a janela do AVD `SynchroNice_API37`, iniciado para esta tentativa; a captura foi recusada com `Computer Use was not approved to use qemu-system-x86_64`. O teste JVM comprova retenção, limite de resolução e descarte da prévia, mas não comprova gestos ou navegação.
 
 - 2026-09-26 Proxy decidiu: a falha 23/24 é só setup do `SentImageTest`: `queueFile` chama `scheduleDelivery`, e o Robolectric lançou `WorkManager is not initialized properly` antes das asserções. Autorizar a inicialização oficial do WorkManager de teste acima. Preservar os commits `ba8d7f0` (teste), `e475559` (implementação) e `318d877` (bloqueio), retomando na branch `syn-015` recuperada desse último commit. Após o ajuste de teste, repetir `gate.ps1 -TestsOnly`; confirmar que a versão sem `e475559` continua vermelha pelo contrato de prévia ausente e que a versão atual passa, então gate completo antes de `to-review`. Nenhum código de produção ou gate foi alterado nesta decisão. Referência: https://developer.android.com/reference/androidx/work/testing/WorkManagerTestInitHelper.
 
