@@ -164,6 +164,31 @@ class ProtocolClientTest {
     }
 
     @Test
+    fun `texto enviado direto e aceito sem resposta usa o mesmo id no retry`() {
+        val executor = Executors.newSingleThreadExecutor()
+        val lostResponse = serverSocket()
+        val port = lostResponse.localPort
+        try {
+            val firstRequest = executor.submit<String?> { textRequest(lostResponse, respond = false) }
+            val sender = client(port)
+            sender.sendText("texto")
+            val firstId = firstRequest.get(5, TimeUnit.SECONDS)
+            assertTrue(sender.hasPending())
+
+            val confirmation = serverSocket(port)
+            val secondRequest = executor.submit<String?> { textRequest(confirmation, respond = true) }
+            sender.retryPending()
+
+            assertTrue(firstId?.isNotBlank() == true)
+            assertEquals(firstId, secondRequest.get(5, TimeUnit.SECONDS))
+            assertFalse(sender.hasPending())
+        } finally {
+            lostResponse.close()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
     fun `arquivo grande aceito sem resposta mantem id e retry confirma sem reenviar corpo`() {
         val dir = kotlin.io.path.createTempDirectory("pending-file-id").toFile()
         val queue = File(dir, "pending.txt")
