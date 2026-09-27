@@ -1,5 +1,5 @@
 # CLEAN-012: Compartilhar aceita arquivos internos do próprio app
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
