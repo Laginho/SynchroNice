@@ -456,9 +456,9 @@ internal class AppState(
                             throw error
                         } catch (_: Exception) {
                             // receiveFile already recorded the failure in connectionError and delivery.
-                            // Keep the id in flight a moment so a fast, repeating failure doesn't
-                            // spin the listen loop hot on the same re-announced file.
-                            delay(1_000)
+                            // Keep the id in flight past the loop's 1.5 s empty-batch wait, so a fast,
+                            // repeating failure doesn't spin the listen loop hot on the same re-announced file.
+                            delay(2_000)
                         } finally {
                             // NonCancellable: a cancelled listen loop (ON_PAUSE) must still free the
                             // id, or the relaunched loop ignores the re-announced file forever.
