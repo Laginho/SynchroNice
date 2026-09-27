@@ -1,5 +1,5 @@
 # CLEAN-013: Escuta e presença do Android
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -325,4 +325,17 @@ a tentativa 5 (não rodado de novo: não há merge).
   "Tests stage 2 writes" na mesma passada.
 
 - 2026-09-27 Proxy decided: (a), mas como ticket próprio — **CLEAN-015** (`14-CLEAN-015-download-conta-como-presenca-no-pc.md`): um `GET /outbox/{id}/file` em andamento entra na `Presence` do PC, com o guarda vivo pelo corpo da resposta (o handler devolve antes de o hyper escrever os bytes, então entrar só no handler não cobriria o download). Este ticket fica só com o Android: critério 1 reescrito para a metade que o laço controla (reabrir o `/listen` e entregar o texto durante o download), critérios 7 e 8 para as duas regressões, critérios 3, 4 e 5 ampliados para as lacunas, tudo em `ListenLoopTest.kt`; sem a opção (b). Por quê: conferi o código em `0fb880b` e a revisão está certa — `get_listen` devolve o manifesto inteiro na hora enquanto houver Pendente (`server.rs:618`, `outbox.rs:237`) e a `Presence` conta só guardas de `get_listen`, então nenhuma mudança no Android mantém escuta aberta durante um download; (a) é a correção na raiz (uma conexão viva do celular com a fila de saída é presença, seja `/listen` ou o próprio arquivo), conserta com uma mudança os dois sintomas (janela do PC piscando e chat do celular "Fora da rede", porque o sondador do Android só lê o `HEAD`), enquanto (b) criaria uma segunda fonte de presença no celular, contra o item 2 deste mesmo ticket, e deixaria o PC piscando; e `server.rs` é a costura 1 da spec, outra costura que o `ticket-flow` manda separar — este ticket já custou sete etapas, então a passada de stage 2 aqui é só o que sobrou da revisão (duas linhas de fix e cinco testes, três deles verdes por mutação), e o CLEAN-015 é umas dez linhas de Rust com um teste de integração, independente deste. O vão de até 1,5 s entre o fim de um download e o `/listen` seguinte fica aceito nos dois tickets (era ausente estável o download inteiro antes); se incomodar, é um `CLEAN-*` novo, não uma reabertura.
+- 2026-09-27 Passada 2: `19d85a7` vermelho (`aDownloadCancelledMidwayIsResumedByTheRelaunchedLoop`
+  critério 7, `aDownloadThatFailsFastDoesNotTurnIntoAHotLoop` critério 8 — este só ficou
+  vermelho de forma confiável depois de o /listen falso passar a esperar um pouco após o
+  primeiro download chegar ao servidor, senão a espera de até 2 s do resolvedor de mDNS
+  falso mascarava o laço quente; medido: 9 `/listen` em 2 s sem o fix — mais as extensões
+  dos critérios 3 e 5 e o novo teste do critério 4, todos verdes hoje) e `1fc2f4e` fix
+  (`inFlightFiles` sobrevive ao cancelamento via `NonCancellable` no `finally`; download que
+  falha rápido segura o id em voo por 1 s; `acceptQr`/`unpair` limpam `inFlightFiles`;
+  `retryReceivedReceipts` pula ids em voo). Gate completo verde (`cargo fmt`/`clippy`/`test`,
+  `tsc`, `node --test`, `gradle check` incluindo `lintDebug`). Não fiz o menor de
+  `removeReceipt` lançando dentro do `catch (FileGoneException)` (reestruturação de
+  try/catch sem teste cobrindo, não cabia na mesma passada). `Stage: to-review`.
+
 - Débito humano: celular real contra PC real, depois de CLEAN-013 e CLEAN-015 mergeados — mandar um arquivo grande do PC, conferir que a janela do PC fica "presente" e o chat do celular "Na rede" durante o download inteiro (um piscar de ≤ 1,5 s no fim é o aceito), e que um texto mandado do PC no meio aparece no celular antes de a barra de progresso terminar; pausar o app no meio do download (Home) e voltar, conferir que o arquivo termina de chegar. Os testes provam cada metade contra um PC falso ou um celular falso, nunca os dois reais juntos.
