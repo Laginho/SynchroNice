@@ -396,7 +396,8 @@ internal class AppState(
         onFileProgress: (Int) -> Unit = {},
         onFileStart: (Long) -> Unit = {},
     ) {
-        // ponytail: delivery waits for every restored preview (N × ~150 ms); wait per item if the delay shows.
+        // ponytail: delivery waits for every restored preview (2048 px software decode, ~150-300+ ms each,
+        // also on worker-only wake-ups); wait per item, or skip previews outside the UI, if the delay shows.
         previewsPending.forEach { it.await() }
         val currentPair = pairing
         val currentClient = client() ?: run { unpair(); return }
@@ -533,7 +534,11 @@ internal class AppState(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: FileGoneException) {
-                dropStaleReceipt(itemId, key)
+                try {
+                    dropStaleReceipt(itemId, key)
+                } catch (cleanup: IOException) {
+                    connectionError = "Não foi possível concluir o recebimento: ${cleanup.message}"
+                }
             } catch (error: Exception) {
                 // A receipt that keeps failing stays queued for the next attempt; it must not stop listening.
                 connectionError = "Não foi possível concluir o recebimento: ${error.message}"
@@ -686,11 +691,11 @@ class MainActivity : ComponentActivity() {
                     if (state.pairing == null) throw IOException("pareie com o PC antes de enviar")
                     state.queueFile(file)
                 }
-                withContext(Dispatchers.IO) {
-                    if (file.exists() && !file.delete()) throw IOException("não foi possível remover a foto temporária")
-                }
             } catch (error: Exception) {
                 Toast.makeText(this@MainActivity, "Não foi possível concluir a foto: ${error.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                // A fila guarda a própria cópia: a temporária sai em qualquer caminho (critério 5 do SYN-017).
+                withContext(Dispatchers.IO) { file.delete() }
             }
         }
     }
@@ -919,10 +924,12 @@ private fun MessageBubble(message: ChatMessage, copyFormatted: Boolean, onImage:
     ) {
         Card(
             modifier = Modifier.sizeIn(maxWidth = 320.dp).clickable(
-                onClickLabel = if (isImage) "Abrir imagem" else if (uri == null) "Copiar texto inteiro" else "Abrir arquivo",
+                // Arquivo ainda baixando (ou enviado, sem prévia) não tem o que abrir.
+                enabled = file == null || uri != null || (isImage && message.preview != null),
+                onClickLabel = if (file == null) "Copiar texto inteiro" else if (isImage) "Abrir imagem" else "Abrir arquivo",
             ) {
-                if (isImage) onImage(message)
-                else if (uri == null) copyText(context, message.text)
+                if (file == null) copyText(context, message.text)
+                else if (isImage) onImage(message)
                 else try {
                     context.startActivity(Intent(Intent.ACTION_VIEW).apply {
                         setDataAndType(uri, fileMimeType(message.text))
