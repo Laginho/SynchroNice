@@ -100,7 +100,7 @@ internal class ReceivedFiles(context: Context) {
             if (existingUri != null && hasCompleteContent(uri, item.size)) {
                 complete()
                 onProgress(100)
-                client.acknowledgeFile(item)
+                client.acknowledgeFile(item.id)
             } else {
                 val output = resolver.openOutputStream(uri, "wt") ?: throw IOException("não foi possível abrir o destino")
                 client.downloadFile(item, output, onSaved = complete, onProgress = onProgress)

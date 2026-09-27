@@ -532,7 +532,7 @@ internal class AppState(
                 withContext(Dispatchers.IO) {
                     kotlinx.coroutines.runInterruptible {
                         files.publish(Uri.parse(value as String))
-                        client.acknowledgeFile(Item.FileMeta(itemId, 0, "", 0))
+                        client.acknowledgeFile(itemId)
                     }
                 }
                 if (client !== protocolClient || pairing != currentPair) return@withContext
@@ -589,7 +589,7 @@ internal class AppState(
                             kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) { dropStaleReceipt(item.id, receiptKey) }
                             throw error
                         }
-                        currentClient.acknowledgeFile(item)
+                        currentClient.acknowledgeFile(item.id)
                     }
                     else files.receive(currentClient, item, existingUri = incompleteUri, creationIntent = creationIntent, onCreating = { intent ->
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {

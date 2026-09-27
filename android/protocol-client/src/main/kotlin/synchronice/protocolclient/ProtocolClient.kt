@@ -324,7 +324,7 @@ class ProtocolClient(
     }
 
     /** Repete apenas a confirmação de um arquivo já gravado, sem baixar outra cópia. */
-    fun acknowledgeFile(item: Item.FileMeta) = ack(item.id)
+    fun acknowledgeFile(id: Long) = ack(id)
 
     /** Copia [input] para [output] em blocos de 8 KB, reportando o percentual de [total] a [onProgress]. */
     private fun pump(input: InputStream, output: OutputStream, total: Long, onProgress: (Int) -> Unit): Long {
