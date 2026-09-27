@@ -96,6 +96,7 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class SynchroNiceApplication : Application() {
     internal lateinit var state: AppState
@@ -155,6 +156,8 @@ internal class AppState(
     private var protocolClient: ProtocolClient? = null
     private val submitted = ArrayDeque<Long>()
     private val previewsPending = mutableListOf<CompletableDeferred<Unit>>()
+    /** Um [DeliveryWorker] deste processo está entregando agora (ver [scheduleDelivery]). */
+    internal val delivering = AtomicBoolean(false)
 
     var pairing by mutableStateOf(readPairing())
         private set
@@ -431,7 +434,13 @@ internal class AppState(
                 }
             }
         } catch (error: ProtocolRejectedException) {
-            if (error.code != 401) throw error
+            if (error.code != 401) {
+                // O PC responde 400 a um upload parado e 500 a erro de disco: o worker tenta de novo, na ordem.
+                withContext(Dispatchers.Main.immediate) {
+                    connectionError = "O PC recusou um Pendente (HTTP ${error.code}); tentando de novo."
+                }
+                throw error
+            }
             unpair(currentPair)
         }
     }
@@ -444,7 +453,10 @@ internal class AppState(
     }
 
     fun updateOnline(value: Boolean) {
+        val cameBack = value && !online
         online = value
+        // Presença é a escuta chegando ao PC: hora de entregar o Pendente, sem esperar o backoff.
+        if (cameBack && hasPending()) scheduleDelivery(appContext)
     }
 
     suspend fun listen(currentPair: PairingInfo, client: ProtocolClient, dispatcher: CoroutineDispatcher = Dispatchers.IO) = withContext(dispatcher) {

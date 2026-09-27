@@ -19,6 +19,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.CancellationException
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 
 internal const val LARGE_FILE_BYTES = 10L * 1024 * 1024
@@ -34,7 +35,11 @@ internal fun scheduleDelivery(context: Context) {
             }
         }
         .build()
-    WorkManager.getInstance(context).enqueueUniqueWork("pending-delivery", ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+    // Um worker parado no backoff (até 5 h) não pode segurar um envio novo nem a volta do PC:
+    // substituí-lo é seguro. O que está enviando não pode ser cancelado no meio de um arquivo.
+    val delivering = (context.applicationContext as SynchroNiceApplication).state.delivering.get()
+    val policy = if (delivering) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE
+    WorkManager.getInstance(context).enqueueUniqueWork("pending-delivery", policy, request)
 }
 
 internal class DeliveryWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
@@ -43,6 +48,7 @@ internal class DeliveryWorker(context: Context, parameters: WorkerParameters) : 
         if (!state.hasPending()) return Result.success()
         var foreground = false
         var lastPercent = -1
+        state.delivering.set(true)
         return try {
             state.retryPending(
                 onFileProgress = { percent ->
@@ -55,8 +61,17 @@ internal class DeliveryWorker(context: Context, parameters: WorkerParameters) : 
                 },
                 onFileStart = { size ->
                     if (size >= LARGE_FILE_BYTES && !foreground) {
-                        setForegroundAsync(foregroundInfo(0)).get()
-                        foreground = true
+                        // Android 12+ recusa iniciar serviço em primeiro plano com o app em segundo
+                        // plano (ForegroundServiceStartNotAllowedException): segue sem a notificação
+                        // em vez de derrubar o envio.
+                        // ponytail: sem primeiro plano o WorkManager para o worker em ~10 min e o
+                        // arquivo recomeça do zero; user-initiated data transfer job se isso aparecer.
+                        foreground = try {
+                            setForegroundAsync(foregroundInfo(0)).get()
+                            true
+                        } catch (_: ExecutionException) {
+                            false
+                        }
                     }
                 },
             )
@@ -65,6 +80,8 @@ internal class DeliveryWorker(context: Context, parameters: WorkerParameters) : 
             throw error
         } catch (_: Exception) {
             Result.retry()
+        } finally {
+            state.delivering.set(false)
         }
     }
 
