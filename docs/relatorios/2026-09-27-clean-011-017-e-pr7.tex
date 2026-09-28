@@ -1,0 +1,225 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs,array,tabularx}
+\usepackage{xcolor}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+\emergencystretch=2em
+\renewcommand{\arraystretch}{1.25}
+
+\title{CLEAN-011 a CLEAN-017 e a revisão do PR 7\\\large O que mudou no app, ticket por ticket}
+\author{Sessão \texttt{sweatshop/2026-09-25-2127}, mergeada em \texttt{main} (\texttt{27a9541})}
+\date{27 de setembro de 2026}
+
+\begin{document}
+\shorthandoff{"}
+\maketitle
+
+\section*{Escopo}
+
+O relatório \texttt{2026-09-27-sweatshop-claude.pdf} cobre o \emph{run} que
+fechou estes tickets: linha do tempo, custo, modelos e reaberturas. Este aqui
+cobre o que cada ticket mudou no produto, e a revisão do PR 7 feita depois
+daquele relatório (20h--22h do mesmo dia), que não está em PDF nenhum. Os
+números de passo (F.7, J.1 \dots) apontam para o
+\texttt{2026-09-27-walkthrough-qa.pdf}.
+
+\section*{Resumo}
+
+\begin{itemize}
+  \item \textbf{Sete tickets, todos nascidos da revisão do PR 7.} CLEAN-011,
+        012 e 013 vieram dos achados. O CLEAN-014 e o CLEAN-015 saíram da
+        divisão do CLEAN-013. O CLEAN-016 e o CLEAN-017 saíram dos dois
+        \emph{Needs your call} das revisões do 013 e do 014.
+  \item \textbf{Onde mexeram.} Um no servidor do PC (011), um na presença do
+        PC (015), um na fronteira de confiança do Android (012) e quatro no
+        laço de escuta e na fila do Android (013, 014, 016, 017).
+  \item \textbf{Depois do run, a revisão do PR 7} trouxe 15 correções de spec,
+        5 de padrões, 3 decisões suas e 4 débitos novos. Um último commit
+        (\texttt{10012ea}) fechou uma corrida no Desparear.
+  \item \textbf{Gate final:} 49 testes Rust, 47 casos Node de Copiáveis, 48
+        testes do app Android e 58 do \texttt{protocol-client}, nenhum
+        falhando.
+  \item \textbf{Nada disso rodou num celular.} Cada ticket Android deixou
+        débito, e a revisão do PR 7 somou mais quatro.
+\end{itemize}
+
+\section{Os tickets}
+
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright}X>{\raggedright}X>{\raggedright\arraybackslash}p{1.5cm}@{}}
+\toprule
+Ticket & Problema & Correção & Teste \\
+\midrule
+CLEAN-011 & Um upload interrompido travava todos os arquivos seguintes do celular até reiniciar o PC. & Timeout de 30\,s sem bytes por pedaço; o upload é abortado como corte de conexão. & J.2 \\
+CLEAN-012 & Outro app podia fazer o Compartilhar ler os arquivos internos do SynchroNice, token incluso, e mandá-los ao PC. & Só aceita \texttt{content://} de outro app. & --- \\
+CLEAN-013 & Durante um download grande o celular aparecia ``Fora da rede'' e os textos do PC esperavam. & O download corre ao lado da escuta, que reabre na hora. & F.7, F.8 \\
+CLEAN-014 & Muitas fotos Pendentes podiam travar a abertura do app (ANR). & Prévias decodificadas fora da main thread. & J.1 \\
+CLEAN-015 & A janela do PC piscava presente/ausente durante um download. & Baixar um arquivo da fila conta como presença. & F.7 \\
+CLEAN-016 & Pausar o app no instante errado fazia um arquivo nunca chegar. & O id em voo é liberado mesmo quando o download é cancelado antes de começar. & F.8 \\
+CLEAN-017 & Com o CLEAN-014, uma foto entregue rápido podia ficar sem prévia. & A entrega espera as prévias. & J.1 \\
+\bottomrule
+\end{tabularx}
+
+\subsection*{CLEAN-011 --- Upload preso trava todos os arquivos do celular}
+
+A rota de arquivo do PC segura um lock único enquanto o corpo chega, e o
+servidor não tinha timeout de leitura. Se o celular saía do Wi-Fi no meio de
+um arquivo, a conexão ficava meio aberta e o lock nunca era solto. Agora a
+leitura de cada pedaço tem 30\,s de prazo. No estouro, o \texttt{.part} sai
+da Pasta, a bolha termina como falhou e o id não fica marcado como aceito, de
+modo que o reenvio grava o arquivo. \emph{Limite aceito:} o lock continua
+único, e no pior caso um upload espera o timeout do anterior.
+
+\subsection*{CLEAN-012 --- Compartilhar aceitava arquivos internos do próprio app}
+
+Era uma falha de fronteira de confiança. O \texttt{ShareActivity} é exportado
+e copiava qualquer URI do Intent, inclusive \texttt{file://} para as
+preferências do Par. Agora só passa \texttt{content://} cuja authority não é do
+próprio app, e as outras URIs do mesmo Intent seguem normalmente. A primeira
+revisão reabriu o ticket porque o filtro era contornável com o prefixo
+\texttt{userId@}, e a correção compara como o próprio \texttt{ContentResolver}
+compara. Não deixa débito visual.
+
+\subsection*{CLEAN-013 --- Escuta e presença do Android}
+
+Cinco defeitos no laço de escuta, mais alguns menores:
+\begin{itemize}
+  \item o laço baixava cada arquivo antes de reabrir o \texttt{/listen}, e a
+        presença era falsa durante o download;
+  \item o chat piscava ``Fora da rede'' a cada lote;
+  \item um recibo que falhava parava a escuta;
+  \item cancelar no meio do download (pausar o app) prendia o Item;
+  \item um download que falhava rápido virava laço quente.
+\end{itemize}
+Agora o download corre ao lado do laço, os ids em voo são ignorados quando o
+PC os reanuncia, um lote sem nada novo espera 1,5\,s, a limpeza do download
+roda mesmo cancelado, e um id que falha fica em voo por 2\,s. O ticket levou 171 min e foi
+dividido três vezes: a metade do PC virou o CLEAN-015, e o trabalho na main
+thread virou o CLEAN-014.
+
+\subsection*{CLEAN-014 --- Prévia de imagem Pendente fora da main thread}
+
+O \texttt{AppState} nasce no \texttt{Application.onCreate} e decodificava ali
+a prévia de cada Pendente de imagem, inclusive quando o processo só acordava
+para o WorkManager. Agora a bolha nasce sem prévia, e um executor de uma
+thread a preenche. A leitura da fila continua síncrona, porque é um arquivo de
+texto pequeno.
+
+\subsection*{CLEAN-015 --- Download em andamento conta como presença no PC}
+
+O \texttt{GET /listen} responde na hora enquanto houver Pendente, e um arquivo
+baixando é Pendente até o ACK. Por isso, durante um download, nenhuma escuta
+ficava aberta. Agora o \texttt{GET /outbox/\{id\}/file} entra na presença. O
+guarda vive dentro do corpo da resposta, em pedaços de 64\,KiB, e cai quando o
+stream acaba ou o celular desconecta. \emph{Limite aceito:} um celular que
+fica conectado sem ler mantém o PC ``presente''.
+
+\subsection*{CLEAN-016 --- Despacho do download sem corrida com o cancelamento}
+
+Havia duas janelas, de microssegundos a poucos ms, em que o cancelamento do
+\texttt{ON\_PAUSE} caía entre marcar o id como em voo e o \texttt{try} do
+download. O id ficava preso, e o arquivo não chegava enquanto o processo
+vivesse. Agora \texttt{inFlightFiles} é um conjunto concorrente, e a limpeza
+fica em \texttt{invokeOnCompletion}, que roda mesmo quando o filho é cancelado
+antes de começar. O teste força a corrida sem depender de tempo.
+
+\subsection*{CLEAN-017 --- A entrega espera a prévia dos Pendentes de imagem}
+
+Esta foi uma regressão do CLEAN-014. Numa LAN rápida, enviar uma foto é mais
+rápido que decodificá-la, então o worker entregava e apagava a cópia antes da
+prévia, e a bolha ficava sem imagem. Agora cada Pendente de imagem tem um
+\texttt{CompletableDeferred}, completado mesmo quando a decodificação falha, e
+a entrega espera todos antes de pegar o mutex de saída. \emph{Custo aceito:}
+a entrega começa só depois de todas as prévias, uns 150\,ms por foto.
+
+\section{A revisão do PR 7 (depois do run)}
+
+A revisão partiu de \texttt{452104c} em dois eixos, os padrões do repositório
+e as specs com os tickets. Ela confirmou que as duas corridas do PR já
+estavam fechadas pelos CLEAN-016 e 017. Cada conserto teve um commit de teste
+vermelho antes.
+
+\subsection*{Suas três decisões}
+
+\begin{itemize}
+  \item \textbf{Nomes na pasta escolhida seguem o PC.} O arquivo tem o
+        marcador \texttt{[syn-<uuid>]} só enquanto baixa. Completo, é
+        renomeado para o nome limpo, e o provedor põe \texttt{(1)} se o nome
+        estiver ocupado. Isso substitui a linha do SYN-014 c.3 que proibia o
+        rename.
+  \item \textbf{O PC persiste os ids de arquivo aceitos}: os últimos 1000, em
+        \texttt{accepted-file-ids.txt}. O ADR 0002 foi atualizado.
+  \item \textbf{Uma recusa que não é 401 continua tentando, mas visível.} O
+        chat mostra ``O PC recusou um Pendente (HTTP n); tentando de novo.''
+\end{itemize}
+
+\subsection*{Correções}
+
+\begin{tabularx}{\linewidth}{@{}>{\raggedright}p{3.2cm}X@{}}
+\toprule
+Área & O que mudou \\
+\midrule
+Pasta SAF & Rename para o nome limpo quando o conteúdo está completo, com recibo \texttt{renaming:} que sobrevive a um restart. Um provedor que não renomeia mantém o nome marcado e entrega mesmo assim. ``Mudar pasta\dots'' reinicia os recibos presos, e um destino apagado recomeça sozinho. \\
+Reenvio & A presença que volta com Pendentes agenda a entrega na hora, sem esperar o backoff do WorkManager, que chegava a 5\,h. \\
+Segundo plano & No Android 12+, um start em primeiro plano recusado não aborta mais o upload: ele segue sem notificação. \\
+Duplicatas & Os ids persistidos evitam arquivo duplicado depois de reiniciar o PC. O envio direto passou a mandar o id do Pendente, então um 201 perdido não cria um segundo Item. \\
+Compartilhar & Girar o celular não reenfileira mais as fotos (o lote roda num ViewModel), e um compartilhamento cancelado não é reportado como falha. \\
+Presença & Um \texttt{HEAD} no arquivo da fila responde os cabeçalhos sem entrar na presença. \\
+QR & O parser recusa \texttt{\textbackslash u} sem quatro dígitos hex. \\
+Copiáveis & No Android, os links seguem o mesmo contrato do \texttt{new URL()} do PC, com 15 casos novos na fixture compartilhada. \\
+Câmera & A foto temporária é apagada num \texttt{finally}. \\
+Bolhas & Uma imagem que ainda está baixando não é clicável. Uma falha ao limpar recibos não para mais a escuta. \\
+Padrões & O teste deixou de chamar a função interna \texttt{sharedUris}; o protocolo foi documentado no cabeçalho de \texttt{server.rs} (ADR 0001); o estado persistido novo foi listado no ADR 0002; o saneador de nomes passou a ser um só. \\
+\bottomrule
+\end{tabularx}
+
+\paragraph{\texttt{10012ea}, o último commit.} Um texto ou arquivo enfileirado
+no exato momento do Desparear podia ir para a fila do Par novo. Agora o
+enfileirar confere, dentro do mutex de saída, se o cliente ainda é o do Par
+atual, e recusa se não for (\texttt{UnpairTest}). O teste do log de ids
+aceitos saiu dos testes de unidade e foi para os de integração.
+
+\subsection*{Deixado de fora, com o gatilho para voltar}
+
+\begin{itemize}
+  \item \textbf{Dividir o \texttt{MainActivity.kt}} (Par, fila de saída,
+        entrada, UI) e tipos selados para \texttt{Receipt} e
+        \texttt{Trecho}. Fazer antes da próxima feature Android.
+  \item \textbf{Notificação de progresso antes de um 503}, que exigiria
+        \texttt{Expect: 100-continue}. É só um piscar, e só em arquivos de
+        10\,MB ou mais.
+  \item \textbf{Envio acelerado no Android 10 e 11}, que mostraria
+        notificação em envios curtos.
+  \item \textbf{Download travado mantém o PC presente}, o mesmo limite do
+        CLEAN-015.
+  \item Das revisões dos CLEAN ficaram: as constantes \texttt{2\_000} e
+        \texttt{1\_500} acopladas só por comentário (CLEAN-013/016), e um
+        \texttt{removeReceipt} que lança dentro de um \texttt{catch} e pula
+        os outros recibos (CLEAN-013, item 6).
+\end{itemize}
+
+\section{Débito humano deixado}
+
+Todos os débitos abaixo estão no walkthrough, com passo próprio:
+\begin{itemize}
+  \item \textbf{F.7 (CLEAN-013/015).} Celular real contra PC real: um
+        arquivo grande mantém ``Na rede'' e ``presente'', e um texto no meio
+        chega antes de a barra terminar.
+  \item \textbf{F.8 (CLEAN-013/016).} Home no meio do download e voltar: o
+        arquivo termina.
+  \item \textbf{J.1 (CLEAN-014/017).} 20 fotos Pendentes: o app abre sem ANR,
+        e toda bolha entregue tem prévia.
+  \item \textbf{J.2 (CLEAN-011).} Wi-Fi cortado no meio de um upload: a bolha
+        falha, e o próximo arquivo chega sem reiniciar o PC.
+  \item \textbf{PR 7:} nome limpo e \texttt{(1)} numa pasta SAF real (F.6);
+        arquivo de 10\,MB ou mais em segundo plano no Android 12+ (D.8);
+        girar durante um compartilhamento múltiplo (D.5); Pendente saindo
+        assim que o PC volta (C.3).
+\end{itemize}
+
+\end{document}

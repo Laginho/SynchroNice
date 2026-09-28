@@ -1,0 +1,365 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs,array,tabularx,longtable}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+\emergencystretch=2em
+
+\definecolor{mvp}{HTML}{C0504D}
+\definecolor{fonte}{HTML}{6B7280}
+\definecolor{caixa}{HTML}{F3F4F6}
+
+% Um passo: caixa de marcar, ação, resultado esperado e ticket de origem.
+\newlist{passos}{enumerate}{1}
+\newcommand{\letra}{P}
+\setlist[passos]{label=$\square$\,\letra.\arabic*,leftmargin=3.2em,itemsep=0.35em}
+\newcommand{\secao}[2]{\renewcommand{\letra}{#1}\section*{#1. #2}\addcontentsline{toc}{section}{#1. #2}}
+\newcommand{\espera}{\par\hspace*{0.2em}$\rightarrow$\ }
+\newcommand{\fonte}[1]{\hfill{\small\color{fonte}\texttt{#1}}}
+\newcommand{\mvp}{\textcolor{mvp}{$\bigstar$}\ }
+\newcommand{\cmd}[1]{\par\smallskip\colorbox{caixa}{\parbox{\dimexpr\linewidth-2\fboxsep}{\small\ttfamily #1}}\par\smallskip}
+
+\title{SynchroNice: walkthrough de QA\\\large O que ficou sem verificar à mão, na ordem em que dá para testar}
+\author{Levantado dos \texttt{Débito humano:} dos tickets\\e de \texttt{docs/pr-7-review-follow-up.md}}
+\date{27 de setembro de 2026 --- \texttt{main} em \texttt{27a9541}}
+
+\begin{document}
+\shorthandoff{"}
+\maketitle
+
+\section*{Por que este roteiro existe}
+
+Os 35 tickets estão \texttt{done}, e todas as histórias das duas specs têm
+ticket. Mas o experimento ``Humano simulado'' troca verificação manual por
+débito: \textbf{o app Android nunca foi instalado num celular nem aberto num
+emulador} (o Computer Use só enxergou o Chrome, ou foi negado no
+\texttt{qemu}, e o \texttt{adb devices} voltou vazio). No PC, você verificou à
+mão em 23/09, mas a engrenagem, a Pasta padrão, os Copiáveis e as mudanças de
+presença entraram depois.
+
+São 53 linhas \texttt{Débito humano:} nos tickets. Descontadas as repetidas e
+as superadas (SYN-007/008/009 foram refeitos em SYN-012/014/016), sobram os
+passos abaixo. Cada um diz o que fazer, o que tem de acontecer
+($\rightarrow$) e de qual ticket veio. \mvp marca o que define se o MVP
+funciona. Os demais são acabamento.
+
+\paragraph{Como registrar.} Marque a caixa quando passar. Quando falhar, anote o
+número do passo e o que viu: cada falha vira um ticket \texttt{BUG-*} no
+tracker, com o ticket de origem como referência.
+
+\paragraph{Tempo estimado.} Cerca de 1\,h30 com tudo à mão. As seções A a D,
+que são o núcleo, levam uns 40 min.
+
+\tableofcontents
+
+\secao{P}{Preparação}
+
+Os dois builds na máquina estão velhos (o \texttt{pc.exe} é de 17/09 e o APK
+de 26/09), então refaça os dois a partir de \texttt{main}. Os comandos são para
+o PowerShell 5.1, a partir da raiz do repositório.
+
+\begin{passos}
+  \item Gerar o executável do PC (sem instalador):
+        \cmd{cd pc; npx tauri build -{}-no-bundle; cd ..}
+        O executável sai em \texttt{pc\textbackslash src-tauri\textbackslash target\textbackslash release\textbackslash}.
+        Use sempre esse, porque o primeiro uso registra o caminho no autostart
+        do Windows.
+  \item Gerar o APK:
+        \cmd{cd android; .\textbackslash gradlew.bat assembleDebug; cd ..}
+  \item No celular, ligar a \emph{Depuração USB} (Opções do desenvolvedor),
+        conectar no USB e instalar:
+        \cmd{\& "\$env:LOCALAPPDATA\textbackslash Android\textbackslash Sdk\textbackslash platform-tools\textbackslash adb.exe" install -r android\textbackslash app\textbackslash build\textbackslash outputs\textbackslash apk\textbackslash debug\textbackslash app-debug.apk}
+        Sem cabo, dá para copiar o APK para o celular e abrir. O Android pede
+        para permitir a instalação de fonte desconhecida.
+  \item Para testar o primeiro uso do PC do zero: sair pela bandeja e tirar a
+        configuração do caminho, que leva junto o Par e a Pasta gravada:
+        \cmd{Rename-Item "\$env:APPDATA\textbackslash dev.synchronice.pc" dev.synchronice.pc.bak}
+  \item Deixar à mão: 3 ou 4 fotos na galeria, um PDF, um vídeo curto, um
+        áudio e um arquivo grande no PC. Para gerar um de 200 MB:
+        \cmd{\$f = [IO.File]::Create("\$env:USERPROFILE\textbackslash Desktop\textbackslash grande.bin"); \$f.SetLength(200MB); \$f.Close()}
+  \item O texto de teste dos Copiáveis (seção H), já conferido contra a função
+        do PC:
+        \cmd{CPF 52998224725, CNPJ 11222333000181, cel 11912345678, fixo 1134567890, email laginho+pix@example.com, pix 550e8400-e29b-41d4-a716-446655440000, pedido 150 de 2026, CPF errado 12345678900, https://example.com/pedido/123}
+\end{passos}
+
+\secao{A}{PC sozinho}
+
+\begin{passos}
+  \item \mvp Abrir o executável novo. $\rightarrow$ Nenhum diálogo de Pasta
+        abre. A janela mostra o QR. \fonte{SYN-010 c.3}
+  \item Com o QR na tela, clicar na engrenagem. $\rightarrow$ O painel abre
+        com ``Mudar pasta\dots'', ``Desparear'' e ``Copiar com pontuação''
+        (desligada), e fechar volta ao QR. \fonte{SYN-010 c.4, SYN-011 c.8}
+  \item Clicar no ícone da bandeja. $\rightarrow$ O menu tem exatamente
+        ``Abrir'' e ``Sair''. \fonte{SYN-010 c.8}
+  \item Fechar a janela pelo X. $\rightarrow$ Ela some, e o processo continua
+        na bandeja. ``Abrir'' traz a janela de volta. \fonte{SYN-001 c.3--4}
+  \item Se o Windows perguntar pelo firewall, permitir na rede privada.
+        $\rightarrow$ Sem isso o celular não chega na porta 47820.
+  \item Opcional: no Gerenciador de Tarefas, o processo ocioso fica abaixo de
+        80 MB de RAM. \fonte{SYN-001 c.6}
+\end{passos}
+
+\secao{B}{Pareamento}
+
+\begin{passos}
+  \item \mvp Abrir o app no celular pela primeira vez. $\rightarrow$ Ele abre
+        direto na câmera. \fonte{SYN-012 c.3}
+  \item \mvp Apontar para o QR do PC. $\rightarrow$ O chat abre. O chat vazio
+        mostra uma instrução de uso. \fonte{SYN-012 c.3, c.9}
+  \item \mvp Olhar o topo do chat no celular e o indicador no PC.
+        $\rightarrow$ Os dois mostram ``Na rede'' em poucos segundos.
+        \fonte{SYN-012 c.4, SYN-004 c.8}
+  \item Fechar o app (tirar dos recentes) e abrir de novo. $\rightarrow$ Vai
+        direto ao chat, sem câmera. \fonte{SYN-012 c.3}
+  \item Opcional: desligar e religar o Wi-Fi do PC (o IP pode mudar).
+        $\rightarrow$ O celular volta a ``Na rede'' sem reescanear.
+        \fonte{SYN-012 c.5}
+\end{passos}
+
+\secao{C}{Texto nos dois sentidos}
+
+\begin{passos}
+  \item \mvp Digitar no PC e dar Enter. $\rightarrow$ Aparece como bolha à
+        esquerda no celular. No PC, a bolha passa de Pendente a Entregue.
+        \fonte{SYN-012 c.6, SYN-004 c.1--2}
+  \item \mvp Digitar no celular e tocar em enviar. $\rightarrow$ Aparece no
+        PC, e a bolha do celular passa de Pendente a Entregue.
+        \fonte{SYN-012 c.7}
+  \item \mvp Com o chat do celular aberto, sair do app do PC pela bandeja.
+        Mandar um texto do celular. $\rightarrow$ Ele fica Pendente. Reabrir o
+        PC. $\rightarrow$ O texto sai \emph{assim que} o topo mostra ``Na
+        rede'', sem esperar minutos. \fonte{SYN-012 c.8, revisão do PR 7}
+  \item Mandar do celular um texto que é só uma URL. No PC, clicar no link.
+        $\rightarrow$ Abre o navegador padrão. \fonte{SYN-002 c.4}
+  \item Mandar do PC um texto com \texttt{<b>oi</b>}. $\rightarrow$ Aparece
+        literal, sem negrito. \fonte{SYN-002 c.3}
+\end{passos}
+
+\secao{D}{Compartilhar do celular}
+
+O motivo do projeto existir. Tudo aqui é \mvp, salvo onde está escrito
+opcional.
+
+\begin{passos}
+  \item Na galeria, Compartilhar $\rightarrow$ SynchroNice com uma foto.
+        $\rightarrow$ Não abre chat nem pede confirmação, e você volta para a
+        galeria. A foto aparece no PC e na Pasta
+        (\texttt{Downloads\textbackslash SynchroNice}). \fonte{SYN-016 c.3,
+        SYN-010 c.1--2}
+  \item Compartilhar um link a partir do navegador ou de outro app.
+        $\rightarrow$ Aparece no chat do PC. \fonte{SYN-016 c.4}
+  \item Compartilhar um PDF, um vídeo e um áudio. $\rightarrow$ Os três chegam
+        na Pasta do PC, e as bolhas mostram nome, tipo e tamanho.
+        \fonte{SYN-016 c.5, SYN-003 c.2}
+  \item Selecionar 3 ou 4 fotos e compartilhar de uma vez. $\rightarrow$ Cada
+        uma vira um Item separado no PC. \fonte{SYN-016 c.6}
+  \item Repetir o passo anterior girando o celular durante o compartilhamento.
+        $\rightarrow$ Cada foto chega uma vez só. \fonte{revisão do PR 7}
+  \item Sair do app do PC. Fechar o app do celular (tirar dos recentes).
+        Compartilhar uma foto. Reabrir o PC e \emph{não} abrir o app do
+        celular. $\rightarrow$ A foto chega sozinha, sem notificação no
+        celular. \fonte{SYN-016 c.7}
+  \item Compartilhar um vídeo grande (100 MB ou mais) e ir para a tela
+        inicial. $\rightarrow$ Continua indo. A notificação de progresso
+        aparece só enquanto dura. \fonte{SYN-016 c.8}
+  \item Android 12 ou mais novo: compartilhar um arquivo de 10 MB ou mais já
+        com o app em segundo plano. $\rightarrow$ É entregue, mesmo sem
+        notificação. \fonte{revisão do PR 7}
+  \item Abrir o app depois desses compartilhamentos. $\rightarrow$ Cada Item
+        aparece como bolha à direita, com Pendente ou Entregue.
+        \fonte{SYN-016 c.9}
+\end{passos}
+
+\secao{E}{Botão de câmera}
+
+\begin{passos}
+  \item O composer tem um botão de câmera e nenhum de anexar.
+        \fonte{SYN-017 c.1}
+  \item Tocar na câmera, tirar a foto e confirmar. $\rightarrow$ Vai direto ao
+        PC, sem segunda tela. \fonte{SYN-017 c.2}
+  \item Abrir a câmera e cancelar. $\rightarrow$ Nada é enviado.
+        \fonte{SYN-017 c.3}
+  \item Com ``Guardar fotos tiradas'' desligada (o padrão), depois da entrega
+        a foto não está no celular. Ligar a opção e repetir. $\rightarrow$ A
+        foto fica em \texttt{Download/SynchroNice}. Reabrir o app: a opção
+        continua ligada. \fonte{SYN-017 c.4--5}
+\end{passos}
+
+\secao{F}{Receber no celular}
+
+\begin{passos}
+  \item \mvp Com o chat do celular aberto, arrastar uma imagem do Explorer
+        para a janela do PC. $\rightarrow$ No celular, a bolha à esquerda
+        mostra progresso e depois a miniatura. Sem nenhum toque, o arquivo
+        está em \texttt{Download/SynchroNice} e aparece na galeria.
+        \fonte{SYN-014 c.3--4}
+  \item Mandar um PDF do PC. $\rightarrow$ A bolha mostra nome, tipo e
+        tamanho, e tocar abre no app padrão de PDF. \fonte{SYN-014 c.4, c.6}
+  \item Mandar o mesmo arquivo duas vezes. $\rightarrow$ Os dois ficam na
+        Pasta, e o segundo ganha \texttt{(1)}. \fonte{SYN-014 c.5}
+  \item Tocar numa imagem recebida. $\rightarrow$ Abre em tela cheia dentro do
+        app. Pinça dá zoom, arrastar move, e Voltar fecha com o chat como
+        estava. \fonte{SYN-015 c.1--3}
+  \item Tocar numa imagem \emph{enviada} pelo celular, enquanto está Pendente
+        e depois de Entregue. $\rightarrow$ Abre nos dois casos. Tocar numa
+        imagem que ainda está baixando não faz nada. \fonte{SYN-015 c.5,
+        revisão do PR 7}
+  \item Engrenagem $\rightarrow$ ``Mudar pasta\dots'' e escolher uma pasta
+        real (Downloads por outra rota, um pendrive ou o Drive). Mandar dois
+        arquivos de mesmo nome do PC. $\rightarrow$ O primeiro termina com o
+        nome limpo, sem \texttt{[syn-\dots]}, e o segundo vira \texttt{(1)}.
+        Reabrir o app: a pasta escolhida continua valendo. \fonte{SYN-014
+        c.7, revisão do PR 7}
+  \item \mvp Mandar \texttt{grande.bin} do PC e, no meio do download, mandar
+        um texto do PC. $\rightarrow$ Durante o download inteiro, o celular
+        fica ``Na rede'' e a janela do PC fica ``presente'' (um piscar de até
+        1,5 s no fim é aceito). O texto aparece antes de a barra terminar.
+        \fonte{CLEAN-013, CLEAN-015}
+  \item Mandar \texttt{grande.bin} de novo, apertar Home no meio e voltar ao
+        app. $\rightarrow$ O arquivo termina de chegar, sem precisar matar o
+        app. \fonte{CLEAN-013, CLEAN-016}
+\end{passos}
+
+\secao{G}{PC: receber, arrastar e mandar}
+
+\begin{passos}
+  \item \mvp Arrastar uma bolha de imagem recebida para uma pasta do Explorer.
+        $\rightarrow$ Copia o arquivo. \fonte{SYN-006 c.1}
+  \item Arrastar uma bolha de PDF para o navegador. $\rightarrow$ Abre o PDF.
+        \fonte{SYN-006 c.2}
+  \item Arrastar uma bolha de imagem para o campo de anexo de um site.
+        $\rightarrow$ Anexa como se viesse do Explorer. \fonte{SYN-006 c.3}
+  \item Enquanto um arquivo grande chega do celular, tentar arrastar a bolha
+        em progresso. $\rightarrow$ Nada acontece. Depois de concluir, arrasta.
+        \fonte{SYN-006 c.4}
+  \item Apagar um arquivo recebido da Pasta e tentar arrastar a bolha.
+        $\rightarrow$ Não há drag, e a legenda diz que o arquivo não está mais
+        na Pasta. \fonte{SYN-006 c.5}
+  \item Arrastar uma bolha e soltar de volta em cima do chat. Clicar numa
+        bolha sem arrastar. $\rightarrow$ Em nenhum dos dois o arquivo é
+        reenviado ao celular. \fonte{SYN-006, achado 1}
+  \item \mvp Mandar do PC: arrastar do Explorer, Ctrl+V com um print no
+        clipboard, e Ctrl+V com um e depois dois arquivos copiados no Explorer.
+        $\rightarrow$ Cada um vira uma bolha à direita, e chega no celular.
+        \fonte{SYN-004 c.3--5}
+  \item Com o celular fora (app fechado), mandar algo do PC, sair pela bandeja
+        e reabrir. $\rightarrow$ O chat do PC abre vazio, mas o Item é
+        entregue quando o app do celular abre. \fonte{SYN-004 c.7, SYN-002
+        c.6}
+\end{passos}
+
+\secao{H}{Copiáveis (nos dois aparelhos)}
+
+Mandar o texto de teste da preparação do PC para o celular e depois do
+celular para o PC, para ver a bolha à esquerda nos dois.
+
+\begin{passos}
+  \item $\rightarrow$ Aparecem formatados e em azul, sem sublinhado:
+        \texttt{529.982.247-25}, \texttt{11.222.333/0001-81},
+        \texttt{(11) 91234-5678}, \texttt{(11) 3456-7890}, o e-mail e o UUID.
+        O link fica azul e sublinhado. ``150'', ``2026'' e o CPF errado ficam
+        como texto comum. \fonte{SYN-011 c.4, c.7; SYN-018 c.3, c.6}
+  \item Tocar ou clicar no CPF e colar num bloco de notas. $\rightarrow$ Cola
+        \texttt{52998224725}, só dígitos. Ligar ``Copiar com pontuação'' e
+        repetir. $\rightarrow$ Cola \texttt{529.982.247-25}.
+        \fonte{SYN-011 c.5, SYN-018 c.4}
+  \item Tocar no link. $\rightarrow$ Abre o navegador. No celular, o toque
+        longo no link copia o link. Tocar no resto da bolha copia o texto
+        inteiro. \fonte{SYN-011 c.6, SYN-018 c.5}
+  \item No PC, arrastar o mouse sobre um trecho da bolha. $\rightarrow$
+        Seleciona e não copia. \fonte{SYN-011 c.6}
+  \item Reiniciar os dois apps. $\rightarrow$ ``Copiar com pontuação''
+        continua como você deixou em cada um. \fonte{SYN-011 c.8, SYN-018 c.7}
+\end{passos}
+
+\secao{I}{Engrenagem, Pasta e Desparear}
+
+\begin{passos}
+  \item No PC, engrenagem $\rightarrow$ ``Mudar pasta\dots'' e escolher outra
+        pasta. Mandar um arquivo do celular. $\rightarrow$ Cai na pasta nova
+        sem reiniciar. Uma bolha antiga ainda arrasta o arquivo da pasta
+        original. \fonte{SYN-010 c.5}
+  \item \mvp No celular, com algo Pendente (PC fora), engrenagem
+        $\rightarrow$ Desparear. $\rightarrow$ O app abre a câmera. Ler o QR
+        de novo pareia, e o Pendente antigo \emph{não} chega ao PC.
+        \fonte{SYN-013 c.3--4}
+  \item \mvp No PC, engrenagem $\rightarrow$ Desparear. $\rightarrow$ Aparece
+        um QR novo, e o antigo botão de parear de novo do composer não existe mais. No celular, a próxima
+        requisição é recusada e o app volta sozinho à câmera. Ler o QR novo
+        pareia. \fonte{SYN-010 c.6--7, SYN-013 c.5}
+  \item Repetir o anterior com o app do celular fechado. $\rightarrow$ Ao
+        abrir, ele vai direto à câmera. \fonte{SYN-013 c.5}
+\end{passos}
+
+\secao{J}{Carga e falhas}
+
+\begin{passos}
+  \item Com o PC fora, compartilhar umas 20 fotos. Abrir o app.
+        $\rightarrow$ Abre sem travar, sem ``O app não está respondendo''. As
+        prévias aparecem aos poucos. Religar o PC. $\rightarrow$ Todas são
+        entregues, e toda bolha entregue tem prévia. \fonte{CLEAN-014,
+        CLEAN-017}
+  \item Mandar \texttt{grande.bin} do celular para o PC e desligar o Wi-Fi do
+        celular no meio. $\rightarrow$ No PC, a bolha termina como falhou, e
+        nenhum arquivo pela metade fica na Pasta. Religar o Wi-Fi e mandar
+        outro arquivo. $\rightarrow$ Ele chega em até uns 30 s, sem reiniciar
+        o PC. \fonte{CLEAN-005, CLEAN-011}
+  \item Opcional: reiniciar o Windows. $\rightarrow$ O app do PC sobe sozinho
+        e o chat está vazio. Os arquivos continuam na Pasta.
+        \fonte{SYN-001 c.5, história 30}
+\end{passos}
+
+\section*{Débito que este roteiro não cobre}
+
+Estes itens não se veem a olho, e a cobertura deles fica nos testes:
+\begin{itemize}
+  \item \textbf{CLEAN-002:} a escrita atômica da fila do Android (temporário
+        e rename) diante de um desligamento no meio da gravação.
+  \item \textbf{SYN-005 c.2:} o serviço mDNS visto por um leitor externo. O
+        passo B.3 já prova a descoberta na prática.
+  \item \textbf{Deixado de fora na revisão do PR 7:} uma notificação de
+        progresso que pisca antes de um 503 (arquivos de 10 MB ou mais); o
+        envio acelerado no Android 10 e 11; um download travado que mantém o
+        PC ``presente''. Todos aceitos como limite conhecido.
+\end{itemize}
+
+\section*{Índice: débito $\rightarrow$ passo}
+
+\begin{longtable}{@{}lp{0.72\linewidth}@{}}
+\toprule
+Ticket & Passos \\
+\midrule
+SYN-001 & A.4, A.6, J.3 \\
+SYN-002 & C.4, C.5, G.8 \\
+SYN-003 & D.3, G.4 \\
+SYN-004 & B.3, C.1, G.7, G.8 \\
+SYN-005 & A.1, B.2, I.3 \\
+SYN-006 & G.1--G.6 \\
+SYN-007/008/009 & superados por SYN-012/016/014 \\
+SYN-010 & A.1--A.3, D.1, I.1, I.3 \\
+SYN-011 & A.2, H.1--H.5 \\
+SYN-012 & B.1--B.5, C.1--C.3 \\
+SYN-013 & I.2--I.4 \\
+SYN-014 & F.1--F.3, F.6 \\
+SYN-015 & F.4, F.5 \\
+SYN-016 & D.1--D.9 \\
+SYN-017 & E.1--E.4 \\
+SYN-018 & H.1--H.3, H.5 \\
+CLEAN-005 & J.2 \\
+CLEAN-007 & A.1--A.3 (a mesma inspeção visual de SYN-010) \\
+CLEAN-011 & J.2 \\
+CLEAN-013/015/016 & F.7, F.8 \\
+CLEAN-014/017 & J.1 \\
+Revisão do PR 7 & C.3, D.5, D.8, F.5, F.6 \\
+\bottomrule
+\end{longtable}
+
+\end{document}
