@@ -318,6 +318,9 @@ fn reenvio_de_arquivo_depois_de_reiniciar_o_pc_nao_duplica_na_pasta() {
     let pasta = raiz.path().join("pasta");
     std::fs::create_dir_all(&pasta).unwrap();
     let ids = raiz.path().join("ids-aceitos.txt");
+    // Histórico no disco: o próximo upload deve compactá-lo para os 1000 ids mais recentes.
+    let historico: String = (0..2000).map(|i| format!("antigo-{i}\n")).collect();
+    std::fs::write(&ids, historico).unwrap();
     let sobe = |outbox: &str| {
         let running = server::spawn_with_accepted_ids(
             "127.0.0.1:0".parse().unwrap(),
@@ -338,12 +341,26 @@ fn reenvio_de_arquivo_depois_de_reiniciar_o_pc_nao_duplica_na_pasta() {
     );
     // O 201 se perdeu e o PC reiniciou: Sessão nova, mas o arquivo continua na Pasta.
     let depois = sobe("outbox-2");
+    let persistidos = std::fs::read_to_string(&ids).unwrap();
+    assert_eq!(persistidos.lines().count(), 1000);
+    assert_eq!(persistidos.lines().next(), Some("antigo-1001"));
+    assert_eq!(persistidos.lines().last(), Some("arquivo-1"));
     assert_eq!(
         post_arquivo_com_id(&depois, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
         201
     );
 
     assert_eq!(std::fs::read_dir(&pasta).unwrap().count(), 1);
+    assert_eq!(
+        post_arquivo_com_id(&depois, TOKEN, "antigo-1999", "recente.bin", b""),
+        201
+    );
+    assert!(!pasta.join("recente.bin").exists());
+    assert_eq!(
+        post_arquivo_com_id(&depois, TOKEN, "antigo-0", "expirado.bin", b"novo"),
+        201
+    );
+    assert_eq!(std::fs::read(pasta.join("expirado.bin")).unwrap(), b"novo");
 }
 
 #[test]

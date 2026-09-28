@@ -338,6 +338,7 @@ internal class AppState(
         try {
             withContext(Dispatchers.IO) {
                 outboundMutex.withLock {
+                    if (currentClient !== protocolClient) throw IOException("Par alterado antes de guardar a mensagem")
                     currentClient.enqueueText(text)
                     submitted.addLast(id)
                 }
@@ -354,6 +355,7 @@ internal class AppState(
         val currentClient = client() ?: return
         val stored = withContext(Dispatchers.IO) {
             outboundMutex.withLock {
+                if (currentClient !== protocolClient) throw IOException("Par alterado antes de guardar o arquivo")
                 val stored = currentClient.enqueueFile(file)
                 if (stored) {
                     val pending = queueStore.load().last() as PendingItem.File

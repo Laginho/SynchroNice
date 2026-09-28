@@ -1047,22 +1047,5 @@ mod tests {
         });
     }
 
-    #[test]
-    fn ids_de_arquivo_aceitos_guardam_so_os_ultimos() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("accepted-file-ids.txt");
-        let mut log = AcceptedFileLog::load(&path).unwrap();
-        for i in 0..=2 * ACCEPTED_FILE_IDS_KEPT {
-            log.record(&format!("id-{i}"));
-        }
-
-        let reloaded = AcceptedFileLog::load(&path).unwrap();
-        assert_eq!(reloaded.recent.len(), ACCEPTED_FILE_IDS_KEPT);
-        assert_eq!(
-            reloaded.recent.back().unwrap(),
-            &format!("id-{}", 2 * ACCEPTED_FILE_IDS_KEPT)
-        );
-    }
-
     const TOKEN_FOR_TEST: &str = "segredo-de-teste";
 }
