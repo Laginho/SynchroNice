@@ -18,6 +18,9 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions.unitTests.isIncludeAndroidResources = true
+    sourceSets.getByName("test").resources.srcDir("../../testdata")
 }
 
 dependencies {
@@ -27,6 +30,7 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
@@ -37,4 +41,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.zxing:core:3.5.4")
+
+    testImplementation(kotlin("test-junit"))
+    testImplementation("androidx.work:work-testing:2.12.0")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

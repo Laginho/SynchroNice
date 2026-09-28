@@ -51,13 +51,14 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
 
 - Tudo que o fluxo devolveria ao humano antes do PR de sessão — `blocked` com
   pergunta, `Needs your call`, `Review: human`, passo de verificação manual
-  (abrir o app, olhar a tela, testar no celular) — vai para um subagente
-  **fable high**, spawnado por quem estiver rodando o `/foreman`. Ele faz o
+  (abrir o app, olhar a tela, testar no celular) — vai para o agente
+  **`proxy`** (`~/.claude/agents/proxy.md`, que fixa modelo e esforço),
+  spawnado por quem estiver rodando o `/foreman`. Ele faz o
   papel do humano: lê o ticket e a `spec.md`, decide, e responde do jeito que
   o `ticket-flow` já espera (resposta dobrada no corpo do ticket, `Stage:
   to-implement`, commit na branch de sessão). Depois o foreman relança o driver.
 - O que um agente não consegue fazer de fato (abrir o app à mão, ver a tela),
-  o fable high contorna — teste automatizado, script, inspeção do binário — e
+  o `proxy` contorna — teste automatizado, script, inspeção do binário — e
   registra a revisão humana como débito: uma linha `Débito humano: <o que
   ficou sem verificar à mão>` em `## Comments` do ticket, committed. Nunca
   bloqueia por isso.
@@ -68,12 +69,12 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
 - Débito humano se acumula até o app ficar pronto: o humano verifica tudo de
   uma vez, junto com o próprio QA. Não é pendência de run: o resumo do foreman
   lista os débitos, mas não os põe em "Your turn".
-- O foreman não para o run por `blocked` esperando humano: spawna o fable high
+- O foreman não para o run por `blocked` esperando humano: spawna o `proxy`
   e segue. Para só quando não há ticket rodável nem `blocked` respondível.
 - Vale para qualquer decisão que o foreman levaria ao humano, não só
   `blocked` — um pormenor de escopo, se um arquivo entra ou não no commit, uma
-  anomalia vista num check-in: se um agente pode decidir, o foreman spawna um
-  **fable high** (Fable 5.1) como humano provisório, que decide e responde no
+  anomalia vista num check-in: se um agente pode decidir, o foreman spawna o
+  **`proxy`** como humano provisório, que decide e responde no
   lugar do humano. O foreman só para esperando o humano quando não há como
   seguir sem ele, ou quando a decisão errada é irreversível ou cara/demorada de
   reverter.

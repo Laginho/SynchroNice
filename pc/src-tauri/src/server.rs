@@ -3,11 +3,16 @@
 //! Protocolo (SYN-002):
 //!   POST /items/text        corpo: o texto, UTF-8
 //!   Authorization: Bearer <token>
+//!   X-Item-Id: <id gerado pelo remetente> (opcional para clientes antigos)
 //!   201 sem corpo ao criar o Item; 401 sem token ou com token errado.
+//!   Um id já aceito responde 201 sem criar outro Item: é o reenvio de uma
+//!   resposta perdida. Id vazio, com mais de 128 bytes ou fora de ASCII
+//!   visível: 400.
 //!
 //! Protocolo (SYN-003):
 //!   POST /items/file        corpo: os bytes do arquivo, em stream
 //!   Authorization: Bearer <token>
+//!   X-Item-Id: <id gerado pelo remetente> (opcional para clientes antigos)
 //!   X-File-Name-Utf8: <nome UTF-8 percent-encoded, espaço = %20>
 //!   X-File-Name: <nome ASCII>       fallback legado; '%' é literal aqui
 //!   X-File-Size: <tamanho em bytes>    (só quando o corpo vier chunked, sem
@@ -18,7 +23,11 @@
 //!                                       deste cabeçalho, o tamanho vem do
 //!                                       Content-Length)
 //!   201 sem corpo ao gravar o arquivo; 401 sem token ou com token errado;
-//!   503 se a Pasta ainda não foi escolhida.
+//!   503 se a Pasta ainda não foi escolhida. Um id já aceito responde 201 sem
+//!   outro Item nem outro arquivo, também depois de o PC reiniciar (os ids de
+//!   arquivo ficam em disco); id inválido é 400, como no texto. 400 também
+//!   quando o corpo fica 30 s sem nenhum byte (o lock do id é solto), chega
+//!   incompleto ou passa do tamanho declarado.
 //!
 //! Protocolo (SYN-004): direção PC -> celular. O PC é o remetente e gera o
 //! id do Item (spec, "Protocolo de Itens"); só a confirmação do celular
@@ -31,10 +40,17 @@
 //!                                 para continuar escutando. A conexão viva
 //!                                 é o sinal de presença.
 //!   Authorization: Bearer <token>
+//!   HEAD /listen                 200 se há presença (um GET /listen ou um
+//!                                 download autenticado ativo); 204 se não
+//!                                 há; 401 com token inválido.
+//!   Authorization: Bearer <token>
 //!
 //!   GET  /outbox/{id}/file       bytes de um Item de arquivo ainda
 //!                                 Pendente; 404 se o id não existir ou já
-//!                                 ter sido confirmado.
+//!                                 ter sido confirmado. Enquanto o corpo está
+//!                                 saindo, a conexão também é presença
+//!                                 (CLEAN-015). HEAD responde os mesmos
+//!                                 cabeçalhos sem corpo e sem presença.
 //!   Authorization: Bearer <token>
 //!
 //!   POST /outbox/{id}/ack        confirma o recebimento do Item `id` — só
@@ -66,15 +82,69 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use futures_util::StreamExt;
-use std::collections::{HashMap, HashSet};
-use std::io;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 /// Porta fixa na rede local. O celular a conhece pelo QR (SYN-005).
 pub const PORT: u16 = 47820;
+
+/// Tempo sem receber nenhum byte do corpo de um upload até abortá-lo como
+/// corpo incompleto e soltar o lock do id — sem isso, uma conexão que morre
+/// no meio do arquivo prende o lock para sempre.
+const UPLOAD_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// ponytail: só os últimos 1000 ids de arquivo aceitos; o celular reenvia o
+/// que ainda está na própria fila logo depois, não semanas depois.
+const ACCEPTED_FILE_IDS_KEPT: usize = 1000;
+
+/// Ids de arquivo aceitos, também em disco (ADR-0002): a Sessão e os ids de
+/// texto somem com o processo, mas o arquivo fica na Pasta, e o reenvio de um
+/// 201 que se perdeu antes de o PC reiniciar viraria `nome (1)`.
+struct AcceptedFileLog {
+    path: PathBuf,
+    recent: VecDeque<String>,
+}
+
+impl AcceptedFileLog {
+    fn load(path: &Path) -> io::Result<Self> {
+        let recent = match std::fs::read_to_string(path) {
+            Ok(text) => text.lines().map(str::to_string).collect(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => VecDeque::new(),
+            Err(e) => return Err(e),
+        };
+        Ok(AcceptedFileLog {
+            path: path.to_path_buf(),
+            recent,
+        })
+    }
+
+    /// Falhar aqui não recusa o arquivo, que já está na Pasta: no pior caso,
+    /// o reenvio depois de um reinício duplica, como antes deste registro.
+    fn record(&mut self, id: &str) {
+        self.recent.push_back(id.to_string());
+        let result = if self.recent.len() > 2 * ACCEPTED_FILE_IDS_KEPT {
+            let excess = self.recent.len() - ACCEPTED_FILE_IDS_KEPT;
+            self.recent.drain(..excess);
+            let temp = self.path.with_extension("tmp");
+            let text: String = self.recent.iter().map(|id| format!("{id}\n")).collect();
+            std::fs::write(&temp, text).and_then(|()| std::fs::rename(&temp, &self.path))
+        } else {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .and_then(|mut file| writeln!(file, "{id}"))
+        };
+        if let Err(e) = result {
+            eprintln!("não foi possível guardar o id de arquivo aceito {id}: {e}");
+        }
+    }
+}
 
 /// Fonte do token que autentica as requisições: um `String` fixo (a maioria
 /// dos testes de integração) ou um `Par` (SYN-005). Vindo de um `Par`,
@@ -116,12 +186,44 @@ struct AppState {
     /// Caminho de cada arquivo recebido que terminou de gravar, indexado pelo
     /// id do Item para que Itens antigos continuem apontando à Pasta original.
     received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
+    /// Ids que este processo já aceitou do remetente. A Sessão é em memória,
+    /// portanto a deduplicação tem o mesmo ciclo de vida dos Itens visíveis.
+    accepted_item_ids: Arc<Mutex<HashSet<String>>>,
+    /// `None` nos testes que não reiniciam o PC; o app sempre guarda.
+    accepted_file_log: Option<Arc<Mutex<AcceptedFileLog>>>,
+    /// ponytail: um lock global basta para os uploads com id — o timeout de
+    /// inatividade da leitura do corpo garante que o pior caso é esperar o
+    /// upload anterior estourar o timeout, nunca travar para sempre;
+    /// particionar por id se isso virar gargalo mensurável.
+    file_item_id_lock: Arc<tokio::sync::Mutex<()>>,
+    upload_inactivity_timeout: Duration,
+    #[cfg(test)]
+    before_file_item_id_lock: Arc<Mutex<Option<TestPause>>>,
+    #[cfg(test)]
+    after_file_rename: Arc<Mutex<Option<TestPause>>>,
 }
 
-/// Se há uma conexão `/listen` viva agora — é o que a spec chama de "o outro
-/// lado está na rede". Um contador, não um booleano: uma segunda conexão
-/// enquanto a primeira ainda não fechou não pode fazer a desconexão dela
-/// apagar a presença por engano.
+#[cfg(test)]
+#[derive(Clone)]
+struct TestPause {
+    reached: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+async fn pause_once(slot: &Mutex<Option<TestPause>>) {
+    let pause = slot.lock().expect("pausa de teste sem panic").take();
+    if let Some(pause) = pause {
+        pause.reached.notify_one();
+        pause.resume.notified().await;
+    }
+}
+
+/// Se há uma conexão viva agora com a fila de saída — `/listen` ou um
+/// download de `/outbox/{id}/file` em andamento — é o que a spec chama de "o
+/// outro lado está na rede" (CLEAN-015). Um contador, não um booleano: uma
+/// segunda conexão enquanto a primeira ainda não fechou não pode fazer a
+/// desconexão dela apagar a presença por engano.
 #[derive(Clone, Default)]
 pub struct Presence {
     inner: Arc<Mutex<PresenceInner>>,
@@ -139,7 +241,8 @@ impl Presence {
     }
 
     /// Chamado a cada vez que a presença muda (de ausente para presente ou
-    /// vice-versa), na thread que fechou ou abriu a conexão `/listen`.
+    /// vice-versa), na thread que fechou ou abriu a conexão (`/listen` ou
+    /// download).
     pub fn on_change(&self, listener: impl Fn(bool) + Send + Sync + 'static) {
         self.inner
             .lock()
@@ -148,8 +251,8 @@ impl Presence {
             .push(Box::new(listener));
     }
 
-    /// Marca uma conexão `/listen` como viva; solta a presença sozinha
-    /// quando o guarda sair de escopo (a conexão fechar).
+    /// Marca uma conexão (`/listen` ou download) como viva; solta a presença
+    /// sozinha quando o guarda sair de escopo (a conexão fechar).
     fn enter(&self) -> PresenceGuard {
         let mut inner = self.inner.lock().expect("presença sem panic");
         inner.count += 1;
@@ -222,6 +325,75 @@ pub fn spawn(
     outbox: Outbox,
     pasta: Option<PathBuf>,
 ) -> io::Result<Running> {
+    spawn_inner(
+        addr,
+        token,
+        items,
+        outbox,
+        pasta,
+        UPLOAD_INACTIVITY_TIMEOUT,
+        None,
+    )
+}
+
+/// Como `spawn`, guardando em `accepted_ids_file` os ids de arquivo aceitos,
+/// para o reenvio depois de um reinício do PC não duplicar o arquivo na Pasta.
+/// É o que o app usa.
+pub fn spawn_with_accepted_ids(
+    addr: SocketAddr,
+    token: impl Into<TokenCell>,
+    items: Items,
+    outbox: Outbox,
+    pasta: Option<PathBuf>,
+    accepted_ids_file: &Path,
+) -> io::Result<Running> {
+    spawn_inner(
+        addr,
+        token,
+        items,
+        outbox,
+        pasta,
+        UPLOAD_INACTIVITY_TIMEOUT,
+        Some(accepted_ids_file),
+    )
+}
+
+/// Como `spawn`, mas com o timeout de inatividade do upload configurável —
+/// só para os testes de integração encurtarem sem esperar os 30s de verdade.
+pub fn spawn_with_upload_timeout(
+    addr: SocketAddr,
+    token: impl Into<TokenCell>,
+    items: Items,
+    outbox: Outbox,
+    pasta: Option<PathBuf>,
+    upload_inactivity_timeout: Duration,
+) -> io::Result<Running> {
+    spawn_inner(
+        addr,
+        token,
+        items,
+        outbox,
+        pasta,
+        upload_inactivity_timeout,
+        None,
+    )
+}
+
+fn spawn_inner(
+    addr: SocketAddr,
+    token: impl Into<TokenCell>,
+    items: Items,
+    outbox: Outbox,
+    pasta: Option<PathBuf>,
+    upload_inactivity_timeout: Duration,
+    accepted_ids_file: Option<&Path>,
+) -> io::Result<Running> {
+    let accepted_file_log = accepted_ids_file.map(AcceptedFileLog::load).transpose()?;
+    let accepted_item_ids: HashSet<String> = accepted_file_log
+        .iter()
+        .flat_map(|log| log.recent.iter().cloned())
+        .collect();
+    let accepted_file_log = accepted_file_log.map(|log| Arc::new(Mutex::new(log)));
     let token = token.into();
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
@@ -262,6 +434,14 @@ pub fn spawn(
                     pasta: pasta_da_thread,
                     leases: Arc::new(Mutex::new(HashSet::new())),
                     received_files: received_files_da_thread,
+                    accepted_item_ids: Arc::new(Mutex::new(accepted_item_ids)),
+                    accepted_file_log,
+                    file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+                    upload_inactivity_timeout,
+                    #[cfg(test)]
+                    before_file_item_id_lock: Arc::new(Mutex::new(None)),
+                    #[cfg(test)]
+                    after_file_rename: Arc::new(Mutex::new(None)),
                 });
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
@@ -284,7 +464,7 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/items/text", post(post_text))
         .route("/items/file", post(post_file))
-        .route("/listen", get(get_listen))
+        .route("/listen", get(get_listen).head(head_listen))
         .route("/outbox/{id}/file", get(get_outbox_file))
         .route("/outbox/{id}/ack", post(post_outbox_ack))
         .with_state(state)
@@ -298,17 +478,62 @@ fn authorized(headers: &HeaderMap, token: &TokenCell) -> bool {
         .is_some_and(|t| t.trim() == token.get())
 }
 
+fn item_id(headers: &HeaderMap) -> Result<Option<String>, StatusCode> {
+    let Some(value) = headers.get("x-item-id") else {
+        return Ok(None);
+    };
+    let id = value.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
+    if id.is_empty() || id.len() > 128 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(Some(id.to_string()))
+}
+
 async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: String) -> StatusCode {
     if !authorized(&headers, &state.token) {
         return StatusCode::UNAUTHORIZED;
     }
+    let item_id = match item_id(&headers) {
+        Ok(id) => id,
+        Err(status) => return status,
+    };
+    let mut accepted = state
+        .accepted_item_ids
+        .lock()
+        .expect("ids aceitos sem panic");
+    if item_id.as_ref().is_some_and(|id| accepted.contains(id)) {
+        return StatusCode::CREATED;
+    }
     state.items.push_text(body);
+    if let Some(id) = item_id {
+        accepted.insert(id);
+    }
     StatusCode::CREATED
 }
 
 async fn post_file(State(state): State<AppState>, request: Request) -> StatusCode {
     if !authorized(request.headers(), &state.token) {
         return StatusCode::UNAUTHORIZED;
+    }
+    let item_id = match item_id(request.headers()) {
+        Ok(id) => id,
+        Err(status) => return status,
+    };
+    #[cfg(test)]
+    pause_once(&state.before_file_item_id_lock).await;
+    let item_id_lock = if item_id.is_some() {
+        Some(state.file_item_id_lock.clone().lock_owned().await)
+    } else {
+        None
+    };
+    if item_id.as_ref().is_some_and(|id| {
+        state
+            .accepted_item_ids
+            .lock()
+            .expect("ids aceitos sem panic")
+            .contains(id)
+    }) {
+        return StatusCode::CREATED;
     }
     let Some(pasta) = state.pasta.lock().expect("Pasta sem panic").clone() else {
         return StatusCode::SERVICE_UNAVAILABLE;
@@ -388,7 +613,18 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 
     let mut stream = request.into_body().into_data_stream();
     let mut received: u64 = 0;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = match tokio::time::timeout(state.upload_inactivity_timeout, stream.next()).await
+        {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_elapsed) => {
+                // Sem nenhum byte por muito tempo: aborta como corpo
+                // incompleto e solta o lock do id. fail_guard e o guarda do
+                // lease cuidam do resto ao sair de escopo.
+                return StatusCode::BAD_REQUEST;
+            }
+        };
         let bytes = match chunk {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -424,12 +660,15 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     // já podiam ter acontecido pela metade e o aviso de fim nunca sair.
     let items = state.items.clone();
     let received_files = state.received_files.clone();
+    let accepted_item_ids = state.accepted_item_ids.clone();
+    let accepted_file_log = state.accepted_file_log.clone();
     let final_path_bg = final_path.clone();
     let temp_path_bg = temp_path.clone();
     let concluido = tokio::spawn(async move {
         // Move a reserva do nome e o guarda de falha para dentro da tarefa:
         // eles só saem de cena depois do rename, nunca enquanto ele ainda
         // está em voo.
+        let _item_id_lock = item_id_lock;
         let _lease = _lease;
         let _fail_guard = fail_guard;
         // Rebind depois do guarda pela mesma razão de lá em cima: se o flush
@@ -449,6 +688,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 
         match tokio::fs::rename(&temp_path_bg, &final_path_bg).await {
             Ok(()) => {
+                #[cfg(test)]
+                pause_once(&state.after_file_rename).await;
                 // Só agora o arquivo existe com o nome final: o sinal de fim
                 // não pode vir antes disso, ou a UI tentaria ler um caminho
                 // que ainda não existe.
@@ -457,6 +698,17 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                     .expect("arquivos recebidos sem panic")
                     .insert(item.id, final_path_bg.clone());
                 items.file_done(item.id);
+                if let Some(id) = item_id {
+                    // Depois do rename: um crash entre os dois duplica, nunca
+                    // dá 201 a um reenvio cujo arquivo não chegou à Pasta.
+                    if let Some(log) = &accepted_file_log {
+                        log.lock().expect("ids de arquivo sem panic").record(&id);
+                    }
+                    accepted_item_ids
+                        .lock()
+                        .expect("ids aceitos sem panic")
+                        .insert(id);
+                }
                 true
             }
             Err(e) => {
@@ -481,7 +733,8 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
 /// Bloqueia até a fila de saída ter ao menos um Pendente, devolve todos os
 /// que houver então (um por linha) e fecha — long-poll clássico: o celular
 /// reabre para continuar escutando. A conexão viva, do início ao fim desta
-/// função, é o sinal de presença.
+/// função, é um dos dois sinais de presença (o outro é um download em
+/// andamento, `get_outbox_file`, CLEAN-015).
 async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     let mut token_changes = state.token.0.subscribe();
     if !authorized(&headers, &state.token) {
@@ -513,9 +766,27 @@ async fn get_listen(State(state): State<AppState>, headers: HeaderMap) -> impl I
     (StatusCode::OK, corpo).into_response()
 }
 
-/// Bytes de um Item de arquivo ainda Pendente na fila de saída.
+async fn head_listen(State(state): State<AppState>, headers: HeaderMap) -> StatusCode {
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    if state.presence.get() {
+        StatusCode::OK
+    } else {
+        StatusCode::NO_CONTENT
+    }
+}
+
+/// Bytes de um Item de arquivo ainda Pendente na fila de saída. O guarda de
+/// presença vai dentro do stream do corpo, não no handler: o hyper escreve o
+/// corpo depois de o handler retornar, então um guarda preso ao handler
+/// soltaria a presença antes de o primeiro byte sair (CLEAN-015). Em pedaços
+/// de 64 KiB para o guarda sobreviver até o stream acabar ou o cliente
+/// desconectar — um pedaço só (o arquivo inteiro de uma vez) faria o stream
+/// terminar, e o guarda cair, na primeira leitura.
 async fn get_outbox_file(
     State(state): State<AppState>,
+    method: axum::http::Method,
     headers: HeaderMap,
     AxPath(id): AxPath<u64>,
 ) -> impl IntoResponse {
@@ -523,7 +794,37 @@ async fn get_outbox_file(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     match state.outbox.file_bytes(id) {
-        Ok(bytes) => (StatusCode::OK, bytes).into_response(),
+        Ok(bytes) => {
+            const CHUNK: usize = 64 * 1024;
+            let tamanho = bytes.len();
+            // Content-Length explícito: sem ele o hyper não sabe o tamanho de
+            // um corpo em stream e usa Transfer-Encoding: chunked, que muda o
+            // formato dos bytes na rede. Content-Type é o que a tupla
+            // `(StatusCode, Vec<u8>)` mandava antes.
+            let resposta = axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header(axum::http::header::CONTENT_LENGTH, tamanho)
+                .header(axum::http::header::CONTENT_TYPE, "application/octet-stream");
+            // O axum manda HEAD para este handler, mas sem corpo não há
+            // download: entrar e sair da presença piscaria a janela.
+            if method == axum::http::Method::HEAD {
+                return resposta
+                    .body(axum::body::Body::empty())
+                    .expect("resposta HEAD com Content-Length é válida");
+            }
+            let guard = state.presence.enter();
+            // `Bytes::slice` fatia sem copiar: o arquivo fica uma vez só na
+            // memória, como antes do stream.
+            let bytes = axum::body::Bytes::from(bytes);
+            let stream =
+                futures_util::stream::iter((0..tamanho).step_by(CHUNK)).map(move |inicio| {
+                    let _presenca = &guard;
+                    Ok::<_, io::Error>(bytes.slice(inicio..(inicio + CHUNK).min(tamanho)))
+                });
+            resposta
+                .body(axum::body::Body::from_stream(stream))
+                .expect("resposta com Content-Length e corpo em stream é válida")
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
             eprintln!("falha ao ler o arquivo de saída do Item {id}: {e}");
@@ -662,4 +963,89 @@ fn random_suffix() -> String {
     let mut bytes = [0u8; 8];
     let _ = getrandom::fill(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+
+    fn file_request(id: &str, name: &str, body: &'static [u8]) -> Request {
+        Request::builder()
+            .method("POST")
+            .uri("/items/file")
+            .header("authorization", "Bearer segredo-de-teste")
+            .header("x-item-id", id)
+            .header("x-file-name", name)
+            .header("content-length", body.len())
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    fn test_pause() -> TestPause {
+        TestPause {
+            reached: Arc::new(tokio::sync::Notify::new()),
+            resume: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    #[test]
+    fn retry_espera_id_ser_registrado_apos_cancelar_handler() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let root = tempfile::tempdir().unwrap();
+            let pasta = root.path().join("pasta");
+            let finalization = test_pause();
+            let state = AppState {
+                token: TOKEN_FOR_TEST.to_string().into(),
+                items: Items::new(),
+                outbox: Outbox::new(root.path().join("outbox")).unwrap(),
+                presence: Presence::default(),
+                pasta: Arc::new(Mutex::new(Some(pasta.clone()))),
+                leases: Arc::new(Mutex::new(HashSet::new())),
+                received_files: Arc::new(Mutex::new(HashMap::new())),
+                accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
+                accepted_file_log: None,
+                file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+                upload_inactivity_timeout: UPLOAD_INACTIVITY_TIMEOUT,
+                before_file_item_id_lock: Arc::new(Mutex::new(None)),
+                after_file_rename: Arc::new(Mutex::new(Some(finalization.clone()))),
+            };
+
+            let first = tokio::spawn(post_file(
+                State(state.clone()),
+                file_request("mesmo-id", "arquivo.bin", b"primeiro"),
+            ));
+            finalization.reached.notified().await;
+            first.abort();
+            assert!(first.await.unwrap_err().is_cancelled());
+
+            let before_retry_lock = test_pause();
+            *state
+                .before_file_item_id_lock
+                .lock()
+                .expect("pausa de teste sem panic") = Some(before_retry_lock.clone());
+            let retry = tokio::spawn(post_file(
+                State(state.clone()),
+                file_request("mesmo-id", "arquivo.bin", b"retry"),
+            ));
+            before_retry_lock.reached.notified().await;
+
+            assert!(
+                state.file_item_id_lock.try_lock().is_err(),
+                "a finalização deve manter o id reservado após cancelar o handler"
+            );
+            before_retry_lock.resume.notify_one();
+            finalization.resume.notify_one();
+
+            assert_eq!(retry.await.unwrap(), StatusCode::CREATED);
+            assert_eq!(state.items.snapshot().len(), 1);
+            assert_eq!(std::fs::read_dir(pasta).unwrap().count(), 1);
+        });
+    }
+
+    const TOKEN_FOR_TEST: &str = "segredo-de-teste";
 }

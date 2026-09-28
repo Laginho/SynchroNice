@@ -3,9 +3,17 @@ package synchronice.protocolclient
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.Socket
+import java.io.RandomAccessFile
+import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -36,7 +44,282 @@ private fun tempFile(bytes: ByteArray): File =
         deleteOnExit()
     }
 
+private fun serverSocket(port: Int = 0) = ServerSocket().apply {
+    reuseAddress = true
+    bind(InetSocketAddress("127.0.0.1", port))
+}
+
+private fun textRequest(server: ServerSocket, respond: Boolean): String? = server.accept().use { socket ->
+    val input = socket.getInputStream()
+    val header = StringBuilder()
+    while (!header.endsWith("\r\n\r\n")) {
+        val byte = input.read()
+        check(byte != -1) { "request ended before headers" }
+        header.append(byte.toChar())
+    }
+    val headers = header.lineSequence().drop(1).filter { it.contains(':') }.associate {
+        it.substringBefore(':').lowercase() to it.substringAfter(':').trim()
+    }
+    val body = input.readNBytes(headers.getValue("content-length").toInt())
+    assertEquals("texto", body.toString(Charsets.UTF_8))
+    server.close()
+    if (respond) {
+        socket.getOutputStream().write("HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+    }
+    headers["x-item-id"]
+}
+
 class ProtocolClientTest {
+
+    @Test
+    fun `upload lento que termina com 201 sai da fila`() {
+        val file = tempFile(ByteArray(1024 * 1024))
+        val paused = AtomicBoolean()
+        val port = freePort()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port)
+            sender.enqueueFile(file)
+
+            sender.retryPending(onFileProgress = {
+                if (paused.compareAndSet(false, true)) Thread.sleep(32_000)
+            })
+
+            assertFalse(sender.hasPending())
+        } finally {
+            server.stop(0)
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `escrita bloqueada devolve o controle e preserva o Pendente`() {
+        val dir = kotlin.io.path.createTempDirectory("blocked-upload").toFile()
+        val file = File(dir, "video.bin")
+        RandomAccessFile(file, "rw").use { it.setLength(64L * 1024 * 1024) }
+        val server = serverSocket()
+        val accepted = AtomicReference<Socket?>()
+        val connected = CountDownLatch(1)
+        val executor = Executors.newCachedThreadPool()
+        try {
+            executor.submit {
+                server.accept().also {
+                    it.receiveBufferSize = 1024
+                    accepted.set(it)
+                    connected.countDown()
+                }
+                CountDownLatch(1).await()
+            }
+            val sender = client(server.localPort)
+            sender.enqueueFile(file)
+            val retry = executor.submit { sender.retryPending() }
+            assertTrue(connected.await(5, TimeUnit.SECONDS))
+
+            retry.get(35, TimeUnit.SECONDS)
+
+            assertTrue(sender.hasPending())
+        } finally {
+            accepted.get()?.close()
+            server.close()
+            executor.shutdownNow()
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `texto aceito sem resposta mantem id ate confirmacao no retry`() {
+        val dir = kotlin.io.path.createTempDirectory("pending-item-id").toFile()
+        val queue = File(dir, "pending.txt")
+        val ids = mutableListOf<String?>()
+        val executor = Executors.newSingleThreadExecutor()
+        val lostResponse = serverSocket()
+        val port = lostResponse.localPort
+        try {
+            val firstRequest = executor.submit<String?> { textRequest(lostResponse, respond = false) }
+            val sender = client(port, FilePendingQueueStore(queue))
+            sender.enqueueText("texto")
+            sender.retryPending()
+            ids.add(firstRequest.get(5, TimeUnit.SECONDS))
+            assertTrue(sender.hasPending())
+
+            val confirmation = serverSocket(port)
+            val secondRequest = executor.submit<String?> { textRequest(confirmation, respond = true) }
+            val restored = client(port, FilePendingQueueStore(queue))
+            restored.retryPending()
+            ids.add(secondRequest.get(5, TimeUnit.SECONDS))
+
+            assertEquals(2, ids.size)
+            assertTrue(ids.first()?.isNotBlank() == true)
+            assertEquals(ids.first(), ids.last())
+            assertFalse(restored.hasPending())
+        } finally {
+            lostResponse.close()
+            executor.shutdownNow()
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `texto enviado direto e aceito sem resposta usa o mesmo id no retry`() {
+        val executor = Executors.newSingleThreadExecutor()
+        val lostResponse = serverSocket()
+        val port = lostResponse.localPort
+        try {
+            val firstRequest = executor.submit<String?> { textRequest(lostResponse, respond = false) }
+            val sender = client(port)
+            sender.sendText("texto")
+            val firstId = firstRequest.get(5, TimeUnit.SECONDS)
+            assertTrue(sender.hasPending())
+
+            val confirmation = serverSocket(port)
+            val secondRequest = executor.submit<String?> { textRequest(confirmation, respond = true) }
+            sender.retryPending()
+
+            assertTrue(firstId?.isNotBlank() == true)
+            assertEquals(firstId, secondRequest.get(5, TimeUnit.SECONDS))
+            assertFalse(sender.hasPending())
+        } finally {
+            lostResponse.close()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `arquivo grande aceito sem resposta mantem id e retry confirma sem reenviar corpo`() {
+        val dir = kotlin.io.path.createTempDirectory("pending-file-id").toFile()
+        val queue = File(dir, "pending.txt")
+        val original = File(dir, "video.bin").apply { writeBytes(ByteArray(10 * 1024 * 1024)) }
+        val ids = mutableListOf<String?>()
+        val attempts = java.util.concurrent.atomic.AtomicInteger()
+        val port = freePort()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            if (attempts.incrementAndGet() == 1) {
+                exchange.requestBody.readBytes()
+            } else {
+                exchange.sendResponseHeaders(201, -1)
+            }
+            exchange.close()
+        }
+        try {
+            val sender = client(port, FilePendingQueueStore(queue))
+            sender.enqueueFile(original)
+            sender.retryPending()
+            assertTrue(sender.hasPending())
+
+            val restored = client(port, FilePendingQueueStore(queue))
+            restored.retryPending()
+
+            assertEquals(2, ids.size)
+            assertTrue(ids.first()?.isNotBlank() == true)
+            assertEquals(ids.first(), ids.last())
+            assertFalse(restored.hasPending())
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `Itens iguais recebem ids diferentes`() {
+        val ids = mutableListOf<String?>()
+        val port = freePort()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port)
+            sender.enqueueText("igual")
+            sender.enqueueText("igual")
+
+            sender.retryPending()
+
+            assertEquals(2, ids.filterNotNull().distinct().size)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `arquivo so pede primeiro plano depois que a conexao abre`() {
+        val unreachablePort = freePort()
+        val file = tempFile(ByteArray(10 * 1024 * 1024))
+        val starts = mutableListOf<Long>()
+        try {
+            val sender = client(unreachablePort)
+            sender.enqueueFile(file)
+
+            sender.retryPending(onFileStart = starts::add)
+
+            assertTrue(starts.isEmpty())
+            assertTrue(sender.hasPending())
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `arquivo grande que entra depois da leitura inicial ainda pede primeiro plano`() {
+        val file = tempFile(ByteArray(10 * 1024 * 1024))
+        val starts = mutableListOf<Long>()
+        val port = freePort()
+        val server = fakeServer(port, "/items/file") { exchange ->
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port)
+            assertFalse(sender.hasPending()) // leitura anterior do worker
+            sender.enqueueFile(file) // intercala antes de o dreno adquirir o mutex
+
+            sender.retryPending(onFileStart = starts::add)
+
+            assertEquals(listOf(file.length()), starts)
+            assertFalse(sender.hasPending())
+        } finally {
+            server.stop(0)
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `enfileirar para trabalho futuro nao envia antes da tentativa e preserva arquivo`() {
+        val dir = kotlin.io.path.createTempDirectory("background-send").toFile()
+        val queue = File(dir, "pending.txt")
+        val original = File(dir, "foto.bin").apply { writeText("foto") }
+        val requests = mutableListOf<String>()
+        val port = freePort()
+        val server = fakeServer(port, "/items/") { exchange ->
+            requests.add(exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port, FilePendingQueueStore(queue))
+            sender.enqueueText("texto")
+            sender.enqueueFile(original)
+            assertEquals(emptyList(), requests)
+            assertTrue(original.delete())
+
+            val restored = client(port, FilePendingQueueStore(queue))
+            restored.retryPending()
+
+            assertEquals(listOf("texto", "foto"), requests)
+            assertFalse(restored.hasPending())
+            assertEquals(emptyList(), File(dir, "pending.txt.payloads").listFiles()?.toList() ?: emptyList())
+        } finally {
+            server.stop(0)
+            dir.deleteRecursively()
+        }
+    }
 
     @Test
     fun `503 preserva texto e arquivo para retry e 401 preserva pendentes`() {
@@ -227,6 +510,126 @@ class ProtocolClientTest {
         } finally {
             server.stop(0)
         }
+    }
+
+    @Test
+    fun `consulta presenca de listen usa HEAD autenticado e so confirma 200`() {
+        val port = freePort()
+        val status = java.util.concurrent.atomic.AtomicInteger(204)
+        val requests = mutableListOf<Pair<String, String?>>()
+        val server = fakeServer(port, "/listen") { exchange ->
+            requests.add(exchange.requestMethod to exchange.requestHeaders.getFirst("Authorization"))
+            exchange.sendResponseHeaders(status.get(), -1)
+            exchange.close()
+        }
+        try {
+            val receiver = client(port)
+            assertFalse(receiver.isListening())
+            status.set(200)
+            assertTrue(receiver.isListening())
+            status.set(204)
+            assertFalse(receiver.isListening())
+            assertEquals(
+                listOf<Pair<String, String?>>(
+                    "HEAD" to "Bearer $TOKEN",
+                    "HEAD" to "Bearer $TOKEN",
+                    "HEAD" to "Bearer $TOKEN",
+                ),
+                requests,
+            )
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `listen sem Itens nao expira depois de trinta segundos`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            try {
+                Thread.sleep(31_000)
+                exchange.sendResponseHeaders(200, -1)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<List<Item>> { client(port).listen() }
+
+            assertEquals(emptyList(), result.get(35, TimeUnit.SECONDS))
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `listen abandona uma conexao silenciosa para poder resolver o PC novamente`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            try {
+                Thread.sleep(42_000)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<List<Item>> { client(port).listen() }
+            val failure = assertFailsWith<java.util.concurrent.ExecutionException> {
+                result.get(40, TimeUnit.SECONDS)
+            }
+            assertTrue(failure.cause is java.net.SocketTimeoutException)
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `fechar escuta encerra GET ativo sem esperar timeout`() {
+        val port = freePort()
+        val entered = CountDownLatch(1)
+        val server = fakeServer(port, "/listen") { exchange ->
+            entered.countDown()
+            try {
+                Thread.sleep(10_000)
+            } finally {
+                exchange.close()
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val receiver = client(port)
+            val result = executor.submit<List<Item>> { receiver.listen() }
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+
+            receiver.closeListen()
+
+            val failure = assertFailsWith<java.util.concurrent.ExecutionException> {
+                result.get(3, TimeUnit.SECONDS)
+            }
+            assertTrue(failure.cause is IOException)
+        } finally {
+            server.stop(0)
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `presenca de listen nao e confirmada em 401 ou falha de rede`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        try {
+            assertEquals(401, assertFailsWith<ProtocolRejectedException> { client(port).isListening() }.code)
+        } finally {
+            server.stop(0)
+        }
+        assertFalse(client(freePort()).isListening())
     }
 
     @Test
@@ -720,6 +1123,77 @@ class ProtocolClientTest {
         } finally {
             server.stop(0)
             destination.delete()
+        }
+    }
+
+    @Test
+    fun `download em stream fecha e publica bytes completos antes de confirmar`() {
+        val port = freePort()
+        val content = ByteArray(50_000) { (it % 256).toByte() }
+        var closed = false
+        var published = false
+        val destination = object : ByteArrayOutputStream() {
+            override fun close() { closed = true; super.close() }
+        }
+        val ackSawSaved = AtomicBoolean(false)
+        val server = fakeServer(port, "/outbox/42/file") { exchange ->
+            exchange.sendResponseHeaders(200, content.size.toLong())
+            exchange.responseBody.use { it.write(content) }
+        }
+        server.createContext("/outbox/42/ack") { exchange ->
+            ackSawSaved.set(closed && published && destination.toByteArray().contentEquals(content))
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        try {
+            val progress = mutableListOf<Int>()
+            client(port).downloadFile(
+                Item.FileMeta(42, 100, "foto.png", content.size.toLong()),
+                destination,
+                onSaved = { published = true },
+                onProgress = { progress.add(it) },
+            )
+            assertTrue(ackSawSaved.get())
+            assertEquals(content.toList(), destination.toByteArray().toList())
+            assertEquals(progress.sorted(), progress)
+            assertEquals(100, progress.last())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `stream incompleto ou falha ao fechar ou publicar nao confirma`() {
+        for (failure in listOf("incomplete", "close", "publish")) {
+            val port = freePort()
+            val acked = AtomicBoolean(false)
+            val server = fakeServer(port, "/outbox/42/file") { exchange ->
+                exchange.sendResponseHeaders(200, 3)
+                exchange.responseBody.use { it.write(byteArrayOf(1, 2, 3)) }
+            }
+            server.createContext("/outbox/42/ack") { exchange ->
+                acked.set(true)
+                exchange.sendResponseHeaders(204, -1)
+                exchange.close()
+            }
+            val destination = object : ByteArrayOutputStream() {
+                override fun close() {
+                    if (failure == "close") throw IOException("disco cheio")
+                    super.close()
+                }
+            }
+            try {
+                assertFailsWith<IOException> {
+                    client(port).downloadFile(
+                        Item.FileMeta(42, 100, "foto.png", if (failure == "incomplete") 10 else 3),
+                        destination,
+                        onSaved = { if (failure == "publish") throw IOException("publicação falhou") },
+                    )
+                }
+                assertFalse(acked.get(), failure)
+            } finally {
+                server.stop(0)
+            }
         }
     }
 

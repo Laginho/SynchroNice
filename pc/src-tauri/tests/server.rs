@@ -5,7 +5,7 @@ use pc_lib::outbox::{OutBody, OutItem, Outbox};
 use pc_lib::par::Par;
 use pc_lib::server;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::time::Duration;
 
 const TOKEN: &str = "segredo-de-teste";
@@ -94,6 +94,276 @@ fn rotacionar_descarta_pendentes_e_revoga_escuta_aberta() {
 }
 
 #[test]
+fn head_listen_confirma_presenca_sem_consumir_o_long_poll() {
+    let raiz = tempfile::tempdir().unwrap();
+    let par = Par::load_or_create(raiz.path()).unwrap();
+    let token = par.token();
+    let outbox = Outbox::new(raiz.path().join("outbox")).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        par,
+        Items::new(),
+        outbox.clone(),
+        None,
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        204
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some("token-errado"),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        401
+    );
+
+    let (online_tx, online_rx) = std::sync::mpsc::channel();
+    running.presence.on_change(move |online| {
+        if online {
+            let _ = online_tx.send(());
+        }
+    });
+    let listen_base = base.clone();
+    let listen_token = token.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        done_tx
+            .send(requisicao_crua(
+                &listen_base,
+                "GET",
+                "/listen",
+                Some(&listen_token),
+            ))
+            .unwrap();
+    });
+
+    online_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        200
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some("token-errado"),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        401
+    );
+    outbox
+        .enqueue_text("entrega continua no GET".into())
+        .unwrap();
+
+    let (status, body) = done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(status, 200);
+    assert!(String::from_utf8(body)
+        .unwrap()
+        .contains("entrega continua no GET"));
+}
+
+#[test]
+fn download_em_andamento_conta_como_presenca() {
+    let raiz = tempfile::tempdir().unwrap();
+    let par = Par::load_or_create(raiz.path()).unwrap();
+    let token = par.token();
+    let outbox = Outbox::new(raiz.path().join("outbox")).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        par,
+        Items::new(),
+        outbox.clone(),
+        None,
+    )
+    .unwrap();
+    let base = format!("http://{}", running.addr);
+
+    // Grande o bastante para não caber nos buffers de socket — sem isso o GET
+    // termina antes de o teste conseguir segurar a conexão em andamento.
+    let bytes = vec![b'X'; 8 * 1024 * 1024];
+    let item = outbox
+        .enqueue_file("grande.bin".to_string(), &bytes)
+        .expect("enfileira arquivo");
+
+    let (online_tx, online_rx) = std::sync::mpsc::channel();
+    running.presence.on_change(move |online| {
+        let _ = online_tx.send(online);
+    });
+
+    let (status, stream) =
+        conecta_e_le_status_sem_ler_corpo(&base, &format!("/outbox/{}/file", item.id), &token);
+    assert_eq!(status, 200);
+
+    assert!(
+        online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "critério 1: download em andamento, sem /listen aberto, entra na presença"
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        200,
+        "critério 1: HEAD /listen confirma a presença do download"
+    );
+
+    // Solta o socket sem ler o corpo — desconecta no meio.
+    drop(stream);
+    assert!(
+        !online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "critério 2 (desconecta no meio): presença cai quando o cliente some"
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        204,
+        "critério 2: HEAD /listen volta a 204"
+    );
+
+    // Mesmo GET, lido até o fim desta vez: presença cai de novo, e os bytes
+    // continuam idênticos ao arquivo enfileirado (critério 4).
+    let (status, mut stream) =
+        conecta_e_le_status_sem_ler_corpo(&base, &format!("/outbox/{}/file", item.id), &token);
+    assert_eq!(status, 200);
+    assert!(online_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+
+    let mut corpo = Vec::new();
+    stream.read_to_end(&mut corpo).expect("lê corpo até o fim");
+    assert_eq!(
+        corpo, bytes,
+        "critério 4: bytes idênticos ao arquivo enfileirado"
+    );
+    assert!(
+        !online_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "critério 2 (termina): presença cai quando o GET termina"
+    );
+    assert_eq!(
+        requisicao_crua_com_timeout(
+            &base,
+            "HEAD",
+            "/listen",
+            Some(&token),
+            Some(Duration::from_secs(2)),
+        )
+        .0,
+        204
+    );
+
+    // Critério 3: recusado (401) ou id inexistente (404) não mexe na presença.
+    let (status, _) = requisicao_crua(
+        &base,
+        "GET",
+        &format!("/outbox/{}/file", item.id),
+        Some("token-errado"),
+    );
+    assert_eq!(status, 401);
+    let (status, _) = requisicao_crua(&base, "GET", "/outbox/99999/file", Some(&token));
+    assert_eq!(status, 404);
+    assert!(
+        online_rx.try_recv().is_err(),
+        "critério 3: 401 e 404 não disparam on_change"
+    );
+
+    // O axum responde HEAD com o handler do GET, mas sem corpo não há download em andamento.
+    let (status, _) = requisicao_crua(
+        &base,
+        "HEAD",
+        &format!("/outbox/{}/file", item.id),
+        Some(&token),
+    );
+    assert_eq!(status, 200);
+    assert!(
+        online_rx.recv_timeout(Duration::from_millis(500)).is_err(),
+        "HEAD no arquivo não entra nem sai da presença"
+    );
+}
+
+#[test]
+fn reenvio_de_arquivo_depois_de_reiniciar_o_pc_nao_duplica_na_pasta() {
+    let raiz = tempfile::tempdir().unwrap();
+    let pasta = raiz.path().join("pasta");
+    std::fs::create_dir_all(&pasta).unwrap();
+    let ids = raiz.path().join("ids-aceitos.txt");
+    // Histórico no disco: o próximo upload deve compactá-lo para os 1000 ids mais recentes.
+    let historico: String = (0..2000).map(|i| format!("antigo-{i}\n")).collect();
+    std::fs::write(&ids, historico).unwrap();
+    let sobe = |outbox: &str| {
+        let running = server::spawn_with_accepted_ids(
+            "127.0.0.1:0".parse().unwrap(),
+            TOKEN.to_string(),
+            Items::new(),
+            Outbox::new(raiz.path().join(outbox)).unwrap(),
+            Some(pasta.clone()),
+            &ids,
+        )
+        .unwrap();
+        format!("http://{}", running.addr)
+    };
+
+    let antes = sobe("outbox-1");
+    assert_eq!(
+        post_arquivo_com_id(&antes, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+    // O 201 se perdeu e o PC reiniciou: Sessão nova, mas o arquivo continua na Pasta.
+    let depois = sobe("outbox-2");
+    let persistidos = std::fs::read_to_string(&ids).unwrap();
+    assert_eq!(persistidos.lines().count(), 1000);
+    assert_eq!(persistidos.lines().next(), Some("antigo-1001"));
+    assert_eq!(persistidos.lines().last(), Some("arquivo-1"));
+    assert_eq!(
+        post_arquivo_com_id(&depois, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+
+    assert_eq!(std::fs::read_dir(&pasta).unwrap().count(), 1);
+    assert_eq!(
+        post_arquivo_com_id(&depois, TOKEN, "antigo-1999", "recente.bin", b""),
+        201
+    );
+    assert!(!pasta.join("recente.bin").exists());
+    assert_eq!(
+        post_arquivo_com_id(&depois, TOKEN, "antigo-0", "expirado.bin", b"novo"),
+        201
+    );
+    assert_eq!(std::fs::read(pasta.join("expirado.bin")).unwrap(), b"novo");
+}
+
+#[test]
 fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
     let raiz = tempfile::tempdir().unwrap();
     let pasta = raiz.path().join("pasta");
@@ -107,7 +377,9 @@ fn escolher_pasta_com_servidor_no_ar_libera_upload_sem_reiniciar() {
     )
     .unwrap();
     let base = format!("http://{}", running.addr);
-    assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b"foto"), 503);
+    // Corpo vazio de propósito: sem Pasta o 503 sai antes de ler o corpo, e no Windows
+    // fechar o socket com bytes não lidos pode virar RST (10053) antes de o cliente ler o 503.
+    assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b""), 503);
     running.escolher_pasta(raiz.path(), &pasta).unwrap();
     assert_eq!(post_arquivo(&base, Some(TOKEN), "foto.png", b"foto"), 201);
     assert_eq!(std::fs::read(pasta.join("foto.png")).unwrap(), b"foto");
@@ -201,6 +473,26 @@ fn sobe() -> (String, Items, Outbox, tempfile::TempDir) {
     (format!("http://{}", running.addr), items, outbox, raiz)
 }
 
+/// Como `sobe()`, mas com o timeout de inatividade do upload encurtado, para
+/// os testes de travamento não esperarem os 30 s de verdade.
+fn sobe_com_timeout_de_upload(timeout: Duration) -> (String, Items, Outbox, tempfile::TempDir) {
+    let raiz = tempfile::tempdir().expect("tempdir");
+    let pasta = raiz.path().join("pasta");
+    std::fs::create_dir_all(&pasta).expect("cria Pasta");
+    let items = Items::new();
+    let outbox = Outbox::new(raiz.path().join("outbox")).expect("cria fila de saída");
+    let running = server::spawn_with_upload_timeout(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        items.clone(),
+        outbox.clone(),
+        Some(pasta.clone()),
+        timeout,
+    )
+    .expect("servidor sobe em porta aleatória");
+    (format!("http://{}", running.addr), items, outbox, raiz)
+}
+
 /// Como `sobe()`, mas autentica com o token vivo de `par` em vez de um
 /// `TOKEN` fixo — rotacionar `par` depois já vale para o servidor, sem
 /// reiniciá-lo (SYN-005).
@@ -241,6 +533,17 @@ fn post_texto(base: &str, token: Option<&str>, texto: &str) -> u16 {
         .as_u16()
 }
 
+fn post_texto_com_id(base: &str, token: &str, id: &str, texto: &str) -> u16 {
+    agent()
+        .post(format!("{base}/items/text"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("X-Item-Id", id)
+        .send(texto)
+        .expect("conexão com o servidor")
+        .status()
+        .as_u16()
+}
+
 /// POST /items/file com `bytes` no corpo e o nome dado; devolve o status HTTP.
 fn post_arquivo(base: &str, token: Option<&str>, nome: &str, bytes: &[u8]) -> u16 {
     let mut req = agent()
@@ -251,6 +554,19 @@ fn post_arquivo(base: &str, token: Option<&str>, nome: &str, bytes: &[u8]) -> u1
         req = req.header("Authorization", format!("Bearer {t}"));
     }
     req.send(bytes)
+        .expect("conexão com o servidor")
+        .status()
+        .as_u16()
+}
+
+fn post_arquivo_com_id(base: &str, token: &str, id: &str, nome: &str, bytes: &[u8]) -> u16 {
+    agent()
+        .post(format!("{base}/items/file"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("X-Item-Id", id)
+        .header("X-File-Name", nome)
+        .header("X-File-Size", bytes.len().to_string())
+        .send(bytes)
         .expect("conexão com o servidor")
         .status()
         .as_u16()
@@ -277,8 +593,23 @@ fn post_arquivo_sem_x_file_size(base: &str, nome: &str, bytes: &[u8]) -> u16 {
 /// lugar — cobre tanto o corpo simples de `/listen` quanto os bytes crus de
 /// `/outbox/{id}/file`.
 fn requisicao_crua(base: &str, metodo: &str, path: &str, token: Option<&str>) -> (u16, Vec<u8>) {
+    requisicao_crua_com_timeout(base, metodo, path, token, None)
+}
+
+fn requisicao_crua_com_timeout(
+    base: &str,
+    metodo: &str,
+    path: &str,
+    token: Option<&str>,
+    timeout: Option<Duration>,
+) -> (u16, Vec<u8>) {
     let addr = base.strip_prefix("http://").expect("base é http://<addr>");
     let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    if timeout.is_some() {
+        stream
+            .set_read_timeout(timeout)
+            .expect("configura timeout da resposta");
+    }
     let auth = token
         .map(|t| format!("Authorization: Bearer {t}\r\n"))
         .unwrap_or_default();
@@ -301,6 +632,36 @@ fn requisicao_crua(base: &str, metodo: &str, path: &str, token: Option<&str>) ->
         .and_then(|c| c.parse().ok())
         .expect("linha de status");
     (status, bruto[fim_cabecalho + 4..].to_vec())
+}
+
+/// Como `requisicao_crua`, mas para quando o teste precisa segurar a conexão
+/// em andamento: lê só até o fim do cabeçalho, byte a byte, e devolve o
+/// `TcpStream` aberto sem tocar no corpo — quem chama decide se lê o resto,
+/// solta o socket (desconecta no meio) ou nem um nem outro.
+fn conecta_e_le_status_sem_ler_corpo(base: &str, path: &str, token: &str) -> (u16, TcpStream) {
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    let pedido = format!(
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(pedido.as_bytes()).expect("escreve pedido");
+
+    let mut cabecalho = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        stream.read_exact(&mut byte).expect("lê cabeçalho");
+        cabecalho.push(byte[0]);
+        if cabecalho.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let status = String::from_utf8_lossy(&cabecalho)
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse().ok())
+        .expect("linha de status");
+    (status, stream)
 }
 
 fn textos(items: &Items) -> Vec<String> {
@@ -339,6 +700,17 @@ fn post_com_token_cria_item_de_texto() {
 
     assert_eq!(status, 201);
     assert_eq!(textos(&items), vec!["olá"]);
+}
+
+#[test]
+fn reenvio_de_texto_com_o_mesmo_id_nao_duplica_o_item() {
+    let (base, items, _outbox, _raiz) = sobe();
+
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto-1", "igual"), 201);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto-1", "igual"), 201);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto-2", "igual"), 201);
+
+    assert_eq!(textos(&items), vec!["igual", "igual"]);
 }
 
 #[test]
@@ -382,6 +754,141 @@ fn post_arquivo_grava_na_pasta_com_conteudo_identico() {
     let gravado = std::fs::read(raiz.path().join("pasta").join("foto.jpg"))
         .expect("arquivo gravado na Pasta");
     assert_eq!(gravado, bytes);
+}
+
+#[test]
+fn reenvio_de_arquivo_com_o_mesmo_id_nao_duplica_item_nem_arquivo() {
+    let (base, items, _outbox, raiz) = sobe();
+
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-1", "foto.jpg", b"igual"),
+        201
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-2", "foto.jpg", b"igual"),
+        201
+    );
+
+    assert_eq!(arquivos(&items).len(), 2);
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn envios_concorrentes_do_mesmo_id_criam_um_item_e_um_arquivo() {
+    let (base, items, _outbox, raiz) = sobe();
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let body = vec![b'A'; 4096];
+    let request = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-Item-Id: mesmo-id\r\n\
+         X-File-Name: simultaneo.bin\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        body.len()
+    );
+    let mut first = TcpStream::connect(addr).expect("conecta primeiro envio");
+    let mut second = TcpStream::connect(addr).expect("conecta segundo envio");
+    first
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    second
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+
+    first.write_all(request.as_bytes()).unwrap();
+    second.write_all(request.as_bytes()).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    first.write_all(&body).unwrap();
+    second.write_all(&body).unwrap();
+
+    let mut first_response = String::new();
+    let mut second_response = String::new();
+    first.read_to_string(&mut first_response).unwrap();
+    second.read_to_string(&mut second_response).unwrap();
+
+    assert!(first_response.starts_with("HTTP/1.1 201"));
+    assert!(second_response.starts_with("HTTP/1.1 201"));
+    assert_eq!(arquivos(&items).len(), 1);
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn retry_apos_cancelar_resposta_na_finalizacao_nao_duplica_arquivo() {
+    let (base, items, _outbox, raiz) = sobe();
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let body = vec![b'A'; 32 * 1024 * 1024];
+    let connection = std::sync::Arc::new(std::sync::Mutex::new(None::<TcpStream>));
+    let connection_on_progress = connection.clone();
+    let (cancelled_tx, cancelled_rx) = std::sync::mpsc::channel();
+    let expected_size = body.len() as u64;
+    items.on_new(move |item| {
+        if matches!(
+            &item.body,
+            ItemBody::File { name, received, status, .. }
+                if name == "cancelado.bin"
+                    && *received == expected_size
+                    && *status == FileStatus::Receiving
+        ) {
+            if let Some(connection) = connection_on_progress.lock().unwrap().take() {
+                connection.shutdown(Shutdown::Both).unwrap();
+                cancelled_tx.send(()).unwrap();
+            }
+        }
+    });
+    let request = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-Item-Id: resposta-cancelada\r\n\
+         X-File-Name: cancelado.bin\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        body.len()
+    );
+    let mut first = TcpStream::connect(addr).expect("conecta primeiro envio");
+    *connection.lock().unwrap() = Some(first.try_clone().unwrap());
+    first.write_all(request.as_bytes()).unwrap();
+    first.write_all(&body).unwrap();
+    cancelled_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("servidor deve consumir o primeiro envio");
+    drop(first);
+
+    assert_eq!(
+        post_arquivo_com_id(
+            &base,
+            TOKEN,
+            "resposta-cancelada",
+            "cancelado.bin",
+            b"retry"
+        ),
+        201
+    );
+    assert_eq!(arquivos(&items).len(), 1);
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -766,6 +1273,168 @@ fn envio_cortado_no_meio_marca_item_como_failed() {
         })
         .expect("item do envio cortado");
     assert_eq!(status, FileStatus::Failed);
+}
+
+#[test]
+fn envio_cortado_nao_consume_o_id_e_pode_ser_repetido() {
+    let (base, items, _outbox, raiz) = sobe();
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    items.on_new(move |item| {
+        if matches!(
+            &item.body,
+            ItemBody::File {
+                status: FileStatus::Failed,
+                ..
+            }
+        ) {
+            let _ = tx.send(());
+        }
+    });
+
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    let pedido = "POST /items/file HTTP/1.1\r\n\
+         Host: HOST\r\n\
+         Authorization: Bearer TOKEN\r\n\
+         X-Item-Id: arquivo-cortado\r\n\
+         X-File-Name: cortado.bin\r\n\
+         Content-Length: 1000000\r\n\
+         Connection: close\r\n\
+         \r\n"
+        .replace("HOST", addr)
+        .replace("TOKEN", TOKEN);
+    stream.write_all(pedido.as_bytes()).unwrap();
+    stream.write_all(b"incompleto").unwrap();
+    drop(stream);
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("o envio cortado deve terminar antes do retry");
+
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "arquivo-cortado", "cortado.bin", b"completo"),
+        201
+    );
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/cortado.bin")).unwrap(),
+        b"completo"
+    );
+}
+
+#[test]
+fn upload_preso_libera_o_lock_e_o_id_pode_ser_reenviado() {
+    let (base, items, _outbox, raiz) = sobe_com_timeout_de_upload(Duration::from_millis(200));
+    let pasta = raiz.path().join("pasta");
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    let corpo = vec![b'A'; 4096];
+    let pedido = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-Item-Id: preso\r\n\
+         X-File-Name: preso.bin\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        corpo.len()
+    );
+    let mut travado = TcpStream::connect(addr).expect("conecta upload que vai travar");
+    travado
+        .write_all(pedido.as_bytes())
+        .expect("escreve cabeçalhos");
+    travado
+        .write_all(&corpo[..10])
+        .expect("escreve só um pedaço");
+    // Conexão fica aberta sem mais bytes: só o timeout de inatividade pode
+    // abortá-la, não um fechamento do lado do cliente.
+    std::thread::sleep(Duration::from_millis(50));
+
+    // Numa thread com prazo: sem o timeout do servidor o segundo upload
+    // espera o lock para sempre, e o teste tem que falhar, não travar o gate.
+    let segundo_base = base.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(post_arquivo_com_id(
+            &segundo_base,
+            TOKEN,
+            "outro-id",
+            "segundo.bin",
+            b"conteudo do segundo",
+        ));
+    });
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("segundo upload não pode esperar o lock para sempre"),
+        201,
+        "segundo upload deve passar assim que o primeiro estourar o timeout, sem reiniciar"
+    );
+    assert!(
+        std::fs::read_dir(&pasta).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".part-")),
+        "upload travado não pode deixar .part na Pasta"
+    );
+    // O Item que nasceu no início do upload termina como falhou, igual a um
+    // corte de conexão — nunca como concluído.
+    let status = items
+        .snapshot()
+        .into_iter()
+        .find_map(|i| match i.body {
+            ItemBody::File { name, status, .. } if name == "preso.bin" => Some(status),
+            _ => None,
+        })
+        .expect("item do upload travado");
+    assert_eq!(status, FileStatus::Failed);
+
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "preso", "preso.bin", b"reenviado"),
+        201,
+        "o id do upload abortado não pode ter ficado marcado como aceito"
+    );
+    assert_eq!(
+        std::fs::read(pasta.join("preso.bin")).unwrap(),
+        b"reenviado"
+    );
+
+    drop(travado);
+}
+
+#[test]
+fn upload_lento_mas_continuo_nao_e_abortado_pelo_timeout() {
+    let (base, _items, _outbox, raiz) = sobe_com_timeout_de_upload(Duration::from_millis(150));
+    let pasta = raiz.path().join("pasta");
+    let addr = base.strip_prefix("http://").expect("base é http://<addr>");
+
+    let pedaco = vec![b'B'; 16];
+    let total = pedaco.len() * 6;
+    let pedido = format!(
+        "POST /items/file HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Authorization: Bearer {TOKEN}\r\n\
+         X-File-Name: lento.bin\r\n\
+         Content-Length: {total}\r\n\
+         Connection: close\r\n\
+         \r\n"
+    );
+    let mut stream = TcpStream::connect(addr).expect("conecta no servidor");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .write_all(pedido.as_bytes())
+        .expect("escreve cabeçalhos");
+    for _ in 0..6 {
+        // Cada intervalo fica abaixo do timeout de 150ms; a soma (~480ms) o
+        // ultrapassa de sobra — só o intervalo isolado pode importar.
+        std::thread::sleep(Duration::from_millis(80));
+        stream.write_all(&pedaco).expect("escreve pedaço");
+    }
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+    assert_eq!(std::fs::read(pasta.join("lento.bin")).unwrap().len(), total);
 }
 
 // SYN-004: direção PC -> celular. O PC é o remetente e gera o id do Item

@@ -1,6 +1,46 @@
 {
   "cases": [
     {
+      "name": "link com porta acima do limite nao e link",
+      "input": "https://example.com:99999",
+      "expected": [{ "type": "text", "text": "https://example.com:99999" }]
+    },
+    {
+      "name": "link com porta imediatamente acima do limite nao e link",
+      "input": "https://example.com:65536",
+      "expected": [{ "type": "text", "text": "https://example.com:65536" }]
+    },
+    {
+      "name": "link com porta negativa nao e link",
+      "input": "https://example.com:-1",
+      "expected": [{ "type": "text", "text": "https://example.com:-1" }]
+    },
+    {
+      "name": "link com porta zero segue o contrato URL do PC",
+      "input": "https://example.com:0",
+      "expected": [{ "type": "link", "text": "https://example.com:0", "href": "https://example.com:0" }]
+    },
+    {
+      "name": "link com porta um e valido",
+      "input": "https://example.com:1",
+      "expected": [{ "type": "link", "text": "https://example.com:1", "href": "https://example.com:1" }]
+    },
+    {
+      "name": "link com porta maxima e valido",
+      "input": "https://example.com:65535",
+      "expected": [{ "type": "link", "text": "https://example.com:65535", "href": "https://example.com:65535" }]
+    },
+    {
+      "name": "link preserva escape percentual malformado no caminho",
+      "input": "https://example.com/%zz",
+      "expected": [{ "type": "link", "text": "https://example.com/%zz", "href": "https://example.com/%zz" }]
+    },
+    {
+      "name": "link preserva percentuais na consulta e no fragmento",
+      "input": "https://example.com/%20?q=%z#%",
+      "expected": [{ "type": "link", "text": "https://example.com/%20?q=%z#%", "href": "https://example.com/%20?q=%z#%" }]
+    },
+    {
       "name": "número comum não é copiável",
       "input": "Tenho 150 itens.",
       "expected": [{ "type": "text", "text": "Tenho 150 itens." }]
@@ -235,6 +275,115 @@
           "href": "https://example.com/pix/52998224725"
         },
         { "type": "text", "text": ". agora" }
+      ]
+    },
+    {
+      "name": "link com barra vertical no caminho segue o contrato URL do PC",
+      "input": "https://example.com/a|b",
+      "expected": [
+        { "type": "link", "text": "https://example.com/a|b", "href": "https://example.com/a|b" }
+      ]
+    },
+    {
+      "name": "link com chaves e circunflexo no caminho e na query",
+      "input": "https://example.com/{x}^y?q=a|b",
+      "expected": [
+        { "type": "link", "text": "https://example.com/{x}^y?q=a|b", "href": "https://example.com/{x}^y?q=a|b" }
+      ]
+    },
+    {
+      "name": "link com crase no caminho",
+      "input": "https://example.com/a`b",
+      "expected": [
+        { "type": "link", "text": "https://example.com/a`b", "href": "https://example.com/a`b" }
+      ]
+    },
+    {
+      "name": "link com sublinhado no host",
+      "input": "https://meu_host.example.com/",
+      "expected": [
+        { "type": "link", "text": "https://meu_host.example.com/", "href": "https://meu_host.example.com/" }
+      ]
+    },
+    {
+      "name": "link com acento no host",
+      "input": "https://café.com.br/menu",
+      "expected": [
+        { "type": "link", "text": "https://café.com.br/menu", "href": "https://café.com.br/menu" }
+      ]
+    },
+    {
+      "name": "link com percentual no host",
+      "input": "https://ex%61mple.com",
+      "expected": [
+        { "type": "link", "text": "https://ex%61mple.com", "href": "https://ex%61mple.com" }
+      ]
+    },
+    {
+      "name": "host com circunflexo nao e link",
+      "input": "https://exa^mple.com",
+      "expected": [
+        { "type": "text", "text": "https://exa^mple.com" }
+      ]
+    },
+    {
+      "name": "espaco nao separavel encerra o link",
+      "input": "veja https://example.com\u00a0agora",
+      "expected": [
+        { "type": "text", "text": "veja " },
+        { "type": "link", "text": "https://example.com", "href": "https://example.com" },
+        { "type": "text", "text": "\u00a0agora" }
+      ]
+    },
+    {
+      "name": "espaco ideografico encerra o link",
+      "input": "veja https://example.com\u3000agora",
+      "expected": [
+        { "type": "text", "text": "veja " },
+        { "type": "link", "text": "https://example.com", "href": "https://example.com" },
+        { "type": "text", "text": "\u3000agora" }
+      ]
+    },
+    {
+      "name": "link para IPv4 com porta",
+      "input": "http://192.168.0.10:8080/x",
+      "expected": [
+        { "type": "link", "text": "http://192.168.0.10:8080/x", "href": "http://192.168.0.10:8080/x" }
+      ]
+    },
+    {
+      "name": "IPv4 abreviado segue o contrato URL do PC",
+      "input": "http://127.1/",
+      "expected": [
+        { "type": "link", "text": "http://127.1/", "href": "http://127.1/" }
+      ]
+    },
+    {
+      "name": "IPv4 com octeto acima de 255 nao e link",
+      "input": "https://1.2.3.999",
+      "expected": [
+        { "type": "text", "text": "https://1.2.3.999" }
+      ]
+    },
+    {
+      "name": "host terminado em numero que nao e IPv4 nao e link",
+      "input": "https://example.123",
+      "expected": [
+        { "type": "text", "text": "https://example.123" }
+      ]
+    },
+    {
+      "name": "link para IPv6 com porta",
+      "input": "https://[::1]:8080/x",
+      "expected": [
+        { "type": "link", "text": "https://[::1]:8080/x", "href": "https://[::1]:8080/x" }
+      ]
+    },
+    {
+      "name": "IPv6 sem colchete de fechamento nao e link",
+      "input": "https://[::1/",
+      "expected": [
+        { "type": "text", "text": "https://[::1/" }
       ]
     }
   ]

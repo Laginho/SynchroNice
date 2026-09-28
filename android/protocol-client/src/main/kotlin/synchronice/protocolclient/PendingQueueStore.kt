@@ -21,6 +21,9 @@ interface PendingQueueStore {
 
     /** Tira da fila o Item que estava na cabeça e libera o que a implementação tiver reservado para ele. */
     fun dequeueFirst()
+
+    /** Descarta todos os Pendentes e suas cópias internas. */
+    fun clear()
 }
 
 class InMemoryPendingQueueStore : PendingQueueStore {
@@ -29,6 +32,8 @@ class InMemoryPendingQueueStore : PendingQueueStore {
     override fun enqueue(item: PendingItem): PendingItem = item
 
     override fun dequeueFirst() {}
+
+    override fun clear() {}
 }
 
 /**
@@ -74,6 +79,13 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
         if (removed is PendingItem.File) File(removed.path).delete()
     }
 
+    override fun clear() {
+        persist(emptyList()) {
+            items.filterIsInstance<PendingItem.File>().forEach { Files.deleteIfExists(File(it.path).toPath()) }
+        }
+        items.clear()
+    }
+
     /**
      * `null` se o arquivo original já tiver sumido — o Item é descartado em
      * vez de estourar para quem chamou. Só esse caso é engolido: disco cheio
@@ -117,10 +129,11 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
      * essa janela — o temporário fica na mesma pasta do arquivo final
      * justamente para o rename atômico ser sempre possível.
      */
-    private fun persist(nextItems: List<PendingItem>) {
+    private fun persist(nextItems: List<PendingItem>, beforeCommit: () -> Unit = {}) {
         file.parentFile?.mkdirs()
         val tempFile = File(file.parentFile ?: File("."), "${file.name}.tmp")
         tempFile.writeText(nextItems.joinToString("") { encodeLine(it) + "\n" })
+        beforeCommit()
         Files.move(
             tempFile.toPath(),
             file.toPath(),
@@ -130,8 +143,8 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     }
 
     private fun encodeLine(item: PendingItem): String = when (item) {
-        is PendingItem.Text -> "T\t${escape(item.text)}"
-        is PendingItem.File -> "F\t${escape(item.path)}\t${escape(item.name)}"
+        is PendingItem.Text -> "T\t${escape(item.id)}\t${escape(item.text)}"
+        is PendingItem.File -> "F\t${escape(item.id)}\t${escape(item.path)}\t${escape(item.name)}"
     }
 
     /**
@@ -149,7 +162,9 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     private fun decodeLineOrNull(line: String): PendingItem? {
         val fields = line.split("\t").map(::unescape)
         return when {
+            fields.size >= 3 && fields[0] == "T" -> PendingItem.Text(fields[2], fields[1])
             fields.size >= 2 && fields[0] == "T" -> PendingItem.Text(fields[1])
+            fields.size >= 4 && fields[0] == "F" -> PendingItem.File(fields[2], fields[3], fields[1])
             fields.size >= 3 && fields[0] == "F" -> PendingItem.File(fields[1], fields[2])
             else -> null
         }
