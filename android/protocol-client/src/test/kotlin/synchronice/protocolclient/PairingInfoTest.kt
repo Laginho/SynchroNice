@@ -3,6 +3,7 @@ package synchronice.protocolclient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 
 class PairingInfoTest {
     @Test
@@ -89,5 +90,34 @@ class PairingInfoTest {
                 parsePairingQr("""{"instance_name":"synchronice-12345678","port":$port,"token":"0123456789abcdef0123456789abcdef"}""")
             }
         }
+    }
+
+    private val base = """"instance_name":"synchronice-12345678","port":47820,"token":"0123456789abcdef0123456789abcdef""""
+
+    @Test
+    fun `QR com ip expoe o IPv4`() {
+        assertEquals("192.168.18.12", parsePairingQr("""{$base,"ip":"192.168.18.12"}""").ip)
+    }
+
+    @Test
+    fun `QR sem ip continua valido com IP nulo`() {
+        assertNull(parsePairingQr("""{$base}""").ip)
+    }
+
+    @Test
+    fun `ip malformado e ignorado e nao derruba o Par`() {
+        for (ip in listOf("abc", "999.1.1.1", "192.168.1", "192.168.1.1.1", "::1", "", "192.168.1.1 ")) {
+            val par = parsePairingQr("""{$base,"ip":"$ip"}""")
+            assertNull(par.ip, "ip=$ip")
+            assertEquals("synchronice-12345678", par.instanceName)
+        }
+    }
+
+    @Test
+    fun `o ip nao entra na identidade do Par`() {
+        assertEquals(
+            parsePairingQr("""{$base,"ip":"192.168.18.12"}"""),
+            parsePairingQr("""{$base,"ip":"10.0.0.5"}"""),
+        )
     }
 }

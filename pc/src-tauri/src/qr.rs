@@ -34,3 +34,32 @@ pub fn par_svg(nome_instancia: &str, port: u16, token: &str, ip: Option<Ipv4Addr
         .light_color(svg::Color("#faedc8"))
         .build()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn json_leva_o_ip_quando_recebe_um() {
+        let json = par_json(
+            "synchronice-12345678",
+            47820,
+            TOKEN,
+            Some(Ipv4Addr::new(192, 168, 18, 12)),
+        );
+        let valor: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(valor["ip"], "192.168.18.12");
+        assert_eq!(valor["instance_name"], "synchronice-12345678");
+        assert_eq!(valor["port"], 47820);
+        assert_eq!(valor["token"], TOKEN);
+    }
+
+    #[test]
+    fn json_omite_o_ip_quando_nao_ha() {
+        let json = par_json("synchronice-12345678", 47820, TOKEN, None);
+        let valor: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(valor.get("ip").is_none());
+    }
+}
