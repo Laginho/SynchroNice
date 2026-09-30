@@ -1,5 +1,5 @@
 # BUG-001: O scanner de QR derruba o app no primeiro quadro sem QR
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
