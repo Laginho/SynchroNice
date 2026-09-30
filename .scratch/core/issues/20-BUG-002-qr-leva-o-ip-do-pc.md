@@ -1,5 +1,5 @@
 # BUG-002: Sem mDNS entre cabo e Wi-Fi, o celular pareado nunca acha o PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,3 +64,17 @@ Correção: **o QR leva o IP do PC como semente do `last-address`.**
 Débito humano previsto: repetir o passo B.3 do walkthrough com o PC no cabo.
 
 ## Comments
+
+- **IP fora da identidade do Par.** `PairingInfo.ip` é propriedade do corpo da
+  `data class` (`var ip: String? = null; internal set`), não do construtor: fica
+  fora de `equals`/`hashCode`/`copy`. Assim `newPair != pairing` em `acceptQr`
+  (que decide limpar os `received-file:`) e `pairing != currentPair` no
+  `unpair`/`listen` não tratam como Par novo o mesmo PC lido de novo com outro
+  IP. Teste: `PairingInfoTest` (`o ip nao entra na identidade do Par`) e
+  `AcceptQrIpTest` (`rescanningTheSamePcWithANewIpIsNotANewPair`).
+- `qr::par_json` foi extraído de `par_svg` para o teste de unidade sobre o JSON;
+  `qr::ip_da_lan()` é o truque do `UdpSocket` (`8.8.8.8:80`, sem enviar nada).
+  Sem IPv4 de rota, o campo é omitido.
+- `acceptQr` sem `ip` (QR antigo) não mexe no `last-address` existente.
+- `parsePairingQr` valida `ip` com regex de IPv4 (4 octetos 0-255); qualquer
+  outra coisa vira `null`.
