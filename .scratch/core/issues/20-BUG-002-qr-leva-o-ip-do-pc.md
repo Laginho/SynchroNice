@@ -1,5 +1,5 @@
 # BUG-002: Sem mDNS entre cabo e Wi-Fi, o celular pareado nunca acha o PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
