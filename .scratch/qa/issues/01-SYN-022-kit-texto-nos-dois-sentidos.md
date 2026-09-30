@@ -98,3 +98,10 @@ Sem o Redmi alcançável pelo adb sem fio, os critérios 3–5 e 7 viram
   existe.
 
 ## Comments
+
+- 2026-09-30, stage 1: `adb pair` feito pelo humano. O Redmi responde em
+  `192.168.18.9:<porta>` e aparece no `adb mdns services` como
+  `adb-njca85bihiau99t8-*._adb-tls-connect._tcp`. O adb conecta sozinho pelo
+  nome mDNS, então o mesmo aparelho pode aparecer duas vezes no `adb devices`
+  (pelo IP e pelo nome mDNS). O kit escolhe um transporte e usa sempre `-s`.
+  A porta muda quando a Depuração sem fio é religada.
