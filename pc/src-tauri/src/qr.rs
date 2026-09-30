@@ -5,6 +5,7 @@
 use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::Serialize;
+use std::net::Ipv4Addr;
 
 #[derive(Serialize)]
 struct Conteudo<'a> {
@@ -13,14 +14,19 @@ struct Conteudo<'a> {
     token: &'a str,
 }
 
-/// SVG do QR de pareamento, para a tela de "sem Par" e para "parear de novo".
-pub fn par_svg(nome_instancia: &str, port: u16, token: &str) -> String {
+/// JSON do QR de pareamento (o que o celular decodifica).
+pub fn par_json(nome_instancia: &str, port: u16, token: &str, _ip: Option<Ipv4Addr>) -> String {
     let conteudo = Conteudo {
         instance_name: nome_instancia,
         port,
         token,
     };
-    let json = serde_json::to_string(&conteudo).expect("conteúdo do QR serializa");
+    serde_json::to_string(&conteudo).expect("conteúdo do QR serializa")
+}
+
+/// SVG do QR de pareamento, para a tela de "sem Par" e para "parear de novo".
+pub fn par_svg(nome_instancia: &str, port: u16, token: &str, ip: Option<Ipv4Addr>) -> String {
+    let json = par_json(nome_instancia, port, token, ip);
     let code = QrCode::new(json.as_bytes()).expect("conteúdo do Par sempre cabe no QR");
     code.render()
         .min_dimensions(240, 240)

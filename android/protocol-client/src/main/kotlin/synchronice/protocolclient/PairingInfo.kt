@@ -1,7 +1,11 @@
 package synchronice.protocolclient
 
 /** O Par lido do QR do PC (SYN-005): nome de instância, porta e token. */
-data class PairingInfo(val instanceName: String, val port: Int, val token: String)
+data class PairingInfo(val instanceName: String, val port: Int, val token: String) {
+    /** IPv4 do PC no QR, se veio. Fora do construtor: não entra em equals/hashCode, não é identidade do Par. */
+    var ip: String? = null
+        internal set
+}
 
 /** Lê o JSON do QR do PC; conteúdo malformado ou incompleto não vira Par. */
 fun parsePairingQr(json: String): PairingInfo {
