@@ -105,3 +105,9 @@ Sem o Redmi alcançável pelo adb sem fio, os critérios 3–5 e 7 viram
   nome mDNS, então o mesmo aparelho pode aparecer duas vezes no `adb devices`
   (pelo IP e pelo nome mDNS). O kit escolhe um transporte e usa sempre `-s`.
   A porta muda quando a Depuração sem fio é religada.
+- 2026-09-30, stage 1: antes de tocar no aparelho, o kit acende a tela
+  (`input keyevent KEYCODE_WAKEUP`) e tira a tela de bloqueio
+  (`wm dismiss-keyguard`). Se o bloqueio for seguro (PIN), o kit não
+  desbloqueia: relata "aparelho bloqueado" como falha de infraestrutura. O kit
+  nunca recebe nem digita o PIN. O humano deixa o Redmi no carregador com
+  "Permanecer ativo" durante o run.
