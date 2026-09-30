@@ -285,6 +285,8 @@ body {
 
 /* bolha de arquivo — SYN-003 */
 .item.file {
+  /* A bolha inteira é a alça do drag (SYN-006): texto selecionável atrapalha. */
+  user-select: none;
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: 10px;
@@ -349,11 +351,14 @@ body {
 .item.file time {
   grid-column: 1 / 3;
 }
-/* Arrastar para fora da janela (SYN-006) — só a bolha recebida e terminada:
+/* Clicar abre, arrastar leva para fora da janela (SYN-006) — só a bolha recebida e terminada:
  * a enviada (`.mine`) não tem arquivo na Pasta para arrastar, e não ganha o
  * `mousedown` de drag. */
 .item.file:not(.mine):not(.enviando):not(.falhou) {
-  cursor: grab;
+  cursor: pointer;
+}
+.item.file:not(.mine):not(.enviando):not(.falhou):active {
+  cursor: grabbing;
 }
 .item.file.sumiu,
 .item.file.falhou {

@@ -143,6 +143,35 @@ fn caminho_para_arrastar(app: tauri::AppHandle, id: u64) -> Result<String, Strin
         .ok_or_else(|| "o caminho do arquivo não é válido".to_string())
 }
 
+/// Extensões que o Windows executa ao abrir: um clique na bolha mostra o
+/// arquivo no Explorer em vez de rodar o que veio da rede.
+const EXECUTAVEIS: &[&str] = &[
+    "exe", "msi", "bat", "cmd", "com", "scr", "pif", "ps1", "vbs", "vbe", "js", "jse", "wsf",
+    "wsh", "hta", "cpl", "msc", "lnk", "reg", "jar",
+];
+
+fn executavel(caminho: &std::path::Path) -> bool {
+    caminho
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| EXECUTAVEIS.contains(&e.to_ascii_lowercase().as_str()))
+}
+
+/// Clique numa bolha recebida: abre o arquivo no app padrão do Windows, ou
+/// mostra no Explorer se for executável.
+#[tauri::command]
+fn abrir_arquivo(app: tauri::AppHandle, id: u64) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let caminho = caminho_do_arquivo_recebido(&app, id)?;
+    if executavel(&caminho) {
+        app.opener().reveal_item_in_dir(&caminho)
+    } else {
+        app.opener()
+            .open_path(caminho.to_string_lossy(), None::<&str>)
+    }
+    .map_err(|e| e.to_string())
+}
+
 /// Enter no composer: enfileira o texto para o celular.
 #[tauri::command]
 fn send_text(outbox: State<'_, Outbox>, text: String) -> Result<(), String> {
@@ -313,7 +342,8 @@ pub fn run() {
             send_files,
             send_bytes,
             read_clipboard_file_list,
-            caminho_para_arrastar
+            caminho_para_arrastar,
+            abrir_arquivo
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -334,4 +364,20 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::executavel;
+    use std::path::Path;
+
+    #[test]
+    fn executavel_nao_abre_direto() {
+        for nome in ["virus.exe", "script.PS1", "atalho.lnk", "x.tar.bat"] {
+            assert!(executavel(Path::new(nome)), "{nome}");
+        }
+        for nome in ["foto.jpg", "doc.pdf", "sem_extensao", "exe"] {
+            assert!(!executavel(Path::new(nome)), "{nome}");
+        }
+    }
 }

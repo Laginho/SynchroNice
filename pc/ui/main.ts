@@ -299,6 +299,7 @@ async function iniciarDrag(id: number, nome: string, bubble: HTMLElement): Promi
 function renderArquivo(item: FileItem): HTMLElement {
   const bubble = document.createElement("div");
   bubble.className = "item file";
+  let arrastou = false;
   // Só uma bolha terminada arrasta: em progresso, `.enviando` ainda está
   // presente (ver `atualizarProgresso`), e não há arquivo com nome final
   // na Pasta para arrastar ainda; `.falhou` nunca chega a ter um arquivo
@@ -317,6 +318,9 @@ function renderArquivo(item: FileItem): HTMLElement {
     ) {
       return;
     }
+    // Sem isto o mesmo gesto também seleciona o texto da bolha.
+    event.preventDefault();
+    arrastou = false;
     const x0 = event.clientX;
     const y0 = event.clientY;
 
@@ -328,6 +332,7 @@ function renderArquivo(item: FileItem): HTMLElement {
         return;
       }
       soltou();
+      arrastou = true;
       void iniciarDrag(item.id, item.name, bubble);
     };
     const soltou = (): void => {
@@ -337,6 +342,22 @@ function renderArquivo(item: FileItem): HTMLElement {
 
     window.addEventListener("mousemove", andou);
     window.addEventListener("mouseup", soltou);
+  });
+  // Clique sem arrastar abre o arquivo no app padrão do Windows.
+  bubble.addEventListener("click", () => {
+    if (
+      arrastou ||
+      bubble.classList.contains("enviando") ||
+      bubble.classList.contains("falhou")
+    ) {
+      return;
+    }
+    invoke("abrir_arquivo", { id: item.id })
+      .then(() => desmarcarArquivoSumido(bubble))
+      .catch((e) => {
+        marcarArquivoSumido(bubble);
+        console.error(`não foi possível abrir ${item.name}: ${e}`);
+      });
   });
 
   const ehImagem = IMAGEM.has(extensao(item.name));
