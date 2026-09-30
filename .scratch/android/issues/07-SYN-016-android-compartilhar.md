@@ -328,3 +328,8 @@ Verdict: Approve
   0 falhas bloqueantes e 1 ressalva não bloqueante sobre a prova do teste.
 
 - Débito humano: com o app em segundo plano no Android 12+, arquivo de 10 MB ou mais é entregue sem a notificação; girar o celular durante um Compartilhar de várias fotos enfileira cada foto uma vez (revisão do PR 7).
+
+- 2026-09-30, walkthrough de QA, passo D.6: com o app do celular fechado, a
+  foto compartilhada só sai quando o app é aberto de novo, e não quando o PC
+  volta. O humano aceitou o comportamento por ora. Registrado como limitação
+  conhecida, sem ticket.
