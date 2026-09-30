@@ -30,3 +30,12 @@
   sem humano vira `Débito humano:` em `## Comments`. Objetivo: rodar todos os
   tickets de uma vez e revisar tudo junto no PR de sessão. Regra completa em
   `AGENTS.md`, seção "Humano simulado".
+- 2026-09-30 — **Kit de QA dirigido por agente** (spec `.scratch/qa/spec.md`,
+  SYN-022..026). Primitivas em `qa/` atrás de wrappers PowerShell (cabem no
+  `--allowedTools` do driver); o agente lê o roteiro em prosa e dá ✅/❌/👤 por
+  passo, num relatório em `.scratch/qa-runs/`. Emulador com PC isolado
+  (`SYNCHRONICE_DATA_DIR`) para o stage 3 e o `proxy`; Redmi pelo adb **só sem
+  fio** (nunca USB) contra o PC real, no pós-run do foreman, no walkthrough e
+  no `/audit`. Passo verificado pelo kit não vira `Débito humano:`. O que o kit
+  apaga vai para a Lixeira. Nada muda nas skills globais: as regras ficam no
+  `AGENTS.md` e em `docs/agents/qa.md`.
