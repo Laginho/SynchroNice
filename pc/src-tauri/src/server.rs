@@ -64,7 +64,12 @@
 //!
 //!   QR mostrado pelo PC     JSON de uma linha, exatamente estes campos:
 //!                           {"instance_name":"synchronice-<8 hex>",
-//!                            "port":47820,"token":"<32 hex>"}
+//!                            "port":47820,"token":"<32 hex>",
+//!                            "ip":"<IPv4 do PC>"}
+//!                           `ip` é opcional: omitido se o PC não achou rota
+//!                           para a LAN, e ausente nos QRs antigos (continuam
+//!                           válidos). O celular o guarda como `last-address`
+//!                           inicial; o mDNS, se resolver, sobrescreve.
 //!   Anúncio mDNS            serviço `_synchronice._tcp.local.`, nome de
 //!                           instância igual ao `instance_name` do QR, host
 //!                           `<instance_name>.local.`, porta igual à do QR.

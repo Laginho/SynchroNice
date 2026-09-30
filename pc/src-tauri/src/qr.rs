@@ -5,21 +5,37 @@
 use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::Serialize;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, UdpSocket};
 
 #[derive(Serialize)]
 struct Conteudo<'a> {
     instance_name: &'a str,
     port: u16,
     token: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ip: Option<Ipv4Addr>,
+}
+
+/// IPv4 de saída para a LAN: o de origem da rota padrão. `connect` num UDP
+/// não manda nada, só escolhe a rota. `None` se não houver rota.
+/// ponytail: um IP só, o da rota padrão. Se um PC com várias placas escolher a
+/// errada, vira uma lista.
+pub fn ip_da_lan() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
 }
 
 /// JSON do QR de pareamento (o que o celular decodifica).
-pub fn par_json(nome_instancia: &str, port: u16, token: &str, _ip: Option<Ipv4Addr>) -> String {
+pub fn par_json(nome_instancia: &str, port: u16, token: &str, ip: Option<Ipv4Addr>) -> String {
     let conteudo = Conteudo {
         instance_name: nome_instancia,
         port,
         token,
+        ip,
     };
     serde_json::to_string(&conteudo).expect("conteúdo do QR serializa")
 }

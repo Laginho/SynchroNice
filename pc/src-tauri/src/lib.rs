@@ -71,7 +71,7 @@ fn estado_par_inicial(
 ) -> EstadoParInicial {
     EstadoParInicial {
         mostrar_qr: !ja_existia.0,
-        svg: qr::par_svg(par.nome_instancia(), server::PORT, &par.token(), None),
+        svg: qr::par_svg(par.nome_instancia(), server::PORT, &par.token(), qr::ip_da_lan()),
     }
 }
 
@@ -84,7 +84,7 @@ fn parear_de_novo(par: State<'_, Par>, outbox: State<'_, Outbox>) -> Result<Stri
         par.nome_instancia(),
         server::PORT,
         &par.token(),
-        None,
+        qr::ip_da_lan(),
     ))
 }
 
