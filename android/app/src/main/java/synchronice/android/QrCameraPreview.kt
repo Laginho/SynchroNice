@@ -120,16 +120,21 @@ private class QrAnalyzer(
             }
         }
 
-        var source: LuminanceSource = PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
-        repeat(4) {
-            try {
-                return reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
-            } catch (_: ReaderException) {
-                source = source.rotateCounterClockwise()
-            } finally {
-                reader.reset()
-            }
-        }
-        return null
+        return decodeLuminance(reader, luminance, width, height)
     }
+}
+
+// Costura para teste de JVM: decodifica o quadro de luminância já extraído.
+internal fun decodeLuminance(reader: MultiFormatReader, luminance: ByteArray, width: Int, height: Int): String? {
+    var source: LuminanceSource = PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
+    repeat(4) {
+        try {
+            return reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
+        } catch (_: ReaderException) {
+            source = source.rotateCounterClockwise()
+        } finally {
+            reader.reset()
+        }
+    }
+    return null
 }
