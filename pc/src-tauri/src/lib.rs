@@ -71,7 +71,12 @@ fn estado_par_inicial(
 ) -> EstadoParInicial {
     EstadoParInicial {
         mostrar_qr: !ja_existia.0,
-        svg: qr::par_svg(par.nome_instancia(), server::PORT, &par.token(), qr::ip_da_lan()),
+        svg: qr::par_svg(
+            par.nome_instancia(),
+            server::PORT,
+            &par.token(),
+            qr::ip_da_lan(),
+        ),
     }
 }
 
