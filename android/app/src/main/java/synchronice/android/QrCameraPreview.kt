@@ -22,7 +22,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
-import com.google.zxing.LuminanceSource
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.ReaderException
@@ -126,15 +125,14 @@ private class QrAnalyzer(
 
 // Costura para teste de JVM: decodifica o quadro de luminância já extraído.
 internal fun decodeLuminance(reader: MultiFormatReader, luminance: ByteArray, width: Int, height: Int): String? {
-    var source: LuminanceSource = PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
-    repeat(4) {
-        try {
-            return reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
-        } catch (_: ReaderException) {
-            source = source.rotateCounterClockwise()
-        } finally {
-            reader.reset()
-        }
+    val source = PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
+    // Uma tentativa só: o detector do ZXing acha os padrões de localização em qualquer orientação,
+    // e PlanarYUVLuminanceSource não suporta rotação (lançava UnsupportedOperationException).
+    return try {
+        reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
+    } catch (_: ReaderException) {
+        null
+    } finally {
+        reader.reset()
     }
-    return null
 }
