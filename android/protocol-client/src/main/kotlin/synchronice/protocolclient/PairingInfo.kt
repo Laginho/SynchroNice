@@ -24,5 +24,10 @@ fun parsePairingQr(json: String): PairingInfo {
         ?.takeIf { it.matches(Regex("[0-9a-fA-F]{32}")) }
         ?: throw IllegalArgumentException("token inválido")
 
-    return PairingInfo(instanceName, port, token)
+    return PairingInfo(instanceName, port, token).also { pairing ->
+        // Opcional: só um IPv4 válido vale; qualquer outra coisa é ignorada, nunca rejeita o Par.
+        pairing.ip = fields["ip"]?.takeIf { it.matches(IPV4) }
+    }
 }
+
+private val IPV4 = Regex("""(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)""")

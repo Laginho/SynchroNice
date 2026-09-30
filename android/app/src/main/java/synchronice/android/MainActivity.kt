@@ -236,6 +236,8 @@ internal class AppState(
             .putInt("port", newPair.port)
             .putString("token", newPair.token)
             .apply()
+        // O IP do QR só semeia o last-address; o mDNS, se resolver, sobrescreve.
+        newPair.ip?.let(knownAddress::save)
         pairing = newPair
         pairingError = null
         connectionError = null
