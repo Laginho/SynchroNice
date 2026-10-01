@@ -170,6 +170,15 @@ internal class AppState(
     var connectionError by mutableStateOf<String?>(null)
         private set
     internal val messages = mutableStateListOf<ChatMessage>()
+    private val stagedPastes = mutableStateListOf<File>()
+    val pasteTray: List<File> get() = stagedPastes
+
+    /** Copia antes de devolver o callback: a permissão do teclado é temporária. */
+    fun pasteUri(uri: Uri): Boolean {
+        if (!isForeignContentUri(appContext, uri)) return false
+        stagedPastes.add(copyToStaging(appContext, uri))
+        return true
+    }
 
     internal val resolver = NsdInstanceResolver(appContext)
     internal val knownAddress = object : KnownAddressStore {

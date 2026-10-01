@@ -94,13 +94,13 @@ private fun sharedUris(context: Context, incoming: Intent): List<Uri> = when (in
  * prefixo e o filtro deixa passar.
  */
 @Suppress("DEPRECATION")
-private fun isForeignContentUri(context: Context, uri: Uri): Boolean {
+internal fun isForeignContentUri(context: Context, uri: Uri): Boolean {
     if (uri.scheme != "content") return false
     val authority = uri.authority?.substringAfterLast('@') ?: return false
     return context.packageManager.resolveContentProvider(authority, 0)?.packageName != context.packageName
 }
 
-private fun copyToStaging(context: Context, uri: Uri): File {
+internal fun copyToStaging(context: Context, uri: Uri): File {
     val resolver = context.contentResolver
     val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor: Cursor ->
         if (cursor.moveToFirst()) cursor.getString(0) else null
