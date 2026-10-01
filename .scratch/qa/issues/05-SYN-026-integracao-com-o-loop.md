@@ -1,5 +1,5 @@
 # SYN-026: Kit de QA no loop — stage 3, `proxy` e pós-run do foreman
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-024, SYN-025
 Review: human
@@ -59,3 +59,24 @@ Nenhum: o ticket altera apenas documentação.
   `sweatshop/2026-09-30-2146`. Sem commit de testes red: a seção de testes
   dispensa testes novos porque o escopo é apenas documentação. A verificação
   será a leitura dos quatro critérios e o gate completo.
+
+#### Stage 2 handoff (2026-10-01)
+
+- Critério 1: binding QA aponta `docs/agents/qa.md#quem-usa-o-kit-e-quando`,
+  identifica stage 3 e `proxy` no emulador e distingue ❌ de infraestrutura.
+- Critério 2: "Humano simulado" exige tentar o kit antes do débito;
+  passos verificados apontam o relatório, sem débito. Computer Use permanece
+  para o que o kit não alcança.
+- Critério 3: o ponteiro do foreman indica Redmi sem fio, critérios do run
+  e ★, "sem aparelho" e `down`; o guia detalha relatório, `BUG-*`
+  `needs-triage` sem `Stage:` e teardown inclusive após infraestrutura falhar.
+- Critério 4: procedimentos ficam na nova seção "Quem usa o kit e quando"
+  do guia; `AGENTS.md` traz os ponteiros e os gatilhos resumidos. Nenhuma
+  skill global, driver ou código do app foi alterado.
+- Verificação: `git diff --check` limpo;
+  `powershell -ExecutionPolicy Bypass -File .\gate.ps1` saiu 0,
+  `gate: passou`. Rust: 52 testes; UI: 47; kit QA: 14, todos passaram.
+  Android: `BUILD SUCCESSFUL`, lint/check verdes, testes `UP-TO-DATE`;
+  XMLs existentes somam 121 testes, zero falhas, erros ou skips.
+- Sem prova red-green nem execução de critérios visíveis no app: alteração
+  exclusivamente documental, conforme a seção "Tests stage 2 writes".
