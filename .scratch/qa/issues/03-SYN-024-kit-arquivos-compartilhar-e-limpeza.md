@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -375,3 +375,48 @@ Os testes usam somente ambiente temporário/adb falso; não houve operação
 no Redmi nem alteração do Par/Wi-Fi real. Débitos anteriores mantidos,
 sem débito adicional. Entrega para stage 3 na branch `syn-024`, sem merge
 ou ledger de encerramento nesta etapa.
+
+#### Review stage 3 (2026-10-01, segunda passada)
+
+Reaberto: a confirmação de desligamento ainda pode aceitar uma transição
+sem queda da rede. Precisa de regressão nova no seam existente, portanto
+volta à etapa 2. Diff `3eba2c9...5e8223a` revisado integralmente por dois
+eixos separados; rebase na sessão `sweatshop/2026-09-30-2146` (`1cadfce`)
+já estava atualizado. Relatório: `.scratch/qa-runs/2026-10-01-024-rereview.md`.
+
+- ❌ Critérios 4 e 9 — `qa/phone.ps1:218` aceita `Wifi is disabled` como
+  confirmação de desligamento, mas o `WifiShellCommand` do Android 16
+  imprime isso para qualquer estado diferente de `WIFI_STATE_ENABLED`,
+  inclusive `DISABLING`. Com IMS por IWLAN e atraso de desligamento da
+  operadora maior que N, a interface continua ativa durante esse estado;
+  o `enable` antecipado muda o alvo do manager e cancela o desligamento.
+  Wrapper e script gerado reais, adb/comandos Android/tempo substituídos:
+  N=1, atraso=5, código 0, stderr vazio, `reconnected=true`, dois marcadores,
+  rede simulada continuamente `up` e `everDisabled=false`. Reproduzido
+  pelo subrevisor e pelo revisor principal; fontes AOSP e trace no relatório.
+  Não se afirma que esse atraso esteja ativo no Redmi. Falta testar esse
+  caso com a saída real do AOSP e confirmar desligamento completo antes
+  de iniciar N segundos, mantendo o trap de restauração. É um caso
+  adicional da confirmação já exigida, no código novo desta retomada.
+- ✅ Recusa silenciosa de `svc`, negativa de consulta, restauração por trap
+  e espera de log parcial passaram nos sete cenários committed.
+  `unknown`/`delayed` no fake usam textos que o AOSP não emite nesses estados;
+  não cobrem a ambiguidade acima. Os achados anteriores do critério 6
+  continuam aprovados; CLEAN-019 permanece separado.
+- Standards: zero violações documentadas e zero smells; Primary files,
+  commits só de testes antes de código e handoff no último commit de código
+  conferidos. Os três `Proxy decided` revisados: PC/baseline; adb falso e
+  critério 9; raiz do Dialog e preparação opcional apenas por SecurityException.
+- Vermelhos reproduzidos: teste `80f9b1a` com wrapper `3eba2c9` falha porque
+  `disable-refused` sai 0; teste `0d74746` com wrapper `2dd91b1` falha porque
+  `log-pending` sai 1. Cada execução: 1 teste, 0 passando, 1 falhando, 0 skips.
+  No HEAD: 1 teste passou, 0 falhas/skips, sete cenários.
+- Gate completo em primeiro plano, aguardado até terminar: código 0,
+  `GATE_EXIT=0`, `gate: passou`, `BUILD SUCCESSFUL in 9s`. Rust 51, UI 47,
+  QA 14, Android app 59 e protocol-client 62: 233 testes; Android UP-TO-DATE,
+  XMLs sem falhas, erros ou skips. fmt, clippy, typecheck, lint e
+  `git diff --check` passaram. Logs locais em `2026-10-01-024-rereview/`.
+- `adb devices -l` e `adb mdns services` sem aparelhos/serviços. Débitos
+  anteriores mantidos, sem débito adicional nem operação real no Redmi.
+  Nenhuma fonte ou teste committed alterado nesta revisão; sem merge
+  ou linha de ledger. Próxima etapa 2: somente o ❌ acima.
