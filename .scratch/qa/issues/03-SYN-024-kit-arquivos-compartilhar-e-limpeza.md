@@ -341,3 +341,11 @@ Vermelho: `node --test --test-reporter=tap --test-name-pattern='wifi-off
 confirms device state' qa/phone.test.mjs`: 1 teste, 0 passando, 1 falhando.
 `disable-refused` devolveu código 0 (esperado 1), `reconnected=true` e ambos
 os marcadores, embora `svc` não tivesse alterado o estado simulado.
+
+Teste vermelho committed em `80f9b1a`, separado da implementação. O script
+agora consulta `cmd wifi status` e só emite cada marcador depois de confirmar
+o estado pedido, até dez tentativas com intervalo de um segundo. O trap
+continua tentando religar mesmo após recusa, consulta negada ou timeout.
+Verde pelo mesmo comando: 1 teste passou, zero falhas/skips, seis cenários.
+Sintaxe PowerShell e `git diff --check` passaram. Nenhuma operação no Redmi;
+os débitos existentes permanecem. Gate completo será registrado no handoff.

@@ -211,8 +211,26 @@ try {
             $local = [IO.Path]::GetTempFileName()
             try {
                 # The trap restores Wi-Fi on exit; nohup keeps it alive after wireless adb drops.
-                $script = "trap 'if svc wifi enable; then echo QA_WIFI_RESTORED; fi; rm -f $remote' EXIT`n" +
-                    "svc wifi disable || exit 1`necho QA_WIFI_DISABLED`nsleep $Seconds`n"
+                $script = @'
+wait_wifi() {
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        state=$(cmd wifi status) || return 1
+        if printf '%s\n' "$state" | grep -qx "Wifi is $1"; then return 0; fi
+        sleep 1
+    done
+    echo "Error: Wi-Fi did not become $1"
+    return 1
+}
+restore() {
+    if svc wifi enable && wait_wifi enabled; then echo QA_WIFI_RESTORED; fi
+    rm -f __REMOTE__
+}
+trap restore EXIT
+svc wifi disable && wait_wifi disabled || exit 1
+echo QA_WIFI_DISABLED
+sleep __SECONDS__
+'@
+                $script = $script.Replace('__REMOTE__', $remote).Replace('__SECONDS__', "$Seconds").Replace("`r`n", "`n") + "`n"
                 [IO.File]::WriteAllText($local, $script, [Text.UTF8Encoding]::new($false))
                 Adb-Run @('push',$local,$remote) | Out-Null
                 $launch = Adb-Run -Arguments @('shell',"nohup sh $remote </dev/null >$logPath 2>&1 &") -AllowFailure

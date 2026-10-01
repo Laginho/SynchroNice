@@ -66,8 +66,14 @@ e do [comando content](https://android.googlesource.com/platform/frameworks/base
 recusar a concessão no `am`, guarde a saída integral e bloqueie SYN-024.
 
 `wifi-off` aceita 1–600 segundos (`-Seconds` também vale). Um script `nohup`
-no aparelho usa um trap para religar o Wi-Fi, mesmo sem adb. Enquanto a
-chamada aguarda, outra chamada a `pc.ps1 presence` permite observar 204;
+no aparelho usa um trap para religar o Wi-Fi, mesmo sem adb. O script
+consulta `cmd wifi status` até dez vezes, com intervalo de um
+segundo, para confirmar cada estado antes de emitir os marcadores de
+desligamento/restauração. Código 0 do `svc` sozinho não confirma a ação;
+recusa silenciosa, consulta negada ou estado não confirmado geram falha.
+A linha `Wifi is enabled/disabled` vem do
+[WifiShellCommand do AOSP](https://android.googlesource.com/platform/packages/modules/Wifi/+/refs/heads/main/service/java/com/android/server/wifi/WifiShellCommand.java#2867).
+Enquanto a chamada aguarda, outra chamada a `pc.ps1 presence` permite observar 204;
 depois da reconexão, espere 200. A descoberta mDNS atualiza a porta quando
 o IP foi informado. Não interprete apenas `reconnected=true` como prova da
 presença do app: confira `/listen` antes, durante e depois. Falha de
