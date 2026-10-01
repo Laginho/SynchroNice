@@ -20,10 +20,12 @@ aparelho, passe `-Serial '192.168.18.9:37123'` ou o serial mDNS completo;
 `-Adb` ou `SYNCHRONICE_ADB` indica outro adb; o padrão usa PATH ou o SDK em
 `%LOCALAPPDATA%/Android/Sdk/platform-tools/adb.exe`.
 
-Em aparelhos que negam `settings put global` com `WRITE_SECURE_SETTINGS`,
-o kit aborta como falha de infraestrutura. A autorização do shell nas
-opções de desenvolvedor precisa ser feita pelo humano; o kit não altera
-configurações de segurança para contornar a negativa.
+Na preparação opcional (escalas de animação, wakeup, dismiss-keyguard),
+`SecurityException` gera aviso no stderr e o kit segue. O kit não altera
+configurações de segurança para contornar a negativa. Erros de transporte,
+bloqueio seguro e falha da ação pedida continuam fatais, inclusive
+`INJECT_EVENTS` negado num toque ou tecla. Um dump ainda tenta de novo
+quando não consegue idle state.
 
 Antes das ações, o wrapper zera as três escalas de animação. Um dump com
 `could not get idle state` tenta de novo uma vez. Os arquivos temporários

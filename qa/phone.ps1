@@ -72,6 +72,13 @@ function Media-Uri([string]$remote) {
         return $uri
     } finally { Remove-Item -LiteralPath $local }
 }
+function Prepare-Optional([string[]]$Arguments) {
+    try { Adb-Run $Arguments | Out-Null }
+    catch {
+        if ($_.Exception.Message -notmatch 'SecurityException') { throw }
+        [Console]::Error.WriteLine("aviso: preparacao opcional negada: $($_.Exception.Message)")
+    }
+}
 try {
     if ($Action -in 'push','share','list-files','track','clean' -and -not $RunDir) {
         throw 'Informe -RunDir compartilhado por toda a execucao de QA'
@@ -103,10 +110,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or $connection -match 'failed|cannot|unable') { throw "infraestrutura: adb connect: $connection" }
     if ((Adb-Run @('get-state')).Trim() -ne 'device') { throw 'infraestrutura: aparelho offline' }
     foreach ($scale in 'window_animation_scale','transition_animation_scale','animator_duration_scale') {
-        Adb-Run @('shell','settings','put','global',$scale,'0') | Out-Null
+        Prepare-Optional @('shell','settings','put','global',$scale,'0')
     }
-    Adb-Run @('shell','input','keyevent','KEYCODE_WAKEUP') | Out-Null
-    Adb-Run @('shell','wm','dismiss-keyguard') | Out-Null
+    Prepare-Optional @('shell','input','keyevent','KEYCODE_WAKEUP')
+    Prepare-Optional @('shell','wm','dismiss-keyguard')
     $policy = Adb-Run @('shell','dumpsys','window','policy')
     if ($policy -match '(?:mShowingLockscreen|isStatusBarKeyguard|mKeyguardShowing|showing)=true') {
         throw 'infraestrutura: aparelho bloqueado; desbloqueie manualmente (o kit nao recebe PIN)'
