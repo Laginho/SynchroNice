@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -420,3 +420,25 @@ já estava atualizado. Relatório: `.scratch/qa-runs/2026-10-01-024-rereview.md`
   anteriores mantidos, sem débito adicional nem operação real no Redmi.
   Nenhuma fonte ou teste committed alterado nesta revisão; sem merge
   ou linha de ledger. Próxima etapa 2: somente o ❌ acima.
+
+#### Retomada stage 2 (2026-10-01, desligamento completo)
+
+Seam aprovado mantido: `qa/phone.ps1 wifi-off` por `-Adb`/`-Serial`.
+Callers conferidos: uso em `docs/agents/qa.md`; `wait_wifi` atende tanto
+desligamento quanto restauração no script enviado. O trap precisa continuar
+religando após timeout, consulta negada ou recusa. Nenhum caller adicional.
+O `ActiveModeWarden` do Android 16 diferencia os estados em `dumpsys wifi`;
+`cmd wifi status` reduz todos os estados diferentes de enabled a disabled.
+
+O teste existente agora executa o script real com o atraso de operadora
+simulado: DISABLING mantém a rede ativa por cinco segundos, com pedido de
+queda de um segundo. O comando `cmd` devolve a saída real ambígua do AOSP.
+Também cobre transição que excede o prazo, estado desconhecido e negativa
+de dump com código 0, mantendo recusa silenciosa e restauração por trap.
+Só comandos externos e tempo são substituídos, em diretório temporário.
+
+Vermelho: `node --test --test-reporter=tap --test-name-pattern='wifi-off
+confirms device state' qa/phone.test.mjs`: 1 teste, 0 passando, 1 falhando,
+zero skips. No caso delayed, o wrapper saiu 0 com os dois marcadores,
+mas a rede ficou desligada por **0 segundos**, esperado **1**. O teste
+será committed antes da alteração de código; nenhuma operação no Redmi.

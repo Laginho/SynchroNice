@@ -171,27 +171,58 @@ case "$QA_FAKE_SCENARIO:$2" in
   disable-refused:disable|restore-refused:enable) exit 0 ;;
 esac
 case "$2" in
-  disable) echo disabled > "$QA_WIFI_DIRECTORY/state" ;;
-  enable) echo enabled > "$QA_WIFI_DIRECTORY/state" ;;
+  disable)
+    case "$QA_FAKE_SCENARIO" in
+      delayed|stuck-disabling)
+        echo disabling > "$QA_WIFI_DIRECTORY/state"
+        delay=5
+        if [ "$QA_FAKE_SCENARIO" = stuck-disabling ]; then delay=30; fi
+        echo $(( $(cat "$QA_WIFI_DIRECTORY/clock") + delay )) > "$QA_WIFI_DIRECTORY/deadline"
+        ;;
+      *)
+        echo disabled > "$QA_WIFI_DIRECTORY/state"
+        cat "$QA_WIFI_DIRECTORY/clock" > "$QA_WIFI_DIRECTORY/outage-start"
+        ;;
+    esac
+    ;;
+  enable)
+    if [ "$(cat "$QA_WIFI_DIRECTORY/state")" = disabled ]; then
+      echo $(( $(cat "$QA_WIFI_DIRECTORY/clock") - $(cat "$QA_WIFI_DIRECTORY/outage-start") )) > "$QA_WIFI_DIRECTORY/outage-seconds"
+    fi
+    echo enabled > "$QA_WIFI_DIRECTORY/state"
+    ;;
 esac
-echo 0 > "$QA_WIFI_DIRECTORY/queries"
 `);
-    writeFileSync(join(directory, 'cmd'), `#!/bin/sh
+    const status = `#!/bin/sh
 if [ "$QA_FAKE_SCENARIO" = status-denied ]; then
   echo 'java.lang.SecurityException: ACCESS_WIFI_STATE' >&2
   exit 1
 fi
-if [ "$QA_FAKE_SCENARIO" = unknown ]; then echo 'Wifi is disabled-extra'; exit 0; fi
-if [ "$QA_FAKE_SCENARIO" = delayed ]; then
-  count=$(cat "$QA_WIFI_DIRECTORY/queries")
-  echo $((count + 1)) > "$QA_WIFI_DIRECTORY/queries"
-  if [ "$count" -lt 2 ]; then echo 'Wifi is transitioning'; exit 0; fi
+if [ "$QA_FAKE_SCENARIO" = dump-denied ]; then
+  echo "Permission Denial: can't dump WifiService"; exit 0
 fi
-printf 'Wifi is %s\\n' "$(cat "$QA_WIFI_DIRECTORY/state")"
+state=$(cat "$QA_WIFI_DIRECTORY/state")
+if [ "$QA_FAKE_SCENARIO" = unknown ]; then state='unknown state'; fi
+if [ "$2" != status ]; then
+  echo 'Dump of ActiveModeWarden'
+  printf 'Wi-Fi is %s\\n' "$state"
+else
+  # Android 16 cmd wifi status collapses every non-enabled state to disabled.
+  if [ "$state" = enabled ]; then echo 'Wifi is enabled'; else echo 'Wifi is disabled'; fi
+fi
 echo 'Other status details'
+`;
+    writeFileSync(join(directory, 'cmd'), status);
+    writeFileSync(join(directory, 'dumpsys'), status);
+    // Advance device time without real waits, including the carrier's deferred stop.
+    writeFileSync(join(directory, 'sleep'), `#!/bin/sh
+clock=$(( $(cat "$QA_WIFI_DIRECTORY/clock") + $1 ))
+echo "$clock" > "$QA_WIFI_DIRECTORY/clock"
+if [ "$(cat "$QA_WIFI_DIRECTORY/state")" = disabling ] && [ "$clock" -ge "$(cat "$QA_WIFI_DIRECTORY/deadline")" ]; then
+  echo disabled > "$QA_WIFI_DIRECTORY/state"
+  echo "$clock" > "$QA_WIFI_DIRECTORY/outage-start"
+fi
 `);
-    // Keep device-side polling fast; only Android commands and time are replaced.
-    writeFileSync(join(directory, 'sleep'), '#!/bin/sh\nexit 0\n');
     writeFileSync(join(directory, 'rm'), '#!/bin/sh\nexit 0\n');
     writeFileSync(adb, `
 $command = $args -join ' '
@@ -219,9 +250,11 @@ if ($command -match 'shell cat .*wifi.*log') {
 }
 exit 0
 `);
-    for (const scenario of ['disable-refused', 'restore-refused', 'status-denied', 'unknown', 'delayed', 'success', 'log-pending']) {
+    for (const scenario of ['delayed', 'stuck-disabling', 'disable-refused', 'restore-refused', 'status-denied', 'dump-denied', 'unknown', 'success', 'log-pending']) {
       writeFileSync(join(directory, 'state'), 'enabled\n');
       writeFileSync(join(directory, 'calls'), '');
+      writeFileSync(join(directory, 'clock'), '0\n');
+      writeFileSync(join(directory, 'outage-seconds'), '0\n');
       if (scenario === 'log-pending') writeFileSync(join(directory, 'pending'), '');
       const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
         resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
@@ -238,6 +271,8 @@ exit 0
         assert.match(output.log, /^QA_WIFI_DISABLED$/m);
         assert.match(output.log, /^QA_WIFI_RESTORED$/m);
         assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
+        assert.equal(readFileSync(join(directory, 'outage-seconds'), 'utf8').trim(), '1',
+          'the network must be fully disabled for the requested second before restoration');
       } else {
         assert.match(result.stderr, /Wi-Fi nao confirmou/);
       }
