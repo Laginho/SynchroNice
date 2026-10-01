@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -467,3 +467,48 @@ Handoff e `Stage: to-review` incluídos no último commit de código, sem
 alterar testes nesse commit. Nenhuma operação real no Redmi; débitos
 anteriores dos critérios 3–8 mantidos, sem débito adicional. Sem merge
 ou ledger; próxima etapa é a revisão do único ❌ desta retomada.
+
+#### Resolution (2026-10-01)
+
+Verdict: Approve
+
+- Standards: zero violações novas documentadas, zero smells relevantes.
+  Diff da retomada `4f01824...b9f0859`, Primary files, callers e separação
+  teste/código conferidos. `12763b6` contém só teste e ticket, com
+  `implementing`; `b9f0859` não altera testes e inclui o handoff `to-review`.
+  As observações históricas não bloqueantes continuam registradas acima.
+- Spec: zero achados nesta retomada, sem scope creep. O último ❌ dos
+  critérios 4 e 9 está resolvido: `wait_wifi` consulta `dumpsys wifi` e
+  exige `Wi-Fi is disabled` antes de iniciar N; `disabling`, `enabling` e
+  estado desconhecido não confirmam a ação. O trap continua restaurando
+  após falha/timeout, e sucesso exige `enabled` e os dois marcadores.
+  Fonte primária Android 16 conferida: `ActiveModeWarden` distingue os
+  estados e imprime a linha exata; `cmd wifi status` colapsa os transitórios.
+- Arquivos da retomada: `qa/phone.ps1`, `qa/phone.test.mjs`,
+  `docs/agents/qa.md` e este ticket. A revisão não alterou fontes ou testes.
+  Os achados anteriores do critério 6 continuam aprovados;
+  CLEAN-019 permanece separado para triagem.
+- Prova vermelho/verde reproduzida: teste committed `12763b6` com wrapper
+  `4f01824`, em snapshot temporário, falhou por observar **0 segundos** de
+  queda, esperado **1**. Uma execução, 1 teste falhou, zero passou/skips.
+  No HEAD revisado `b9f0859`, o teste verde independente passou nos nove
+  cenários: 1 teste passou, zero falhas/skips. O mesmo teste passou no gate.
+  Executa o wrapper e seu próprio script; só comandos externos/tempo são
+  substituídos, sem copiar a lógica de confirmação.
+- Gate completo após rebase, em primeiro plano e aguardado até terminar:
+  código 0, `GATE_EXIT=0`, `gate: passou`, `BUILD SUCCESSFUL in 9s`.
+  Rust 51, UI 47, QA 14, Android app 59 e protocol-client 62: **233 testes**,
+  zero falhas. Android UP-TO-DATE, XMLs confirmados sem falhas, erros ou
+  skips; fmt, clippy, typecheck, lint, sintaxe PowerShell e
+  `git diff --check` passaram.
+- Os três `Proxy decided` revisados e aprovados: PC/baseline; adb falso e
+  critério 9; raiz do Dialog e preparação opcional só por SecurityException.
+  Nenhuma nova decisão do proxy nem alteração dos critérios nesta revisão.
+- `adb devices -l` e `adb mdns services` sem aparelhos/serviços.
+  Os débitos físicos anteriores do Redmi permanecem, sem débito adicional
+  nem operação real de Wi-Fi/Par/arquivos. Não se afirma medição de
+  `/listen` no aparelho. Harnesses usaram temporários; o teste PC enviou
+  apenas seu arquivo `synchronice-qa-test-recycle.txt` à Lixeira.
+- Relatório: `.scratch/qa-runs/2026-10-01-024-final-review.md`.
+  Merge sem squash `68c2d96` em `sweatshop/2026-09-30-2146`;
+  Stage, resolução e ledger fechados juntos no commit desta resolução.
