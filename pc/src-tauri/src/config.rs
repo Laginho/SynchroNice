@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 const FILE_NAME: &str = "config.json";
 
 /// Um perfil de QA guarda todos os dados à parte e não registra autostart.
-pub fn resolve_data_dir(default: PathBuf, override_dir: Option<std::ffi::OsString>) -> (PathBuf, bool) {
+pub fn resolve_data_dir(
+    default: PathBuf,
+    override_dir: Option<std::ffi::OsString>,
+) -> (PathBuf, bool) {
     match override_dir {
         Some(dir) => (PathBuf::from(dir), false),
         None => (default, true),

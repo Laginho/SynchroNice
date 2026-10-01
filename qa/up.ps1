@@ -52,10 +52,11 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.qrcode.QRCodeWriter;
 class QrImage {
     public static void main(String[] args) throws Exception {
-        var matrix = new QRCodeWriter().encode(Files.readString(Path.of(args[0])), BarcodeFormat.QR_CODE, 720, 720);
+        // Keep the QR inside the portrait preview's center crop.
+        var matrix = new QRCodeWriter().encode(Files.readString(Path.of(args[0])), BarcodeFormat.QR_CODE, 240, 240);
         var image = new BufferedImage(720, 720, BufferedImage.TYPE_INT_RGB);
         for (int y = 0; y < 720; y++) for (int x = 0; x < 720; x++)
-            image.setRGB(x, y, matrix.get(x, y) ? 0 : 0xffffff);
+            image.setRGB(x, y, x >= 240 && x < 480 && y >= 240 && y < 480 && matrix.get(x - 240, y - 240) ? 0 : 0xffffff);
         ImageIO.write(image, "png", Path.of(args[1]).toFile());
     }
 }
@@ -106,6 +107,7 @@ class QrImage {
         Adb-Run @('-s',$serial,'uninstall','synchronice.android') | Out-Null
         Adb-Run @('-s',$serial,'install',$apk) | Out-Null
     } elseif ($installCode -ne 0) { throw "Instalacao APK falhou: $install" }
+    Adb-Run @('-s',$serial,'shell','pm','grant','synchronice.android','android.permission.POST_NOTIFICATIONS') | Out-Null
     Push-Location "$root/pc"
     try { & npx.cmd tauri build --debug --no-bundle | Out-Host; if ($LASTEXITCODE -ne 0) { throw 'Build PC falhou' } }
     finally { Pop-Location }
