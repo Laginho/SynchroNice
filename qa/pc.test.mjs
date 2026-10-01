@@ -12,14 +12,18 @@ test('PC cleanup protects previous, unlisted, changed files and unsafe manifests
     const config = join(directory, 'config.json');
     mkdirSync(folder);
     writeFileSync(config, JSON.stringify({ pasta: folder }));
-    const previous = join(folder, 'synchronice-qa-test-previous.txt');
+    const previous = join(folder, 'synchronice-qa-test-prévia.txt');
     const unlisted = join(folder, 'synchronice-qa-test-unlisted.txt');
     const tracked = join(folder, 'synchronice-qa-test-recycle.txt');
     const changed = join(folder, 'synchronice-qa-test-changed.txt');
     const run = (action, path, runDir = join(directory, 'run')) => {
-      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+      const args = [
         resolve('qa/pc.ps1'), action, '-Config', config, '-RunDir', runDir,
-        ...(path ? ['-Path', path] : [])], { encoding: 'utf8', timeout: 30000 });
+        ...(path ? ['-Path', path] : [])];
+      const command = '[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(850); & ' +
+        args.map(value => "'" + value.replaceAll("'", "''") + "'").join(' ');
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 30000 });
       assert.ifError(result.error);
       return result;
     };

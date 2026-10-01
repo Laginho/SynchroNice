@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
