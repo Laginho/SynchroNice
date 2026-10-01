@@ -1,5 +1,5 @@
 # SYN-023: Atalho de pareamento no build de debug
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -99,3 +99,32 @@ Sem o Redmi alcançável, o critério 4 vira `Débito humano:`.
   após execução verde real dos 59 testes do app no TestsOnly.
   Testes ficam apenas no commit `4d12967`; nenhum commit posterior os alterou.
   Branch `syn-023`, base `sweatshop/2026-09-30-2146`; pronto para stage 3.
+
+#### Resolution (2026-09-30)
+
+Verdict: Approve
+
+- Standards: 1 limpeza não bloqueante, registrada no CLEAN-018 para triagem:
+  preservar uma verificação executável da primitiva `pair`. Não consta dos
+  critérios deste ticket; nenhum critério, limite de Primary files, regra
+  test-first ou comportamento anterior foi violado. Sem smells relevantes.
+- Spec: 0 achados. Critérios 1, 2, 3 e 5 atendidos; o critério 4 mantém o
+  débito autorizado no Verification, sem afirmar sucesso físico.
+- Arquivos revisados: manifest e `DebugPairActivity` em `src/debug`,
+  `DebugPairActivityTest` em `src/testDebug`, `qa/phone.ps1` e
+  `docs/agents/qa.md`. Nenhuma correção de código nesta revisão.
+- Prova vermelho/verde: commit `4d12967` contém somente testes e metadados
+  do ticket. O log original registra `gate.ps1 -TestsOnly` saindo 1 por
+  `Unresolved reference 'DebugPairActivity'`. Os commits de implementação
+  não alteram testes; os XMLs registram os três casos verdes. Manifests
+  merged inspecionados: activity presente em debug e ausente em release.
+- Gate completo após rebase, em primeiro plano: saída 0, `gate: passou`,
+  `BUILD SUCCESSFUL`. Rust 51, UI 47 e parser QA 5 passaram; Android app 59
+  e protocol-client 62 UP-TO-DATE, XMLs sem falhas, erros ou skips.
+- `phone.ps1 pair` foi repetido: saída 1 por `WRITE_SECURE_SETTINGS` antes
+  da leitura do config e do disparo da activity. Computer Use inicializado
+  e janelas consultadas; nenhuma janela do celular acessível. O débito do
+  critério 4 permanece. Nenhum Par foi alterado nesta revisão.
+- Evidência: `.scratch/qa-runs/2026-09-30-redmi-SYN-023-review.md`.
+  Merge sem squash `96d7d7e` em `sweatshop/2026-09-30-2146`; Stage e ledger
+  fechados juntos no commit desta resolução.
