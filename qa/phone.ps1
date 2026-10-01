@@ -110,7 +110,7 @@ try {
         'stop' { Adb-Run @('shell','am','force-stop','synchronice.android') }
         'pair' {
             $pair = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
-            if ($pair.instance_name -cnotmatch '^synchronice-[0-9a-fA-F]{8}$' -or
+            if ($pair.nome_instancia -cnotmatch '^synchronice-[0-9a-fA-F]{8}$' -or
                 $pair.token -cnotmatch '^[0-9a-fA-F]{32}$') { throw 'config.json sem Par valido' }
             if (-not $Ip) {
                 # Same route lookup as the PC QR: UDP connect selects an address without sending data.
@@ -124,7 +124,7 @@ try {
             if ($Ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$' -or
                 -not [Net.IPAddress]::TryParse($Ip, [ref]$address) -or $address.ToString() -ne $Ip -or
                 $Ip -eq '0.0.0.0') { throw 'Informe -Ip como IPv4 valido do PC' }
-            $json = @{ instance_name=$pair.instance_name; port=47820; token=$pair.token; ip=$Ip } | ConvertTo-Json -Compress
+            $json = @{ instance_name=$pair.nome_instancia; port=47820; token=$pair.token; ip=$Ip } | ConvertTo-Json -Compress
             # Preserve JSON quotes through Windows PowerShell native argv and the adb shell.
             $quoted = "'" + $json.Replace('"', '\"') + "'"
             $result = Adb-Run @('shell','am','start','-W','-n','synchronice.android/.DebugPairActivity','--es','qr',$quoted)

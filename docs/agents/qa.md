@@ -51,7 +51,7 @@ Execute da raiz do repo (prefixo de todos os exemplos:
 exportada existem apenas no source set `debug`, nunca no release. O extra
 string `qr` recebe o JSON completo e passa pelo mesmo `acceptQr` do scanner;
 JSON inválido ou ausente apenas encerra a activity, sem criar Par.
-O wrapper lê `instance_name` e `token` de
+O wrapper lê `nome_instancia` (emitido como `instance_name` no QR) e `token` de
 `%APPDATA%/dev.synchronice.pc/config.json` (`-Config` troca esse caminho),
 usa a porta 47820 e o IPv4 escolhido pela rota padrão do PC, como o QR real.
 `-Ip` sobrescreve o IPv4, por exemplo quando há VPN. O token não deve ir para
