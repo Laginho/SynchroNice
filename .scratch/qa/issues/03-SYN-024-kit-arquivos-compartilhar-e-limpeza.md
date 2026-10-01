@@ -10,7 +10,7 @@ Review: agent
   - New: qa/mediastore.mjs, qa/mediastore.test.mjs (saída do `content query`)
   - gate.ps1 (só a linha do `node --test` do kit)
   - android/app/src/main/java/synchronice/android/MainActivity.kt (só `testTag` na engrenagem, nos itens do painel e na câmera)
-  - android/app/src/main/java/synchronice/android/ImageViewer.kt (só `testTag`)
+  - android/app/src/main/java/synchronice/android/ImageViewer.kt (só `testTag`, `testTagsAsResourceId` na raiz do Dialog e imports/opt-in necessários)
   - docs/agents/qa.md (seções das primitivas novas)
 
 #### What to build
@@ -85,6 +85,16 @@ Sem o Redmi alcançável, os critérios 3–8 viram `Débito humano:`.
   vírgula ou espaço. Vermelho porque `qa/mediastore.mjs` não existe.
 
 ## Comments
+
+- Proxy decided: expor `testTagsAsResourceId` na raiz do Dialog de
+  `ImageViewer`, com imports e opt-in necessários; tornar preparação opcional
+  de animações/wakeup tolerante apenas a `SecurityException`, sem mudar a
+  segurança do Redmi, e tentar D.1/G.7 antes de registrar débito — o Dialog
+  tem raiz própria e a preparação atual aborta ações que não precisam dessas
+  permissões. Demais falhas adb, ações solicitadas e bloqueio seguro continuam
+  fatais; negativa de concessão no `am` continua `blocked`.
+  Decisão obtida do agente `proxy` via Claude CLI, `--agent proxy --model opus
+  --effort xhigh --tools Read`, sem escrita do proxy no repo.
 
 - 2026-09-30, stage 2: branch `syn-024`, base `sweatshop/2026-09-30-2146`.
   Seam aprovada: `mediaUri(output, path)` em `qa/mediastore.mjs`, chamada pelo

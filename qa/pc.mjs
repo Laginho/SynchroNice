@@ -1,12 +1,18 @@
 import { chromium } from 'playwright-core';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
 let browser;
 try {
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
   const request = JSON.parse(input.replace(/^\uFEFF/, ''));
-  if (request.action === 'presence') {
+  if (request.action === 'list-files') {
+    let entries;
+    try { entries = await readdir(request.folder, { withFileTypes: true }); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; entries = []; }
+    console.log(JSON.stringify(entries.filter(entry => entry.isFile()).map(entry => join(request.folder, entry.name))));
+  } else if (request.action === 'presence') {
     const { token } = JSON.parse(await readFile(request.config, 'utf8'));
     if (!token) throw new Error('config.json sem token');
     const response = await fetch('http://127.0.0.1:47820/listen', {
@@ -27,6 +33,12 @@ try {
       case 'key':
         if (request.selector) await page.locator(request.selector).press(request.key);
         else await page.keyboard.press(request.key);
+        break;
+      case 'paste-image':
+      case 'paste-files':
+        await page.bringToFront();
+        await page.locator(request.selector || '#composer-input').focus();
+        await page.keyboard.press('Control+v');
         break;
       case 'text': result = await page.locator(request.selector).allTextContents(); break;
       case 'screenshot': await page.screenshot({ path: request.path }); result = request.path; break;

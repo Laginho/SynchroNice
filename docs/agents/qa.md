@@ -46,6 +46,30 @@ Execute da raiz do repo (prefixo de todos os exemplos:
 | Árvore | `dump` | XML com textos, descrições, resource-ids e bounds |
 | Print | `screenshot -Path '.scratch/qa-runs/2026-09-30-redmi/phone.png'` | PNG local; crie o diretório antes |
 | Parear sem câmera | `pair` ou `pair -Ip '192.168.18.12'` | lê o Par do PC, dispara a activity de debug e abre o chat |
+| Listar recebidos | `list-files -RunDir '.scratch/qa-runs/2026-09-30-024-redmi'` | caminhos em `Download/SynchroNice`; primeira chamada registra os arquivos anteriores ao QA |
+| Empurrar arquivo | `push -Path 'qa-foto.png' -RunDir '<execução>'` | grava em `Pictures/SynchroNiceQA/`, recusa nome existente e registra para limpeza |
+| Compartilhar | `share -Path 'qa-foto.png' -RunDir '<execução>'` | empurra, varre mídia, resolve URI e dispara SEND na ShareActivity |
+| Wi-Fi fora | `wifi-off 15` | desliga por 15 segundos e reconecta adb; retorna só depois da reconexão |
+| Registrar chegada | `track -Path '/storage/emulated/0/Download/SynchroNice/imagem-123.png' -RunDir '<execução>'` | registra somente o arquivo novo identificado pelo agente como resultado do QA |
+| Limpar | `clean -RunDir '<execução>'` | JSON de cada arquivo e destino; MediaStore ou `rm` |
+
+`share` recebe um arquivo **local do PC**, inclusive na posição 1. Não precisa
+chamar `push` antes. Usa `content call --method scan_file`, depois
+`content query --projection _id:_data` e `am start -a android.intent.action.SEND`
+com `--grant-read-uri-permission`, URI em `-d` e extra URI `--eu
+android.intent.extra.STREAM`. A sintaxe vem do [Intent do AOSP](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/master/core/java/android/content/Intent.java)
+e do [comando content](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/cmds/content/src/com/android/commands/content/Content.java).
+`-Mime` sobrescreve o MIME inferido pela extensão; desconhecidas usam
+`application/octet-stream`. SEND_MULTIPLE continua manual. Se o Android 16
+recusar a concessão no `am`, guarde a saída integral e bloqueie SYN-024.
+
+`wifi-off` aceita 1–600 segundos (`-Seconds` também vale). Um script `nohup`
+no aparelho usa um trap para religar o Wi-Fi, mesmo sem adb. Enquanto a
+chamada aguarda, outra chamada a `pc.ps1 presence` permite observar 204;
+depois da reconexão, espere 200. A descoberta mDNS atualiza a porta quando
+o IP foi informado. Não interprete apenas `reconnected=true` como prova da
+presença do app: confira `/listen` antes, durante e depois. Falha de
+reconexão é infraestrutura. Não desligue o Wi-Fi sem um aparelho acessível.
 
 `pair` só funciona com o **APK de debug**: `DebugPairActivity` e sua declaração
 exportada existem apenas no source set `debug`, nunca no release. O extra
@@ -68,7 +92,9 @@ shell são protegidos; o campo deve estar em foco antes de digitar.
 Todo elemento de UI tocado por um critério deve ganhar `testTag`.
 A raiz Compose expõe tags como resource-ids com
 [`testTagsAsResourceId`](https://developer.android.com/develop/ui/compose/testing/interoperability).
-Neste ticket: `composer`, `send`, `presence` e
+Tags: `composer`, `send`, `presence`, `settings`, `camera`, `settings-back`,
+`change-folder`, `copy-formatted`, `keep-photos`, `unpair`, `image-viewer`,
+`image-viewer-back` e
 `bubble-<localId>-<incoming|outgoing>-<pending|delivered|failed>`.
 As tags são valores puros, sem prefixo do pacote. A entrega fica na tag da
 bolha; o dump também contém o texto e, nas saídas, a legenda Entregue/Pendente.
@@ -95,6 +121,17 @@ Leia `pc.stderr.log` para diagnosticar falhas do app.
 | Print | `screenshot -Path '.scratch/qa-runs/2026-09-30-redmi/pc.png'` | captura da área web da janela |
 | Comando Tauri | `invoke -Command list_items -Json '{}'` | retorno JSON do comando real |
 | Presença | `presence` | `{"status":200,"online":true}` ou 204/false |
+| Listar Pasta | `list-files -RunDir '<execução>'` | caminhos; fotografia inicial para proteger arquivos anteriores |
+| Colar imagem | `paste-image -Path 'qa-foto.png'` | clipboard nativo do Windows, foco no composer e Ctrl+V pelo CDP |
+| Colar arquivos | `paste-files -Paths 'qa-a.pdf','qa-b.txt'` | CF_HDROP nativo; uma bolha por arquivo |
+| Registrar chegada | `track -Path 'C:\Users\bruno\Downloads\SynchroNice\qa-foto.png' -RunDir '<execução>'` | registra um arquivo novo da Pasta para limpeza |
+| Limpar | `clean -RunDir '<execução>'` | arquivos registrados enviados à Lixeira do Windows |
+
+Para vários caminhos, chame `& .\qa\pc.ps1 paste-files -Paths @('qa-a.pdf',
+'qa-b.txt')` **dentro do PowerShell**: `powershell -File` não recebe arrays
+tipados do shell chamador. Imagem e arquivos usam o clipboard real, sem
+simular eventos paste nem chamar diretamente `send_files`/`send_bytes`.
+`-Selector` muda o alvo de foco; o padrão é `#composer-input`.
 
 `invoke` chama `window.__TAURI__.core.invoke`, sem reproduzir a lógica do app.
 `presence` faz `HEAD http://127.0.0.1:47820/listen`, com o token lido de
@@ -142,6 +179,32 @@ citando passo e ticket de origem. Na revisão de um ticket, ❌ reprova esse
 ticket. Um passo verificado aponta o relatório e não gera débito humano.
 👤 é o que permanece para o humano; o ticket SYN-022 permite débito nos
 critérios 3–5 e 7 se o Redmi não estiver alcançável sem fio.
-No fim, liste os arquivos apagados e seu destino. Estas primitivas não
-apagam arquivos da Pasta nem despareiam o app; limpeza de arquivos do QA
-será implementada no SYN-024. Os textos desaparecem ao encerrar a Sessão.
+## Limpeza dos arquivos do QA
+
+Escolha um `-RunDir` e repita-o em **todas** as ações de arquivos dos dois
+wrappers. Antes de enviar, rode `list-files` em ambos: ele registra os
+arquivos anteriores à execução em `pc-files.json`/`phone-files.json`.
+No PC, a Pasta vem de `config.json`, ou Downloads/SynchroNice quando não
+foi escolhida; no celular, a listagem cobre Download/SynchroNice.
+Uma Pasta Android escolhida via SAF fica fora desta primitiva.
+
+Use nomes exclusivos da execução. `share`/`push` registram automaticamente
+o arquivo empurrado. Depois da entrega, compare a listagem e registre com
+`track` o caminho **exato** que o QA fez chegar (incluindo sufixo de colisão).
+Nunca registre outros arquivos só porque apareceram durante a execução.
+`track` recusa os arquivos da fotografia inicial e os de fora da Pasta.
+Fontes locais copiadas para o clipboard não entram automaticamente na lista.
+
+`clean` percorre apenas os arquivos registrados, recusa diretórios e compara
+o SHA-256 antes de apagar: arquivo alterado fica preservado e gera erro.
+No PC, usa `FileSystem.DeleteFile` com `SendToRecycleBin`. No celular,
+atualiza `is_trashed=1` no MediaStore e confirma por query; se não puder,
+usa `rm` apenas no caminho registrado. O manifesto fica vinculado à Pasta
+ou ao aparelho; não o reutilize para outro alvo. Lista vazia não apaga nada.
+Os resultados ficam também em `cleanup` nos manifestos, inclusive após
+uma interrupção; `clean` pode ser repetido sem apagar arquivos adicionais.
+
+Copie para o relatório cada `path` e `destination` retornados pelos dois
+`clean`. Se o kit abortou antes de criar arquivos, registre lista vazia e
+o motivo. Os manifestos ficam no subdiretório local ignorado pelo git;
+o relatório Markdown é committed. Os textos somem ao encerrar a Sessão.

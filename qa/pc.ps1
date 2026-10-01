@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory, Position=0)]
-    [ValidateSet('start','click','type','key','text','screenshot','invoke','presence')][string]$Action,
+    [ValidateSet('start','click','type','key','text','screenshot','invoke','presence','list-files','track','clean','paste-image','paste-files')][string]$Action,
     [int]$Port = 9222,
     [string]$Selector,
     [string]$Text,
@@ -8,15 +8,98 @@ param(
     [string]$Command,
     [string]$Json = '{}',
     [string]$Path,
+    [string[]]$Paths,
     [string]$RunDir,
     [string]$Exe,
     [string]$Config = "$env:APPDATA/dev.synchronice.pc/config.json"
 )
 $ErrorActionPreference = 'Stop'
+if ($Action -in 'list-files','track','clean' -and -not $RunDir) {
+    [Console]::Error.WriteLine('Informe -RunDir compartilhado por toda a execucao de QA'); exit 1
+}
 if (-not $RunDir) { $RunDir = "$PSScriptRoot/../.scratch/qa-runs/$((Get-Date).ToString('yyyy-MM-dd-HHmmss'))-redmi" }
 if (-not $Exe) { $Exe = "$PSScriptRoot/../pc/src-tauri/target/release/pc.exe" }
 try {
     if ($Port -lt 1 -or $Port -gt 65535) { throw 'Porta CDP invalida' }
+    if ($Action -in 'list-files','track','clean') {
+        if (-not (Test-Path -LiteralPath $RunDir)) { New-Item -ItemType Directory -Path $RunDir | Out-Null }
+        $settings = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
+        $folder = $settings.pasta
+        if (-not $folder) {
+            $downloads = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders').'{374DE290-123F-4565-9164-39C4925E467B}'
+            $folder = Join-Path ([Environment]::ExpandEnvironmentVariables($downloads)) 'SynchroNice'
+        }
+        $folder = [IO.Path]::GetFullPath($folder).TrimEnd('\','/')
+        $manifest = Join-Path $RunDir 'pc-files.json'
+        $state = $null
+        if (Test-Path -LiteralPath $manifest) {
+            $state = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+            if ($state.folder -ne $folder) { throw 'Pasta mudou: use outra execucao de QA' }
+        }
+        if ($Action -eq 'list-files') {
+            $OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $listing = @{ action=$Action; folder=$folder } | ConvertTo-Json -Compress | & node "$PSScriptRoot/pc.mjs"
+            if ($LASTEXITCODE -ne 0) { throw 'Listagem da Pasta falhou' }
+            if (-not $state) {
+                @{ folder=$folder; baseline=@($listing | ConvertFrom-Json); tracked=@(); cleanup=@() } |
+                    ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifest -Encoding UTF8
+            }
+            $listing
+        } elseif ($Action -eq 'track') {
+            if (-not $state) { throw 'Rode list-files antes do envio, com o mesmo -RunDir' }
+            $file = Get-Item -LiteralPath $Path
+            if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+                $file.DirectoryName -ne $folder -or @($state.baseline) -contains $file.FullName) {
+                throw 'So registre arquivos novos desta execucao, diretamente na Pasta'
+            }
+            if (@($state.tracked.path) -notcontains $file.FullName) {
+                $state.tracked = @($state.tracked) + @{ path=$file.FullName; hash=(Get-FileHash -LiteralPath $file.FullName).Hash }
+                $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifest -Encoding UTF8
+            }
+            $state.tracked | ConvertTo-Json -Depth 10
+        } elseif ($state) {
+            Add-Type -AssemblyName Microsoft.VisualBasic
+            foreach ($entry in @($state.tracked)) {
+                $target = [IO.Path]::GetFullPath($entry.path)
+                if ([IO.Path]::GetDirectoryName($target) -ne $folder -or @($state.baseline) -contains $target) {
+                    throw 'Manifesto inseguro: arquivo fora da Pasta ou anterior ao QA'
+                }
+                $destination = 'ja ausente'
+                if (Test-Path -LiteralPath $target) {
+                    $file = Get-Item -LiteralPath $target
+                    if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+                        (Get-FileHash -LiteralPath $target).Hash -ne $entry.hash) { throw "Arquivo alterado; preservado: $target" }
+                    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($target,
+                        [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs,
+                        [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin,
+                        [Microsoft.VisualBasic.FileIO.UICancelOption]::ThrowException)
+                    $destination = 'Lixeira do Windows'
+                }
+                $state.cleanup = @($state.cleanup) + @{ path=$target; destination=$destination }
+                $state.tracked = @($state.tracked | Where-Object { $_.path -ne $entry.path })
+                $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifest -Encoding UTF8
+            }
+            ConvertTo-Json -InputObject @($state.cleanup) -Depth 10
+        } else { '[]' }
+        exit 0
+    }
+    if ($Action -in 'paste-image','paste-files') {
+        Add-Type -AssemblyName System.Windows.Forms
+        if ($Action -eq 'paste-image') {
+            Add-Type -AssemblyName System.Drawing
+            $image = [Drawing.Image]::FromFile((Resolve-Path -LiteralPath $Path).Path)
+            try { [Windows.Forms.Clipboard]::SetImage($image) } finally { $image.Dispose() }
+        } else {
+            if (-not $Paths) { throw 'Informe -Paths com um ou mais arquivos' }
+            $files = [Collections.Specialized.StringCollection]::new()
+            foreach ($candidate in $Paths) {
+                $file = Get-Item -LiteralPath $candidate
+                if ($file.PSIsContainer) { throw 'Clipboard aceita arquivos, nao diretorios' }
+                [void]$files.Add($file.FullName)
+            }
+            [Windows.Forms.Clipboard]::SetFileDropList($files)
+        }
+    }
     if ($Action -eq 'start') {
         $resolvedExe = (Resolve-Path -LiteralPath $Exe).Path
         New-Item -ItemType Directory -Force -Path $RunDir | Out-Null

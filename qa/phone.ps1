@@ -1,12 +1,15 @@
 param(
     [Parameter(Mandatory, Position=0)]
-    [ValidateSet('tap','type','key','dump','screenshot','open','stop','pair')][string]$Action,
+    [ValidateSet('tap','type','key','dump','screenshot','open','stop','pair','push','share','list-files','track','wifi-off','clean')][string]$Action,
     [string]$Serial = $env:SYNCHRONICE_ADB_SERIAL,
     [ValidateSet('id','text','description')][string]$By = 'id',
     [string]$Value,
     [string]$Text,
     [string]$Key,
-    [string]$Path,
+    [Parameter(Position=1)][string]$Path,
+    [string]$RunDir,
+    [int]$Seconds = 15,
+    [string]$Mime,
     [string]$Config = "$env:APPDATA/dev.synchronice.pc/config.json",
     [string]$Ip,
     [string]$Adb = $env:SYNCHRONICE_ADB
@@ -42,7 +45,41 @@ function Dump {
         }
     } finally { & $Adb -s $Serial shell rm -f $remote 2>&1 | Out-Null }
 }
+function Shell-Quote([string]$value) {
+    if ($value -match '[\r\n\x00]') { throw 'Caminho com caractere de controle recusado' }
+    return "'" + $value.Replace("'", "'\''").Replace('"', '\"') + "'"
+}
+function Phone-Files {
+    $listing = Adb-Run @('shell',"if [ -d /storage/emulated/0/Download/SynchroNice ]; then find /storage/emulated/0/Download/SynchroNice -maxdepth 1 -type f; fi")
+    return @($listing -split '\r?\n' | Where-Object { $_ })
+}
+function Save-Files {
+    $script:fileState | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $script:manifest -Encoding UTF8
+}
+function Phone-Hash([string]$remote) {
+    $hash = Adb-Run @('shell', "sha256sum $(Shell-Quote $remote)")
+    if ($hash -notmatch '^([a-fA-F0-9]{64})\s') { throw "Nao foi possivel identificar arquivo: $remote" }
+    return $Matches[1]
+}
+function Media-Uri([string]$remote) {
+    $local = [IO.Path]::GetTempFileName()
+    try {
+        $where = Shell-Quote ("_data='" + $remote.Replace("'", "''") + "'")
+        $query = Adb-Run @('shell',"content query --uri content://media/external/file --projection _id:_data --where $where")
+        [IO.File]::WriteAllText($local, $query, [Text.UTF8Encoding]::new($false))
+        $uri = & node "$PSScriptRoot/mediastore.mjs" $local $remote
+        if ($LASTEXITCODE -ne 0) { throw "nao achado no MediaStore: $remote" }
+        return $uri
+    } finally { Remove-Item -LiteralPath $local }
+}
 try {
+    if ($Action -in 'push','share','list-files','track','clean' -and -not $RunDir) {
+        throw 'Informe -RunDir compartilhado por toda a execucao de QA'
+    }
+    if ($Action -eq 'wifi-off') {
+        if ($Path) { $Seconds = [int]$Path }
+        if ($Seconds -lt 1 -or $Seconds -gt 600) { throw 'Wi-Fi fora: use de 1 a 600 segundos' }
+    }
     if (-not (Get-Command $Adb -ErrorAction SilentlyContinue)) { throw 'infraestrutura: adb nao encontrado' }
     if ($Serial -and -not (Wireless $Serial)) { throw 'sem aparelho: transporte USB recusado' }
     if (-not $Serial) {
@@ -74,7 +111,122 @@ try {
     if ($policy -match '(?:mShowingLockscreen|isStatusBarKeyguard|mKeyguardShowing|showing)=true') {
         throw 'infraestrutura: aparelho bloqueado; desbloqueie manualmente (o kit nao recebe PIN)'
     }
+    if ($Action -in 'push','share','list-files','track','clean') {
+        New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
+        $manifest = Join-Path $RunDir 'phone-files.json'
+        $device = (Adb-Run @('shell','getprop','ro.serialno')).Trim()
+        if (-not $device) { throw 'infraestrutura: aparelho sem identificacao' }
+        if (Test-Path -LiteralPath $manifest) {
+            $fileState = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+            if ($fileState.device -cne $device) { throw 'Manifesto pertence a outro aparelho' }
+        } else {
+            $fileState = [pscustomobject]@{ device=$device; baseline=@(Phone-Files); tracked=@(); cleanup=@() }
+            Save-Files
+        }
+    }
     switch ($Action) {
+        'list-files' { ConvertTo-Json -InputObject @(Phone-Files) }
+        'track' {
+            $prefix = '/storage/emulated/0/Download/SynchroNice/'
+            if (-not $Path.StartsWith($prefix) -or $Path.Substring($prefix.Length) -match '[/\\\r\n]' -or
+                $Path.Substring($prefix.Length) -in '', '.', '..' -or @($fileState.baseline) -ccontains $Path) {
+                throw 'So registre arquivos novos desta execucao, diretamente em Download/SynchroNice'
+            }
+            if (@($fileState.tracked.path) -cnotcontains $Path) {
+                $fileState.tracked = @($fileState.tracked) + @{ path=$Path; hash=(Phone-Hash $Path) }
+                Save-Files
+            }
+            ConvertTo-Json -InputObject @($fileState.tracked) -Depth 10
+        }
+        { $_ -in 'push','share' } {
+            $file = Get-Item -LiteralPath $Path
+            if ($file.PSIsContainer) { throw 'Informe um arquivo, nao um diretorio' }
+            $remote = '/storage/emulated/0/Pictures/SynchroNiceQA/' + $file.Name
+            $quoted = Shell-Quote $remote
+            Adb-Run @('shell','mkdir','-p','/storage/emulated/0/Pictures/SynchroNiceQA') | Out-Null
+            # Reserve without overwriting an existing photo; track before push so partial writes can be cleaned.
+            Adb-Run @('shell',"set -C; : > $quoted") | Out-Null
+            $fileState.tracked = @($fileState.tracked) + @{ path=$remote; hash=$null }
+            Save-Files
+            Adb-Run @('push',$file.FullName,$remote) | Out-Null
+            $entry = $fileState.tracked | Select-Object -Last 1
+            $entry.hash = Phone-Hash $remote
+            Save-Files
+            if ($Action -eq 'push') { @{ path=$remote } | ConvertTo-Json -Compress; break }
+            Adb-Run @('shell',"content call --uri content://media --method scan_file --arg $quoted") | Out-Null
+            $uri = $null
+            for ($attempt = 0; $attempt -lt 10; $attempt++) {
+                try { $uri = Media-Uri $remote; break } catch { if ($attempt -eq 9) { throw }; Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $Mime) {
+                $Mime = @{ '.jpg'='image/jpeg'; '.jpeg'='image/jpeg'; '.png'='image/png'; '.webp'='image/webp'; '.gif'='image/gif'; '.pdf'='application/pdf'; '.mp4'='video/mp4'; '.txt'='text/plain' }[$file.Extension.ToLowerInvariant()]
+                if (-not $Mime) { $Mime = 'application/octet-stream' }
+            }
+            if ($Mime -notmatch '^[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+$') { throw 'MIME invalido' }
+            $result = Adb-Run @('shell','am','start','-W','-n','synchronice.android/.ShareActivity',
+                '-a','android.intent.action.SEND','-t',$Mime,'-d',$uri,
+                '--eu','android.intent.extra.STREAM',$uri,'--grant-read-uri-permission')
+            if ($result -match 'Error:|Exception|Permission Denial') { throw "Compartilhar recusado pelo am: $result" }
+            @{ path=$remote; uri=$uri; am=$result } | ConvertTo-Json -Compress
+        }
+        'wifi-off' {
+            $remote = '/data/local/tmp/synchronice-qa-wifi-' + [guid]::NewGuid().ToString('N') + '.sh'
+            $local = [IO.Path]::GetTempFileName()
+            try {
+                # The trap restores Wi-Fi on exit; nohup keeps it alive after wireless adb drops.
+                [IO.File]::WriteAllText($local, "trap 'svc wifi enable; rm -f $remote' EXIT`nsvc wifi disable`nsleep $Seconds`n", [Text.UTF8Encoding]::new($false))
+                Adb-Run @('push',$local,$remote) | Out-Null
+                Adb-Run -Arguments @('shell',"nohup sh $remote </dev/null >/data/local/tmp/synchronice-qa-wifi.log 2>&1 &") -AllowFailure | Out-Null
+            } finally { Remove-Item -LiteralPath $local }
+            Start-Sleep -Seconds ($Seconds + 2)
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                $ErrorActionPreference = 'Continue'
+                & $Adb connect $Serial 2>&1 | Out-Null
+                $status = & $Adb -s $Serial get-state 2>&1
+                $ErrorActionPreference = 'Stop'
+                if ($LASTEXITCODE -eq 0 -and $status -contains 'device') { $ready = $true; break }
+                $services = & $Adb mdns services
+                foreach ($service in $services) {
+                    if ($service -match '^\S+\s+_adb-tls-connect\._tcp\.?\s+(\S+:\d+)') {
+                        $endpoint = $Matches[1]
+                        if ($Serial -match '^([^:]+):' -and $endpoint.StartsWith($Serial.Split(':')[0] + ':')) {
+                            $Serial = $endpoint; break
+                        }
+                    }
+                }
+                Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'infraestrutura: Wi-Fi nao reconectou o adb; confira o aparelho' }
+            @{ seconds=$Seconds; reconnected=$true; serial=$Serial; log=(Adb-Run @('shell','cat','/data/local/tmp/synchronice-qa-wifi.log')) } | ConvertTo-Json -Compress
+        }
+        'clean' {
+            foreach ($entry in @($fileState.tracked)) {
+                $remote = $entry.path
+                if ($remote -notmatch '^/storage/emulated/0/(Pictures/SynchroNiceQA|Download/SynchroNice)/[^/\\\r\n]+$' -or
+                    [IO.Path]::GetFileName($remote) -in '.', '..' -or @($fileState.baseline) -ccontains $remote) {
+                    throw 'Manifesto inseguro: arquivo fora da lista de QA'
+                }
+                $quoted = Shell-Quote $remote
+                $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
+                $destination = 'ja ausente'
+                if ($exists.Trim() -eq 'exists') {
+                    if (-not $entry.hash -or (Phone-Hash $remote) -cne $entry.hash) { throw "Arquivo sem hash ou alterado; preservado: $remote" }
+                    $destination = 'rm (MediaStore indisponivel)'
+                    try {
+                        $uri = Media-Uri $remote
+                        $result = Adb-Run @('shell','content','update','--uri',$uri,'--bind','is_trashed:i:1')
+                        $trashed = Adb-Run @('shell','content','query','--uri',$uri,'--projection','is_trashed','--extra','android:query-arg-match-trashed:i:1')
+                        if ($result -match 'Exception|Error' -or $trashed -notmatch 'is_trashed=1\b') { throw 'MediaStore nao confirmou lixeira' }
+                        $destination = 'Lixeira do MediaStore'
+                    } catch { Adb-Run @('shell',"rm -f -- $quoted") | Out-Null }
+                }
+                $fileState.cleanup = @($fileState.cleanup) + @{ path=$remote; destination=$destination }
+                $fileState.tracked = @($fileState.tracked | Where-Object { $_.path -cne $remote })
+                Save-Files
+            }
+            ConvertTo-Json -InputObject @($fileState.cleanup) -Depth 10
+        }
         'dump' { Dump }
         'tap' {
             if (-not $Value) { throw 'Informe -Value' }
