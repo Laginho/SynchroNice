@@ -52,7 +52,7 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.qrcode.QRCodeWriter;
 class QrImage {
     public static void main(String[] args) throws Exception {
-        // Keep the QR inside the portrait preview's center crop.
+        // Leave a wide white margin around the QR.
         var matrix = new QRCodeWriter().encode(Files.readString(Path.of(args[0])), BarcodeFormat.QR_CODE, 240, 240);
         var image = new BufferedImage(720, 720, BufferedImage.TYPE_INT_RGB);
         for (int y = 0; y < 720; y++) for (int x = 0; x < 720; x++)

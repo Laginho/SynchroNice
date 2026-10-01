@@ -86,3 +86,39 @@ O kit roda o app inteiro sem aparelho e sem tocar no Par real.
   Os chamadores são `start_server`, `mudar_pasta` e o registro no setup;
   Par, outbox e accepted-file-ids derivam do mesmo diretório em start_server.
   Configuração ausente continua seguindo o comportamento padrão existente.
+
+- Vermelho: commit de testes `40851a2`; `gate.ps1 -TestsOnly` saiu 1 por
+  E0425: `config::resolve_data_dir` ainda não existia. Nenhum commit de
+  implementação alterou testes. Log local: `syn-025/red.log` em qa-runs.
+- Primeira rodada verde do teste novo: 7 testes de config passaram. Um teste
+  existente de servidor (`reenvio_de_arquivo_com_o_mesmo_id_nao_duplica_item_nem_arquivo`)
+  falhou na conexão por erro Windows 10053; servidor não foi alterado.
+  A rodada do gate completo será a confirmação final de toda a suíte.
+- Critérios 2 e 4: POST de arquivo no servidor isolado devolveu 201 e gravou
+  `data/Pasta/synchronice-qa-syn025.txt` e `data/accepted-file-ids.txt`
+  (`syn025-isolated`). `send_text` pela API Tauri gerou pendente
+  `QA isolated outbox` em `data/outbox/manifest.json`. Configuração real
+  manteve SHA-256 `90D3D7B3C5503FACA4BBC387B7178E35A087B7F8C4FF455135B9A6FB5C668993`;
+  valor `SynchroNice` em HKCU/Run permaneceu idêntico ao snapshot anterior.
+- C.1 pelo kit: DOM `QA SYN-025 C1`, dump com texto igual e
+  `bubble-1-incoming-delivered`, indicador `Na rede`; HEAD /listen 200.
+  Evidência local: `syn-025/c1.xml`. Foi necessário instalar a dependência
+  existente com `npm ci --prefix qa`, conforme o pré-requisito do kit.
+- Critérios 3 e 5: `up3` e `up5` terminaram online, saída 0, reutilizando
+  qemu PID 13752. `up4` foi interrompido pelo harness externo que tratou um
+  aviso de stderr do JVM como fatal; corrigido no harness, sem mudar testes.
+  Com release previamente aberto, `up-real1` e `up-real2` consecutivos
+  também saíram 0 e mantiveram o PID do qemu, com `restoredOnDown=true`.
+  `down` deixou zero qemu/PC debug e reabriu o release (PID 23732 confirmado).
+  Com release inicialmente fechado, `down` deixou zero qemu e zero PC,
+  `restored=false`. Os logs ficam em `.scratch/qa-runs/syn-025/`.
+- Spike da câmera: **não leu; B.2 é 👤 no emulador**. Após limpar somente
+  os dados do app no AVD e conceder CAMERA, a CameraX mostrou o PNG com QR,
+  mas o enquadramento cortou parte do código. Uma segunda tentativa com QR
+  menor e margem branca continuou cortando-o; duas leituras mantiveram
+  scanner e presença 204. Prints locais `scanner.png` e
+  `scanner-padded.png`, dumps `camera-padded.xml`/`camera-padded-retry.xml`.
+  `qa.md` registra a limitação; pareamento das execuções usa SYN-023.
+- O lançamento foi ajustado para não herdar pipes nativos do chamador:
+  wrappers devolvem controle enquanto os apps permanecem vivos, com logs
+  redirecionados. As variáveis de ambiente do chamador são restauradas.

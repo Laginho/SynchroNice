@@ -4,6 +4,64 @@ O agente lê o roteiro em prosa, chama as primitivas e julga cada passo.
 Instale a única dependência com `npm ci --prefix qa`; não baixa navegador.
 O PC usa o WebView2 instalado, via [CDP do Playwright](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp).
 
+## Emulador: PC isolado
+
+Prepare os SDKs, dependências do PC e `npm ci --prefix qa`. Rode o gate uma
+vez para que o ZXing do projeto Android esteja no cache do Gradle; o kit o
+reutiliza para gerar o PNG do QR, sem instalar outro gerador. O AVD esperado
+é `SynchroNice_API37`, no SDK em `%LOCALAPPDATA%/Android/Sdk` (`-Sdk` muda
+esse caminho nos dois wrappers).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\qa\up.ps1
+powershell -ExecutionPolicy Bypass -File .\qa\pc.ps1 presence -Isolated -RunDir .scratch/qa-runs/emulator
+powershell -ExecutionPolicy Bypass -File .\qa\phone.ps1 dump -Serial '127.0.0.1:5555'
+powershell -ExecutionPolicy Bypass -File .\qa\down.ps1
+```
+
+`up` reutiliza o AVD que já está de pé e aguarda `sys.boot_completed`. Ao
+subi-lo, usa `-no-window -no-audio -no-snapshot-save -gpu swiftshader_indirect`
+e `-camera-back imagefile:<PNG do QR>`. Compila/instala o APK debug da branch
+atual; assinatura incompatível desinstala **só o app no emulador** e reinstala.
+Concede a permissão de notificações no emulador, compila o PC com
+`npx tauri build --debug --no-bundle`, anota/fecha o release real e abre o
+debug isolado com CDP. Pareia pelo atalho do SYN-023 com o IP de LAN e só
+termina após `HEAD /listen` confirmar presença. Repetir `up` recompila a
+branch e reabre o PC debug, preservando o processo do emulador e a informação
+de que o release real deve ser restaurado. Erro chama `down` antes de sair.
+
+O diretório padrão da execução é `.scratch/qa-runs/emulator`; `-RunDir`
+escolhe outro e deve ser repetido no `down` e em **todas** as ações do PC.
+Use `pc.ps1 -Isolated -RunDir <execução>` também em `type`, `invoke`,
+`presence`, `list-files` e limpeza. `data/config.json`, `data/outbox`,
+`data/accepted-file-ids.txt` e a Pasta `data/Pasta` ficam aí. O app respeita
+`SYNCHRONICE_DATA_DIR` e não registra autostart nesse modo; o kit também
+define `WEBVIEW2_USER_DATA_FOLDER` como `webview` dentro da execução. Os
+logs do PC ficam em `pc.stderr.log` e `pc.stdout.log`.
+
+A porta HTTP continua 47820: use uma execução por vez. O CDP usa 9222
+(`up -Port` e `pc.ps1 -Port` podem mudá-la). O adb do emulador também está
+disponível em loopback: o padrão é `127.0.0.1:5555`; o JSON final do `up`
+informa `endpoint` quando reutiliza um AVD em outra porta. Passe esse
+endpoint explicitamente em `phone.ps1 -Serial`; a descoberta automática
+continua escolhendo só celulares sem fio. No `pair`, passe ainda
+`-Config <execução>/data/config.json`. USB continua recusado.
+
+`down` encerra o AVD e o PC debug desta árvore. Reabre `release/pc.exe`
+somente se ele estava aberto antes do primeiro `up`. Pode ser repetido;
+preserva os dados e evidências locais. O estado fica em `emulator.json`.
+O lançamento usa [Win32_ProcessStartup](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-processstartup)
+com janela oculta para não herdar os pipes de uma sessão de agente.
+
+**Spike da câmera (2026-10-01): B.2 permanece 👤 no emulador.** Com o app
+limpo e CAMERA concedida, a CameraX exibiu o `imagefile:`, mas cortou o QR
+na horizontal. Mesmo após reduzir o código e acrescentar margem branca,
+duas leituras mantiveram a tela do scanner e `HEAD /listen` 204. Não houve
+pareamento pela câmera. Use o atalho `pair` para os demais passos; o B.2
+continua sendo a leitura real do QR no Redmi. Evidências locais do SYN-025:
+`.scratch/qa-runs/syn-025/scanner.png`, `scanner-padded.png` e os dumps
+`camera-padded.xml`/`camera-padded-retry.xml`.
+
 ## Redmi: pré-requisitos
 
 O humano faz `adb pair ip:porta` uma vez, na Depuração sem fio do Android.
