@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -85,3 +85,16 @@ Sem o Redmi alcançável, os critérios 3–8 viram `Débito humano:`.
   vírgula ou espaço. Vermelho porque `qa/mediastore.mjs` não existe.
 
 ## Comments
+
+- 2026-09-30, stage 2: branch `syn-024`, base `sweatshop/2026-09-30-2146`.
+  Seam aprovada: `mediaUri(output, path)` em `qa/mediastore.mjs`, chamada pelo
+  wrapper para compartilhar e limpar. Testes cobrem seleção exata entre linhas,
+  vírgula/espaço, saída vazia, id inválido e caminho ausente. Vermelho real:
+  `node --test qa/mediastore.test.mjs`, 1 arquivo falhou com
+  `ERR_MODULE_NOT_FOUND`, antes de existir implementação.
+  Callers lidos: wrappers nos exemplos de `docs/agents/qa.md`; `pc.mjs`
+  recebe somente o JSON de `pc.ps1`; `ImageViewer` é aberto por `ChatScreen`.
+  As mudanças Android serão apenas tags. Lista vazia e colisão com arquivo
+  existente precisam ser seguras na limpeza; os arquivos recebidos serão
+  registrados explicitamente após uma fotografia inicial da Pasta, sem
+  incluir automaticamente outros arquivos que aparecerem durante o QA.
