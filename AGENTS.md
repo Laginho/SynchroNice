@@ -42,6 +42,8 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
   (`sonnet` = Sonnet 5, `opus` = Opus 5.5; o driver só aceita o alias, sem
   hífen. Stage 1 é sempre manual, o sweatshop nunca o roda.)
 - Models (Codex): stage 2 gpt-6-astra low, stage 3 gpt-5.6-sol high
+- QA: stage 3 e `proxy` usam o kit no emulador; ❌ reprova o próprio ticket,
+  falha de infraestrutura não reprova. Leia [quem usa o kit e quando](docs/agents/qa.md#quem-usa-o-kit-e-quando).
 
 ## Humano simulado (somente neste repo — experimento)
 
@@ -62,10 +64,13 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
   registra a revisão humana como débito: uma linha `Débito humano: <o que
   ficou sem verificar à mão>` em `## Comments` do ticket, committed. Nunca
   bloqueia por isso.
+- Antes de registrar `Débito humano:`, o `proxy` tenta o kit conforme
+  [QA no loop](docs/agents/qa.md#quem-usa-o-kit-e-quando); passo verificado
+  pelo kit só aponta o relatório, sem débito.
 - O Computer Use do Codex funciona nesta máquina: a falha de 2026-09-24
   (`SetIsBorderRequired … No such interface supported`) era do ambiente, já
-  resolvida. Tente-o antes de registrar débito visual; débito é só o que ele
-  de fato não conseguiu ver.
+  resolvida. Para o que o kit não alcança, tente-o antes de registrar débito
+  visual; débito é só o que ele de fato não conseguiu ver.
 - Débito humano se acumula até o app ficar pronto: o humano verifica tudo de
   uma vez, junto com o próprio QA. Não é pendência de run: o resumo do foreman
   lista os débitos, mas não os põe em "Your turn".
@@ -81,6 +86,9 @@ Este repo mede a efetividade do fluxo sem humano no meio. Sobrescreve o
 - O que continua humano: o merge do PR de sessão. O resumo final do foreman
   lista, além dos blocos normais, todos os `Débito humano:` do run
   (`grep -rh 'Débito humano:' .scratch/`), para a revisão ser feita de uma vez.
+- O pós-run do foreman segue [QA no loop](docs/agents/qa.md#quem-usa-o-kit-e-quando):
+  Redmi sem fio com critérios do run e passos ★, ou "sem aparelho" no resumo;
+  `down` no fim do run.
 
 ## Layout
 

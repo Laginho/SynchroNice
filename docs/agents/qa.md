@@ -4,6 +4,52 @@ O agente lê o roteiro em prosa, chama as primitivas e julga cada passo.
 Instale a única dependência com `npm ci --prefix qa`; não baixa navegador.
 O PC usa o WebView2 instalado, via [CDP do Playwright](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp).
 
+## Quem usa o kit e quando
+
+Estas regras são locais ao repo; as skills globais e o driver continuam
+inalterados. O roteiro permanece em prosa, com relatório e evidência por passo
+conforme "Execução, retentativa e relatório" abaixo.
+
+### Stage 3 e `proxy`: emulador
+
+O stage 3 roda `qa/up.ps1` na branch do ticket e usa o emulador com PC isolado
+para verificar todos os critérios visíveis que o kit alcança. O relatório
+aponta o ID e o número de cada critério; a revisão aponta esse relatório.
+Um ❌ reprova a revisão do próprio ticket, que volta a `to-implement` com
+os critérios não atendidos, sem abrir `BUG-*` sobre esse trabalho.
+Falha de infraestrutura aborta a execução e é registrada como tal; não
+reprova o ticket nem vira bug do app.
+
+O `proxy` também tenta o kit no emulador antes de registrar `Débito humano:`.
+Passo verificado pelo kit só aponta o relatório no comentário do ticket,
+sem débito. Para o que o kit não alcança (👤), tente o Computer Use do Codex
+conforme `AGENTS.md`; registre débito apenas do que continuar sem verificar.
+
+O último usuário do emulador roda `qa/down.ps1` com o mesmo `-RunDir` do `up`;
+numa revisão avulsa, rode ao terminar. Num run, o emulador pode ser reutilizado
+pelos próximos tickets; cada revisão chama `up` para compilar sua branch.
+
+### Foreman: pós-run no Redmi
+
+No fim do run, confira `adb devices`. Se o Redmi estiver conectado como
+`device` por transporte sem fio, rode nele os critérios visíveis dos tickets
+do run e os passos ★ (`\mvp`) de
+`docs/relatorios/2026-09-27-walkthrough-qa.tex`, contra o PC release real.
+Antes de passar ao Redmi, rode `qa/down.ps1` para liberar a porta 47820 e
+restaurar o PC real; siga os pré-requisitos e as primitivas abaixo.
+
+Inclua o relatório no resumo do run. Cada ❌ do pós-run abre `BUG-*` com
+`Status: needs-triage`, sem `Stage:`, citando o passo ou critério, o ticket
+de origem e a evidência. Falha de infraestrutura é registrada no relatório
+e no resumo, sem reprovar tickets nem abrir bugs do app. Se o Redmi não
+aparecer conectado sem fio, escreva "sem aparelho" no resumo e siga o run.
+Passos 👤 seguem a regra de débito acima.
+
+Limpe somente os arquivos rastreados pelo kit e inclua os destinos no
+relatório. Ao encerrar o run, inclusive após falha de infraestrutura ou
+"sem aparelho", rode `qa/down.ps1` com o `-RunDir` usado no emulador;
+o comando pode ser repetido.
+
 ## Emulador: PC isolado
 
 Prepare os SDKs, dependências do PC e `npm ci --prefix qa`. Rode o gate uma
