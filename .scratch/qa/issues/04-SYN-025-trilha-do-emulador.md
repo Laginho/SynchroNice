@@ -1,5 +1,5 @@
 # SYN-025: Trilha do emulador — PC isolado, `up`/`down` e câmera com QR
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-023
 Review: agent
@@ -79,3 +79,10 @@ O kit roda o app inteiro sem aparelho e sem tocar no Par real.
   e o autostart. Vermelho porque a função não existe.
 
 ## Comments
+
+- Stage 2: seam confirmada: `config::resolve_data_dir`, recebendo o caminho
+  padrão e o valor opcional de `SYNCHRONICE_DATA_DIR`, devolve caminho e
+  autorização de autostart. Teste sem alterar variáveis globais do processo.
+  Os chamadores são `start_server`, `mudar_pasta` e o registro no setup;
+  Par, outbox e accepted-file-ids derivam do mesmo diretório em start_server.
+  Configuração ausente continua seguindo o comportamento padrão existente.
