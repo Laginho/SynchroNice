@@ -1,5 +1,5 @@
 # SYN-026: Kit de QA no loop — stage 3, `proxy` e pós-run do foreman
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-024, SYN-025
 Review: human
@@ -80,3 +80,34 @@ Nenhum: o ticket altera apenas documentação.
   XMLs existentes somam 121 testes, zero falhas, erros ou skips.
 - Sem prova red-green nem execução de critérios visíveis no app: alteração
   exclusivamente documental, conforme a seção "Tests stage 2 writes".
+
+#### Resolution (2026-10-01)
+
+Verdict: Approve
+
+- Revisão de `5d9c424...cc46568`, após rebase sobre
+  `sweatshop/2026-09-30-2146`; integração sem squash em `cbaea90`.
+  Arquivos: bindings e "Humano simulado" do `AGENTS.md`, e somente a
+  seção "Quem usa o kit e quando" de `docs/agents/qa.md`.
+  Stage 3 não precisou corrigir a implementação.
+- Standards: **0 violações, 0 smells**. Primary files respeitados;
+  metadados e histórico do ticket seguem o tracker. Sem conflito com
+  `CONTEXT.md`, ADRs ou a decisão local de QA em `docs/DECISIONS.md`.
+- Spec: **0 achados**; os quatro critérios estão atendidos:
+  - ✅ Critério 1: binding identifica stage 3 e `proxy` no emulador,
+    aponta o guia e distingue reprovação por ❌ de infraestrutura.
+  - ✅ Critério 2: o `proxy` tenta o kit antes do débito; passo verificado
+    aponta o relatório, sem débito. Computer Use permanece para o restante.
+  - ✅ Critério 3: foreman usa Redmi sem fio com critérios do run e ★,
+    relata "sem aparelho" quando necessário e chama `down` ao terminar.
+  - ✅ Critério 4: procedimentos concentrados no guia; `AGENTS.md` contém
+    ponteiros e os gatilhos exigidos, sem contradição nem alteração global.
+- Testes red-green dispensados expressamente pelo contrato documental;
+  nenhum commit altera testes. Os critérios verificam texto, sem critério
+  visível no app que exija execução do emulador ou gere débito humano.
+- Gate completo em primeiro plano, saída **0**, após rebase: fmt, clippy,
+  typecheck e lint verdes; Rust **52**, UI **47**, kit QA **14** passaram.
+  Android app **59** e protocol-client **62** `UP-TO-DATE`; XMLs com zero
+  falhas, erros ou skips. `BUILD SUCCESSFUL` e `gate: passou`.
+  Log local: `.scratch/qa-runs/syn-026-review/gate.log`.
+- Resumo dos eixos: Standards **0**, Spec **0**; sem achado em nenhum eixo.
