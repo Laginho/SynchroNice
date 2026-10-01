@@ -1,0 +1,7 @@
+{
+  "name": "synchronice-qa",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test dump.test.mjs" },
+  "dependencies": { "playwright-core": "^1.58.0" }
+}

@@ -105,7 +105,11 @@ async fn mudar_pasta(app: tauri::AppHandle) -> Result<bool, String> {
     let Some(pasta) = rx.await.map_err(|e| e.to_string())? else {
         return Ok(false);
     };
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map(|dir| config::resolve_data_dir(dir, std::env::var_os("SYNCHRONICE_DATA_DIR")).0)
+        .map_err(|e| e.to_string())?;
     let running = app
         .try_state::<server::Running>()
         .ok_or_else(|| "servidor HTTP não está disponível".to_string())?;
@@ -222,7 +226,11 @@ fn read_clipboard_file_list() -> Result<Vec<String>, String> {
 /// a lista de Itens e a fila de saída à janela, e disponibiliza a fila para
 /// os comandos de envio.
 fn start_server(app: &tauri::AppHandle, items: Items) {
-    let config_dir = match app.path().app_config_dir() {
+    let config_dir = match app
+        .path()
+        .app_config_dir()
+        .map(|dir| config::resolve_data_dir(dir, std::env::var_os("SYNCHRONICE_DATA_DIR")).0)
+    {
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("sem diretório de configuração, o servidor não sobe: {e}");
@@ -323,6 +331,8 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let (_, autostart) =
+        config::resolve_data_dir(PathBuf::new(), std::env::var_os("SYNCHRONICE_DATA_DIR"));
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -345,13 +355,15 @@ pub fn run() {
             caminho_para_arrastar,
             abrir_arquivo
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
             start_server(&handle, app.state::<Items>().inner().clone());
             // Idempotente, e fora do primeiro uso: um perfil que já tem Pasta
             // gravada também precisa estar no autostart.
-            if let Err(e) = handle.autolaunch().enable() {
-                eprintln!("não foi possível registrar no autostart: {e}");
+            if autostart {
+                if let Err(e) = handle.autolaunch().enable() {
+                    eprintln!("não foi possível registrar no autostart: {e}");
+                }
             }
             setup_tray(&handle)?;
             Ok(())

@@ -18,12 +18,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -47,6 +51,7 @@ internal fun decodePreview(source: ImageDecoder.Source): Bitmap? = try {
 }
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 internal fun ImageViewer(message: ChatMessage, onClose: () -> Unit) {
     val context = LocalContext.current
     var bitmap by remember(message.localId) { mutableStateOf(message.preview) }
@@ -62,7 +67,7 @@ internal fun ImageViewer(message: ChatMessage, onClose: () -> Unit) {
         loading = false
     }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        Box(Modifier.semantics { testTagsAsResourceId = true }.testTag("image-viewer").fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             bitmap?.let { image ->
                 Image(
                     image.asImageBitmap(), contentDescription = message.text,
@@ -85,7 +90,7 @@ internal fun ImageViewer(message: ChatMessage, onClose: () -> Unit) {
                     },
                 )
             } ?: Text(if (loading) "Carregando…" else "Não foi possível abrir a imagem.", color = Color.White)
-            TextButton(onClick = onClose, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
+            TextButton(onClick = onClose, modifier = Modifier.testTag("image-viewer-back").align(Alignment.TopStart).padding(16.dp)) {
                 Text("Voltar", color = Color.White)
             }
         }

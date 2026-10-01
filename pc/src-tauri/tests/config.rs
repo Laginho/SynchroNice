@@ -1,4 +1,19 @@
 use pc_lib::config;
+use std::path::PathBuf;
+
+#[test]
+fn diretorio_isolado_desliga_autostart_e_padrao_o_mantem() {
+    let padrao = PathBuf::from("perfil real");
+    let isolado = PathBuf::from("execucao QA/dados");
+    assert_eq!(
+        config::resolve_data_dir(padrao.clone(), Some(isolado.clone().into_os_string())),
+        (isolado, false)
+    );
+    assert_eq!(
+        config::resolve_data_dir(padrao.clone(), None),
+        (padrao, true)
+    );
+}
 
 #[test]
 fn ausencia_de_config_devolve_nao_escolhida() {
