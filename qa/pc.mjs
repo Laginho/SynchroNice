@@ -1,4 +1,3 @@
-import { chromium } from 'playwright-core';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -21,6 +20,7 @@ try {
     if (![200, 204].includes(response.status)) throw new Error(`HEAD /listen: ${response.status}`);
     console.log(JSON.stringify({ status: response.status, online: response.status === 200 }));
   } else {
+    const { chromium } = await import('playwright-core');
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${request.port}`, { timeout: 10000 });
     const page = browser.contexts().flatMap(context => context.pages())
       .find(page => /^(https?:\/\/(tauri\.localhost|localhost)|tauri:)/.test(page.url()));

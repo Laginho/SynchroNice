@@ -35,13 +35,19 @@ try {
         if (Test-Path -LiteralPath $manifest) {
             $state = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
             if ($state.folder -ne $folder) { throw 'Pasta mudou: use outra execucao de QA' }
+            foreach ($previousFile in @($state.baseline)) {
+                if ($previousFile -isnot [string] -or [IO.Path]::GetDirectoryName($previousFile) -ne $folder) {
+                    throw 'Manifesto inseguro: baseline invalido; preserve os arquivos e inicie outra execucao'
+                }
+            }
         }
         if ($Action -eq 'list-files') {
             $OutputEncoding = [Text.UTF8Encoding]::new($false)
             $listing = @{ action=$Action; folder=$folder } | ConvertTo-Json -Compress | & node "$PSScriptRoot/pc.mjs"
             if ($LASTEXITCODE -ne 0) { throw 'Listagem da Pasta falhou' }
             if (-not $state) {
-                @{ folder=$folder; baseline=@($listing | ConvertFrom-Json); tracked=@(); cleanup=@() } |
+                $initialFiles = $listing | ConvertFrom-Json
+                @{ folder=$folder; baseline=@($initialFiles); tracked=@(); cleanup=@() } |
                     ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifest -Encoding UTF8
             }
             $listing
