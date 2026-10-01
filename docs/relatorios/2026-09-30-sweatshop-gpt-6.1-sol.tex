@@ -19,7 +19,7 @@
 
 \title{Sweatshop no Codex: o kit de QA\\\large gpt-6.1-sol (high) no stage 2, gpt-6.1-sol (max) no stage 3}
 \author{Foreman, sessão \texttt{sweatshop/2026-09-30-2146}}
-\date{30 de setembro a 1\textsuperscript{o} de outubro de 2026}
+\date{30 de setembro e 1\textsuperscript{o} de outubro de 2026}
 
 \begin{document}
 \shorthandoff{"}
@@ -29,89 +29,121 @@
 
 Primeiro run da fila \texttt{.scratch/qa/} (o kit de QA, SYN-022 a SYN-026),
 com a escalação pedida para este run só (\texttt{-Models}), sem mexer no
-binding. É o primeiro run do kit contra o celular real (Redmi, adb sem fio).
+binding. É o primeiro run do kit contra o celular real (Redmi, adb sem fio) e
+contra o emulador. O run teve três lançamentos: o driver caiu duas vezes pelo
+mesmo defeito, e o humano mandou relançar nas duas.
 
 \begin{itemize}
-  \item \textbf{Produzido:} 2 tickets mergeados na sessão (SYN-022, SYN-023),
-        ambos \emph{Approve} com \texttt{Review: agent}. SYN-024 foi reaberto
-        uma vez, corrigido, e a segunda revisão morreu no limite de 20 min:
-        fica em \texttt{to-review}. SYN-025 e SYN-026 não começaram. PR de
-        sessão: \href{https://github.com/Laginho/SynchroNice/pull/8}{\#8}.
-  \item \textbf{Custo:} \textbf{\$6,23} a preço de lista em 7 estágios com
-        preço, mais 1 sem preço (a segunda revisão do SYN-024). Uma das 7, a
-        revisão do SYN-022, saiu do \texttt{run-log} como ``?'' e foi
-        recalculada pelo uso no \texttt{.txt} (\$0,57). 142 min de estágio em
-        142 min de relógio (21:46--00:08); 17,9\,M tokens de entrada (95,7\,\%
-        em cache) e 127\,k de saída.
+  \item \textbf{Produzido:} \textbf{os 5 tickets da fila mergeados} na sessão,
+        todos \emph{Approve}; SYN-026 com \texttt{Review: human} (mexe no
+        \texttt{AGENTS.md}). SYN-024 foi reaberto três vezes antes de passar.
+        A fila do kit está vazia; sobraram 6 abertos, todos fora do kit
+        (\texttt{needs-triage}). PR de sessão:
+        \href{https://github.com/Laginho/SynchroNice/pull/8}{\#8}, 5 tickets.
+  \item \textbf{Custo:} \textbf{\$15,97} a preço de lista em 16 estágios com
+        preço (high \$8,81, max \$7,17), mais 2 estágios sem preço (os dois que
+        estouraram o tempo e derrubaram o driver). A revisão do SYN-022 saiu do
+        \texttt{run-log} como ``?'' e foi recalculada pelo \texttt{.txt}
+        (\$0,57). 348 min de estágio em 349 min de relógio, em três janelas
+        (21:46--00:08, 08:39--10:40, 15:31--16:57); 48,9\,M tokens de entrada
+        (96,3\,\% em cache) e 297\,k de saída.
   \item \textbf{O que deu errado:} \textbf{processos órfãos do kit}. O
         \texttt{codex exec} não termina enquanto um filho que a sessão abriu
-        (\texttt{pc.exe}, o servidor \texttt{adb}) está vivo. O driver espera
-        o processo: 30 min ociosos no SYN-022 e, no fim, um \texttt{throw} em
-        \texttt{ReadAllText} com o \texttt{.txt} ainda preso por esses órfãos,
-        que encerrou o run.
-  \item \textbf{Veredito provisório:} barato (\$1,41 e \$1,46 por ticket
-        mergeado) e rápido no trabalho real (8--23 min por estágio). A
-        revisão em max é séria: reabriu o SYN-024 com quatro falhas
-        reproduzidas. O par precisa de mais de 20 min de revisão quando a
-        revisão faz QA no aparelho.
+        (\texttt{pc.exe}, servidor \texttt{adb}, emulador) está vivo. Primeiro
+        isso deixou o driver parado esperando (30 min no SYN-022). Depois, nos
+        dois estágios que estouraram o limite, o \texttt{taskkill} não alcançou
+        os órfãos, que seguravam o \texttt{.txt}, e o driver caiu num
+        \texttt{ReadAllText} (00:08 e 10:40).
+  \item \textbf{Veredito provisório:} barato e confiável no conteúdo:
+        \$0,87--1,46 por ticket pequeno, \$4,2 o do emulador, \$8,0 o
+        SYN-024 com três reaberturas. A revisão em max é dura e reproduz cada
+        achado; no SYN-024 ela entrou em casos cada vez mais raros do Wi-Fi. Os
+        limites padrão (45/20 min) não servem para tickets que sobem emulador
+        ou fazem QA no aparelho.
 \end{itemize}
 
 \section{Linha do tempo}
 
 \begin{tabularx}{\linewidth}{@{}lX@{}}
 \toprule
+\multicolumn{2}{@{}l}{\textbf{30/09, primeiro lançamento}}\\
 21:46 & Lançamento. O foreman desfez uma mudança só de fim de linha no
         \texttt{Cargo.toml} para o Preflight ver a árvore limpa.\\
-21:46 & SYN-022, implementação. A sessão termina às 21:59 (\texttt{to-review}),
-        mas o \texttt{codex exec} fica preso em \texttt{pc.exe} e \texttt{adb}
-        órfãos. O foreman os derruba às 22:17 e o driver segue.\\
+21:46 & SYN-022, implementação. A sessão termina às 21:59, mas o
+        \texttt{codex exec} fica preso em \texttt{pc.exe} e \texttt{adb}
+        órfãos até o foreman derrubá-los às 22:17.\\
 22:17 & SYN-022, revisão: zero achados, mergeado. A sessão termina às 22:25; o
-        driver espera até o limite de 20 min e mata o processo (custo ``?'').\\
+        driver espera até os 20 min e mata o processo (custo ``?'').\\
 22:37 & SYN-023 (9 + 9 min), mergeado às 22:55; a revisão abre o CLEAN-018.\\
 22:55 & SYN-024, implementação (23 min). Por decisão do proxy, conserta a
         preparação opcional do kit (\texttt{6ad0599}): a negativa de
-        \texttt{WRITE\_\allowbreak SECURE\_\allowbreak SETTINGS} vira aviso. O Redmi passa a barrar por
-        PIN. O humano destrava o celular às 23:21.\\
-23:19 & SYN-024, revisão: \textbf{reabre} com quatro falhas e abre o CLEAN-019.\\
-23:35 & SYN-024, implementação 2 (13 min): as quatro corrigidas.\\
-23:48 & SYN-024, revisão 2. Às 23:49 o vigia automático do foreman derruba
-        \texttt{pc.exe} e \texttt{adb} por engano (seção 7). A revisão faz QA
-        de verdade no Redmi (recebimentos confirmados, Wi-Fi fora) e estoura
-        os 20 min às 00:08.\\
-00:08 & O driver mata a revisão, tenta ler o \texttt{.txt}, preso pelos órfãos
-        dela, e lança exceção. O \texttt{finally} atualiza o PR (2 tickets) e
-        volta à \texttt{main}. O foreman derruba os órfãos (o arquivo solta),
-        mas não consegue limpar a árvore da \texttt{main} para relançar
-        (seção 7).\\
+        \texttt{WRITE\_\allowbreak SECURE\_\allowbreak SETTINGS} vira aviso. O
+        Redmi passa a barrar por PIN; o humano o destrava às 23:21.\\
+23:19 & SYN-024, revisão 1: \textbf{reabre} com quatro falhas e abre o
+        CLEAN-019. 23:35: implementação 2 (13 min) corrige as quatro.\\
+23:48 & SYN-024, revisão 2. Às 23:49 o vigia do foreman derruba \texttt{pc.exe}
+        e \texttt{adb} por engano (seção 7). A revisão faz QA real no Redmi e
+        estoura os 20 min às 00:08. O driver cai em \texttt{ReadAllText}.\\
+00:15 & O foreman solta o arquivo, mas a permissão automática nega mover os
+        não rastreados da \texttt{main}. Sem árvore limpa, sem relançamento.\\
+\multicolumn{2}{@{}l}{\textbf{01/10, segundo lançamento (pedido pelo humano)}}\\
+08:39 & Árvore limpa (não rastreados movidos para \texttt{.scratch/run-log/}),
+        relançado com \texttt{-ReviewMinutes 40}.\\
+08:40 & SYN-024, revisão 2 refeita (14 min): três correções aprovadas,
+        \textbf{reabre} pela recusa silenciosa do Wi-Fi. Implementação 3 (12
+        min).\\
+09:07 & SYN-024, revisão 3 (23 min): \textbf{reabre} porque \texttt{Wifi is
+        disabled} sai também em \texttt{DISABLING}. Implementação 4 (9 min).\\
+09:40 & SYN-024, revisão 4 (14 min): zero achados, mergeado às 09:54.\\
+09:55 & SYN-025, implementação: ainda trabalhando (10 commits) quando estoura
+        os 45 min às 10:40. O \texttt{adb} órfão segura o \texttt{.txt}; o
+        driver cai de novo. O foreman renomeia a branch para
+        \texttt{syn-025-timeout-20261001-1040} (guardada, não apagada).\\
+\multicolumn{2}{@{}l}{\textbf{01/10, terceiro lançamento (pedido pelo humano)}}\\
+15:31 & Relançado com \texttt{-ImplementMinutes 90 -ReviewMinutes 40}. SYN-025
+        recomeça do zero: 45 min até \texttt{to-review}; revisão 25 min,
+        mergeado às 16:43. B.2 (QR pela câmera do emulador) fica manual.\\
+16:44 & SYN-026 (5 + 8 min), mergeado às 16:57. ``Nothing runnable'', PR com
+        5 tickets.\\
 \bottomrule
 \end{tabularx}
 
 \section{Métricas por estágio}
 
-Linhas de \texttt{.scratch/run-log.md} desde 21:46. Os tokens foram
-recontados a partir do evento \texttt{turn.completed} de cada \texttt{.txt}. ``Min'' é o que o log grava; entre
-parênteses, os minutos até a sessão terminar, quando o processo ficou preso
-depois. A segunda revisão do SYN-024 não tem linha no log: o driver caiu antes
-de gravá-la.
+Linhas de \texttt{.scratch/run-log.md} do run. Os tokens foram recontados a
+partir do evento \texttt{turn.completed} de cada \texttt{.txt}. ``Min'' é o
+que o log grava; entre parênteses, os minutos até a sessão terminar, quando o
+processo ficou preso depois. Os dois estágios mortos no limite não têm linha:
+o driver caiu antes de gravá-las.
 
 \medskip
 \noindent{\footnotesize
 \begin{tabularx}{\linewidth}{@{}l l r r r r r X@{}}
 \toprule
-Estágio & Modelo & Min & Entrada & Cache & Saída & Custo & Desfecho\\
+Estágio & Esforço & Min & Entrada & Cache & Saída & Custo & Desfecho\\
 \midrule
 S22 impl.      & high & 31 (13) & 2,34\,M & 96\,\% & 20\,k & 0,84 & to-review\\
 S22 revisão    & max  & 20 (8)  & 1,53\,M & 94\,\% & 11\,k & 0,57\textsuperscript{*} & mergeado\\
 S23 impl.      & high &  9      & 2,43\,M & 97\,\% & 12\,k & 0,76 & to-review\\
 S23 revisão    & max  &  9      & 1,85\,M & 94\,\% & 13\,k & 0,70 & mergeado\\
-S24 impl.      & high & 24 (23) & 5,07\,M & 97\,\% & 33\,k & 1,63 & to-review\\
-S24 revisão    & max  & 16 (15) & 2,41\,M & 94\,\% & 23\,k & 0,96 & reaberto\\
+S24 impl.\ 1   & high & 24 (23) & 5,07\,M & 97\,\% & 33\,k & 1,63 & to-review\\
+S24 revisão 1  & max  & 16 (15) & 2,41\,M & 94\,\% & 23\,k & 0,96 & reaberto\\
 S24 impl.\ 2   & high & 13      & 2,28\,M & 96\,\% & 15\,k & 0,77 & to-review\\
-S24 revisão 2  & max  & 20      & ?       & ?      & ?     & ?    & \textcolor{perda}{timeout, sem linha}\\
+S24 revisão 2a & max  & 20      & ?       & ?      & ?     & ?    & \textcolor{perda}{timeout, driver caiu}\\
+S24 revisão 2  & max  & 15 (14) & 2,69\,M & 95\,\% & 17\,k & 0,97 & reaberto\\
+S24 impl.\ 3   & high & 12      & 3,27\,M & 97\,\% & 13\,k & 0,97 & to-review\\
+S24 revisão 3  & max  & 24 (23) & 3,81\,M & 96\,\% & 24\,k & 1,25 & reaberto\\
+S24 impl.\ 4   & high &  9      & 1,96\,M & 96\,\% &  9\,k & 0,63 & to-review\\
+S24 revisão 4  & max  & 15 (14) & 2,32\,M & 95\,\% & 14\,k & 0,83 & mergeado\\
+S25 impl.\ a   & high & 45      & ?       & ?      & ?     & ?    & \textcolor{perda}{timeout, driver caiu}\\
+S25 impl.      & high & 47 (45) & 10,23\,M & 98\,\% & 48\,k & 2,83 & to-review\\
+S25 revisão    & max  & 26 (25) & 4,30\,M & 97\,\% & 28\,k & 1,39 & mergeado\\
+S26 impl.      & high &  5      & 1,13\,M & 95\,\% &  4\,k & 0,38 & to-review\\
+S26 revisão    & max  &  8      & 1,26\,M & 94\,\% & 10\,k & 0,49 & mergeado\\
 \midrule
-\multicolumn{2}{@{}l}{Total} & 142 & 17,90\,M & 95,7\,\% & 127\,k & 6,23 & \\
-\multicolumn{2}{@{}l}{Ocioso} & 32 & & & & & esperando órfãos\\
-\multicolumn{2}{@{}l}{Perdido} & 20 & ? & & ? & ? & 1 estágio sem preço\\
+\multicolumn{2}{@{}l}{Total} & 348 & 48,85\,M & 96,3\,\% & 297\,k & 15,97 & \\
+\multicolumn{2}{@{}l}{Ocioso} & 37 & & & & & esperando órfãos\\
+\multicolumn{2}{@{}l}{Perdido} & 65 & ? & & ? & ? & 2 estágios sem preço\\
 \bottomrule
 \end{tabularx}}
 
@@ -123,29 +155,31 @@ recalculado pelo \texttt{.txt} com a tabela de preços do driver.}
 \begin{center}
 \begin{tikzpicture}
 \begin{axis}[
-  ybar stacked, bar width=22pt, width=0.8\linewidth, height=6cm,
+  ybar stacked, bar width=22pt, width=\linewidth, height=6.2cm,
   ylabel={Minutos de estágio}, ymin=0,
-  symbolic x coords={SYN-022,SYN-023,SYN-024},
+  symbolic x coords={SYN-022,SYN-023,SYN-024,SYN-025,SYN-026},
   xtick=data, x tick label style={font=\small},
   legend style={at={(0.02,0.95)},anchor=north west,draw=none},
   axis lines*=left, ymajorgrids, grid style={gray!25}]
 \addplot[fill=sol,draw=none] coordinates
-  {(SYN-022,21) (SYN-023,18) (SYN-024,51)};
+  {(SYN-022,21) (SYN-023,18) (SYN-024,123) (SYN-025,70) (SYN-026,13)};
 \addplot[fill=ocioso,draw=none] coordinates
-  {(SYN-022,30) (SYN-023,0) (SYN-024,2)};
+  {(SYN-022,30) (SYN-023,0) (SYN-024,5) (SYN-025,3) (SYN-026,0)};
 \addplot[fill=perda,draw=none] coordinates
-  {(SYN-022,0) (SYN-023,0) (SYN-024,20)};
+  {(SYN-022,0) (SYN-023,0) (SYN-024,20) (SYN-025,45) (SYN-026,0)};
 \legend{sessão trabalhando, ocioso (órfãos), perdido (timeout)}
 \end{axis}
 \end{tikzpicture}
 \end{center}
 
-\paragraph{Onde foi o custo.} Por ticket: SYN-024 \$3,36 até aqui (mais a
-revisão 2 sem preço, ainda sem veredito), SYN-023 \$1,46, SYN-022 \$1,41. O
-custo em dólar quase não teve perda: o desperdício do run foi de tempo. Foram
-32 min de driver parado esperando processos que já tinham feito o trabalho,
-mais os 20 min da revisão 2, que fazia QA real e não chegou a gravar o
-veredito.
+\paragraph{Onde foi o custo.} Por ticket: SYN-024 \$8,01 (mais 1 estágio sem
+preço), SYN-025 \$4,22 (mais 1 sem preço, 45 min), SYN-023 \$1,46, SYN-022
+\$1,41, SYN-026 \$0,87. O SYN-024 sozinho é metade do run: quatro revisões e
+quatro implementações, quase tudo no Wi-Fi fora. O desperdício foi de tempo,
+não de dólar: 37 min de driver parado esperando processos que já tinham
+terminado (30 deles antes de o vigia automático existir) e 65 min em dois
+estágios mortos no limite, um deles com trabalho real de 10 commits guardado
+na branch \texttt{syn-025-timeout-20261001-1040}.
 
 \section{Comparação}
 
@@ -156,62 +190,72 @@ Números de \texttt{run-log.md}. O run de 27/09 é o do relatório
 \noindent{\small
 \begin{tabularx}{\linewidth}{@{}X r r@{}}
 \toprule
-& Claude, 27/09 & Codex gpt-6.1-sol, 30/09\\
+& Claude, 27/09 & Codex gpt-6.1-sol, 30/09--01/10\\
 \midrule
-Estágios & 26 & 8 (7 no log)\\
-Tickets mergeados & 7 & 2\\
-Minutos de estágio por ticket mergeado & 49 & 21 / 18 (sem ociosidade)\\
-Custo por ticket mergeado & \$3,68--19,34 & \$1,41--1,46\\
-Reaberturas & 1 & 1\\
-Minutos por implementação até \texttt{to-review}, média & 13,0 & 14,5 (real)\\
-Minutos por revisão concluída, média & 11,4 & 10,7 (real)\\
-Custo registrado & \$59,99 & \$6,23\\
+Estágios & 26 & 18 (16 no log)\\
+Tickets mergeados & 7 & 5\\
+Minutos de estágio por ticket mergeado & 49 & 70\\
+Minutos por ticket, mediana & 31 (15--171) & 51 (13--148)\\
+Custo por ticket mergeado & \$3,68--19,34 & \$0,87--8,01\\
+Reaberturas & 1 & 3 (todas no SYN-024)\\
+Minutos por implementação até \texttt{to-review}, média & 13,0 & 16,4\\
+Minutos por revisão concluída, média & 11,4 & 14,5\\
+Custo registrado & \$59,99 & \$15,97\\
 \bottomrule
 \end{tabularx}}
 
 \medskip
 Ressalva forte: os tickets são de outro tipo. Os CLEAN de 27/09 mexiam no app
-com testes unitários; os SYN do kit escrevem scripts PowerShell e Node e tentam
-o celular real, e boa parte dos critérios virou débito humano em vez de
-verificação. Com 2 tickets mergeados, a comparação é indicativa, não
-conclusiva.
+com testes unitários; os SYN do kit escrevem scripts PowerShell e Node, sobem
+emulador e tentam o celular real. A ociosidade e os timeouts pesam nos minutos
+deste run e não existiam no de 27/09. O custo é quase um quarto.
 
 \section{Atribuição das reaberturas}
 
-Uma reabertura no run: SYN-024, rodada 1 (a primeira linha \texttt{reopened}
-do ticket no log), às 23:35. O revisor foi \texttt{gpt-6.1-sol max}, que não é
-o modelo do foreman (Opus 5.5), então o foreman classificou. Evidência: o
-ticket como estava no stage 2 (\texttt{fc384a2}), o diff
-\texttt{5f02f14..fc384a2} e a revisão (\texttt{9ca8337}). Linhas registradas
-em \path{.scratch/reopen-attribution.md}.
+Três reaberturas no run, todas do SYN-024 (rodadas 1, 2 e 3 do ticket no
+log). O revisor foi \texttt{gpt-6.1-sol max}, que não é o modelo do foreman
+(Opus 5.5), então o foreman classificou. Evidência por rodada: o ticket no
+stage 2 (\texttt{fc384a2}, \texttt{3cd1413}, \texttt{5e8223a}), o diff
+revisado e a revisão (\texttt{9ca8337}, \texttt{3eba2c9}, \texttt{4f01824}).
+Linhas em \path{.scratch/reopen-attribution.md}.
 
 \medskip
 \noindent{\small
-\begin{tabularx}{\linewidth}{@{}l c l X@{}}
+\begin{tabularx}{\linewidth}{@{}c l X@{}}
 \toprule
-Ticket & Rodada & Rótulo & Achado e porquê\\
+Rodada & Rótulo & Achado e porquê\\
 \midrule
-SYN-024 & 1 & S2-explícito/código & \texttt{wifi-off} ignora o erro do
-  \texttt{nohup} e sai 0 com \texttt{reconnected=true} quando
-  \texttt{CHANGE\_WIFI\_STATE} é negado. O critério 9 e a lista de testes dizem
-  que falha da ação pedida continua fatal.\\
-SYN-024 & 1 & S2-explícito/código ? & No PowerShell 5.1 com console 850,
-  \texttt{prévia.txt} vira mojibake e \texttt{track} aceita o arquivo anterior.
-  A lista de testes pede a recusa do arquivo anterior; o acento é o mesmo
-  critério num nome comum em português.\\
-SYN-024 & 1 & S2-implícito & Upload interrompido deixa o arquivo com
-  \texttt{hash=null}, e a limpeza o recusa para sempre. É caminho de falha do
-  código que o próprio stage 2 escreveu.\\
-SYN-024 & 1 & S2-implícito & A normalização transforma \texttt{C:\textbackslash}
-  em \texttt{C:}, e os guards recusam a Pasta na raiz, que o app permite.\\
+1 & S2-explícito/código & \texttt{wifi-off} ignora o erro do \texttt{nohup}
+  e sai 0 com \texttt{reconnected=true} quando \texttt{CHANGE\_WIFI\_STATE} é
+  negado. O critério 9 diz que falha da ação pedida é fatal.\\
+1 & S2-explícito/código ? & Com console 850, \texttt{prévia.txt} vira
+  mojibake e \texttt{track} aceita o arquivo anterior. A lista de testes pede
+  a recusa; o acento é o mesmo critério num nome comum.\\
+1 & S2-implícito & Upload interrompido deixa o arquivo com \texttt{hash=null}
+  e a limpeza o recusa para sempre: caminho de falha do código novo.\\
+1 & S2-implícito & A normalização transforma \texttt{C:\textbackslash} em
+  \texttt{C:} e os guards recusam a Pasta na raiz, que o app permite.\\
+2 & S2-explícito/código ? & O kit confia no código de saída do \texttt{svc},
+  que o AOSP devolve 0 mesmo com recusa silenciosa. Critérios 4 e 9; o ? é
+  porque pede saber que o \texttt{svc} ignora o retorno.\\
+3 & S2-implícito ? & A confirmação aceita \texttt{Wifi is disabled}, que sai
+  também em \texttt{DISABLING}; com atraso maior que N a rede não cai. Código
+  novo da rodada 3; o revisor não afirma o atraso no Redmi.\\
 \bottomrule
 \end{tabularx}}
 
 \medskip
-Totais: 2 S2-explícito (2 código, 0 teste), 2 S2-implícito, 0 S1, 0 S3. Sem
-\emph{drip-feeding} nem \emph{churn} (primeira rodada). A reabertura é do
-implementador. A revisão também abriu o CLEAN-019 (escape do extra de query do
-MediaStore) como achado sem critério, sem reabrir por ele, o que está certo.
+Totais: 3 S2-explícito (3 código, 0 teste), 3 S2-implícito, 0 S1, 0 S3. As
+três reaberturas são do implementador.
+
+\paragraph{O que é do stage 3.} \emph{Drip-feeding} na rodada 2: a recusa
+silenciosa já existia no código da rodada 1, e a própria revisão 2 escreve que
+foi ``miss daquela passada''. Sem \emph{churn} estrito: a rodada 3 é um defeito
+do jeito como o implementador seguiu o conselho certo da rodada 2 (conferir o
+estado), não do conselho. Mas a sequência mostra o padrão a vigiar: cada
+revisão desce um nível no Wi-Fi (código de saída, recusa silenciosa, estado
+intermediário com IWLAN), num kit de QA cujo critério 4 ainda está como débito
+humano no aparelho real.
 
 \section{Scoreboard}
 
@@ -232,7 +276,7 @@ gpt-5.6-sol & 5 & 4 & 1 & 0 & 17m & ?\\
 gpt-6-astra & 18 & 11 & 6 & 1 & 8m & ?\\
 sonnet & 5 & 3 & 2 & 0 & 14m & \$10.53 (4/5)\\
 sonnet-5 xhigh & 11 & 6 & 2 & 3 & 8m & \$18.09 (11/11)\\
-gpt-6.1-sol high & 28 & 24 & 0 & 4 & 7m & \$16.16 (28/28)\\
+gpt-6.1-sol high & 33 & 29 & 0 & 4 & 7m & \$21.39 (33/33)\\
 opus-5.5 & 7 & 4 & 0 & 3 & 14m & \$15.12 (7/7)\\
 gpt-6-luna max & 89 & 61 & 10 & 18 & 17m & \$4.91 (85/89)\\
 sonnet-5.5 high & 2 & 2 & 0 & 0 & 7m & \$3.77 (2/2)\\
@@ -253,7 +297,7 @@ gpt-5.6-sol & gpt-6-astra & 4 & 3 & 75\,\% & 0 & $\geq$0\,\% & 3\\
 gpt-6-astra & gpt-5.6-sol & 11 & 5 & 45\,\% & 0 & $\geq$0\,\% & 5\\
 sonnet & opus & 3 & 1 & 33\,\% & 1 & 33\,\% & 0\\
 sonnet-5 xhigh & opus-5.5 xhigh & 5 & 0 & 0\,\% & 0 & 0\,\% & 0\\
-gpt-6.1-sol high & gpt-6.1-sol max & 22 & 5 & 23\,\% & 3 & $\geq$14\,\% & 2\\
+gpt-6.1-sol high & gpt-6.1-sol max & 29 & 8 & 28\,\% & 7 & 24\,\% & 0\\
 opus-5.5 & opus-5.5 & 4 & 0 & 0\,\% & 0 & 0\,\% & 0\\
 gpt-6-luna max & opus-5.5 high & 18 & 1 & 6\,\% & 1 & 6\,\% & 0\\
 gpt-6-luna max & gpt-6-sol max & 43 & 23 & 53\,\% & 22 & 51\,\% & 0\\
@@ -269,7 +313,7 @@ sonnet-5.5 high & gpt-6-sol max & 2 & 1 & 50\,\% & 1 & 50\,\% & 0\\
 Implementador $\to$ Revisor & Rodadas & S2 expl.\ código & S2 expl.\ teste & S2 implícito & S1 & S3 ruído\\
 \midrule
 sonnet $\to$ opus & 1 & 1 & 1 & 0 & 0 & 0\\
-gpt-6.1-sol high $\to$ gpt-6.1-sol max & 3 & 2 & 0 & 5 & 0 & 0\\
+gpt-6.1-sol high $\to$ gpt-6.1-sol max & 8 & 3 & 0 & 9 & 1 & 0\\
 fable $\to$ ? & 4 & 5 & 1 & 3 & 1 & 0\\
 sonnet $\to$ ? & 10 & 3 & 6 & 9 & 3 & 2\\
 opus $\to$ ? & 1 & 3 & 0 & 0 & 0 & 0\\
@@ -282,81 +326,86 @@ sonnet-5.5 high $\to$ gpt-6-sol max & 1 & 3 & 0 & 2 & 0 & 0\\
 
 \paragraph{O que mudou desde o relatório de 27/09.}
 \begin{itemize}
-  \item \textbf{Linhas novas:} \texttt{gpt-6.1-sol high} (28 estágios, 24 em
+  \item \textbf{Linhas novas:} \texttt{gpt-6.1-sol high} (33 estágios, 29 em
         \texttt{to-review}, nenhum falho, 7 min de mediana) e o par
-        \texttt{gpt-6.1-sol high} $\to$ \texttt{gpt-6.1-sol max}: 22 revisões,
-        23\,\% de reabertura, taxa S2 $\geq$14\,\% com 2 reaberturas sem
-        rótulo. Quase tudo vem do PhysiSyst; este run soma 3 revisões e 1
-        reabertura. Também são novas \texttt{sonnet-5.5 high} e os pares com
-        \texttt{gpt-6-sol max} revisando.
+        \texttt{gpt-6.1-sol high} $\to$ \texttt{gpt-6.1-sol max}: 29 revisões,
+        28\,\% de reabertura, \textbf{taxa S2 24\,\%}, sem reabertura sem
+        rótulo, então não é piso. Este run soma 8 revisões e 3 reaberturas; o
+        resto vem do PhysiSyst. Também são novas \texttt{sonnet-5.5 high} e os
+        pares com \texttt{gpt-6-sol max} revisando.
   \item \textbf{Cresceu:} \texttt{gpt-6-luna max}, de 10 para 89 estágios, em
         outros repositórios.
-  \item \textbf{Mesma implementação, revisores diferentes} (as duas com mais de
-        10 revisões): \texttt{gpt-6-luna max} reabre 6\,\% sob
+  \item \textbf{Mesma implementação, revisores diferentes} (os dois pares com
+        mais de 10 revisões): \texttt{gpt-6-luna max} reabre 6\,\% sob
         \texttt{opus-5.5 high} (18) e 53\,\% sob \texttt{gpt-6-sol max} (43),
         com S2 em 51\,\%. A diferença é do revisor, não do implementador.
   \item \textbf{Implementadores sob o mesmo revisor:} ninguém além do próprio
-        \texttt{gpt-6.1-sol high} foi revisado por \texttt{gpt-6.1-sol max};
-        não dá para comparar implementadores por esta linha.
+        \texttt{gpt-6.1-sol high} foi revisado por \texttt{gpt-6.1-sol max}.
+        A linha não compara implementadores; só diz que o par, nos tickets em
+        que rodou, reabre um em cada quatro por culpa do implementador.
 \end{itemize}
 
 \section{Observações sobre os modelos}
 
 \subsection*{gpt-6.1-sol (high), implementação}
 \begin{itemize}
-  \item \textbf{TDD limpo em todos:} commit de teste antes do código
-        (\texttt{7d0028a}, \texttt{4d12967}, \texttt{95a46e1}, \texttt{5d65455},
-        \texttt{ced5962}; na volta, \texttt{87f73a8}, \texttt{e8494cf},
-        \texttt{c30cd73}, \texttt{4ac9157}), e prova vermelha registrada no
-        ticket.
+  \item \textbf{TDD limpo em todos os tickets de código:} commit de teste antes
+        do código em cada rodada, prova vermelha registrada no ticket. As
+        revisões a reproduziram contra as versões anteriores.
   \item \textbf{Pede ao proxy em vez de travar:} no SYN-022 e no SYN-024 a
         sessão chamou o agente \texttt{proxy} pelo Claude CLI (só leitura) e
         seguiu com a decisão registrada. Nenhum \texttt{blocked}.
-  \item \textbf{Débito largo:} no SYN-023, atribuiu à negativa de
-        \texttt{WRITE\_SECURE\_SETTINGS} um pareamento que talvez não dependa
-        dela. O próprio SYN-024 tirou a causa depois.
+  \item \textbf{Conserta o pedido, não a classe:} no Wi-Fi, cada rodada fechou
+        exatamente o caso apontado (código de saída, depois o estado), e a
+        revisão seguinte achou o vizinho. Três dos seis achados são
+        S2-implícito.
   \item \textbf{Deixa processos abertos} (\texttt{pc.exe}, servidor
-        \texttt{adb}) ao terminar. É a causa da ociosidade e do crash.
+        \texttt{adb}, emulador) ao terminar. É a causa da ociosidade e dos dois
+        crashes.
 \end{itemize}
 
 \subsection*{gpt-6.1-sol (max), revisão}
 \begin{itemize}
-  \item \textbf{Reproduz antes de reabrir:} as quatro falhas do SYN-024 vieram
-        com repro (adb falso, console 850, Pasta temporária) e linha de código.
-        Refez a prova vermelho-verde dos commits originais.
+  \item \textbf{Reproduz antes de reabrir:} todos os achados vieram com repro
+        (adb falso, console 850, Pasta temporária, fonte AOSP) e linha de
+        código, e a prova vermelho-verde dos commits originais foi refeita.
   \item \textbf{Separa achado de critério:} o que não tinha critério virou
         ticket (CLEAN-018, CLEAN-019), não motivo de reabertura.
-  \item \textbf{Lenta com o aparelho:} a revisão 2 do SYN-024 fez QA real no
-        Redmi (recebimentos, Wi-Fi fora com amostragem) e não coube nos 20 min.
+  \item \textbf{Desce um nível por rodada no mesmo eixo:} as revisões 2 e 3 do
+        SYN-024 acharam casos que já estavam ao alcance da revisão anterior (a
+        2 admite isso).
+  \item \textbf{Lenta com aparelho e emulador:} 23--25 min nas revisões que
+        fazem QA real; com 20 min de limite, a revisão 2 original morreu.
 \end{itemize}
 
 \section{Integração com o Codex e o driver}
 \begin{itemize}
   \item \textbf{\texttt{codex exec} não sai com filhos vivos.} O driver faz
-        \texttt{WaitForExit} no processo; um \texttt{pc.exe} ou servidor
-        \texttt{adb} aberto pela sessão o segura até alguém matá-lo ou o limite
-        estourar. Aconteceu em 4 de 8 estágios.
+        \texttt{WaitForExit} no processo; um \texttt{pc.exe}, servidor
+        \texttt{adb} ou emulador aberto pela sessão o segura até alguém matá-lo
+        ou o limite estourar. Aconteceu em quase todo estágio que tocou o
+        aparelho, o app ou o emulador.
   \item \textbf{\texttt{taskkill /T} não alcança os órfãos:} o pai deles já
-        morreu, então a árvore não os inclui, e eles continuam segurando o
+        morreu, então a árvore não os inclui, e eles seguem segurando o
         \texttt{stdout} redirecionado para o \texttt{.txt}.
   \item \textbf{\texttt{ReadAllText} sem tolerância a lock:} o arquivo preso
-        derrubou o driver depois do timeout. Sem linha no log para o estágio.
+        derrubou o driver duas vezes (00:08 e 10:40), sempre depois de um
+        timeout, e o estágio ficou sem linha no log.
   \item \textbf{Árvore suja na \texttt{main} depois do run:}
-        \texttt{qa/node\_modules} e os artefatos de
-        \texttt{.scratch/qa-runs/} (174 arquivos) são ignorados na sessão, mas
-        a \texttt{main} não tem esse \texttt{.gitignore}. O Preflight recusaria
-        o relançamento. Mover os arquivos foi negado ao foreman pela permissão
-        automática.
+        \texttt{qa/node\_modules} e os artefatos de \texttt{.scratch/qa-runs/}
+        são ignorados na sessão, mas a \texttt{main} não tem esse
+        \texttt{.gitignore}. Cada fim de run deixa a \texttt{main} suja e o
+        Preflight recusa o relançamento. Some quando o PR \#8 for mergeado.
   \item \textbf{Run paralelo:} um sweatshop do PhysiSyst rodava ao mesmo
         tempo. Ele não usa \texttt{adb}; matar o servidor não o afetou.
-  \item \textbf{Erro do foreman:} o vigia automático das 23:39 derrubava
-        \texttt{pc.exe} e \texttt{adb} quando o driver ficava parado 60\,s
-        depois de um \texttt{.final}. Às 23:49 ele mediu tarde, com o driver
-        já na revisão seguinte, e matou os dois no começo da revisão 2 do
-        SYN-024. A revisão reabriu o \texttt{adb} às 23:52 e o app às 23:57;
-        pode ter custado parte dos minutos que faltaram. O vigia foi corrigido
-        às 23:50 para só agir quando a última linha do driver ainda é o
-        lançamento daquele estágio.
+  \item \textbf{O vigia do foreman.} Desde 23:39, um monitor matava
+        \texttt{pc.exe} e \texttt{adb} (e, no terceiro lançamento, o emulador)
+        quando o driver seguia parado 60\,s depois de um \texttt{.final}. Às
+        23:49 ele mediu tarde, com o driver já na revisão seguinte, e matou os
+        dois no começo da revisão 2 do SYN-024; a revisão os reabriu e pode ter
+        perdido minutos. Corrigido às 23:50 para só agir quando a última linha
+        do driver ainda é o lançamento daquele estágio. Depois disso agiu certo
+        seis vezes, cada uma destravando o driver em cerca de 1 min.
 \end{itemize}
 
 \section{Recomendações}
@@ -364,26 +413,29 @@ sonnet-5.5 high $\to$ gpt-6-sol max & 1 & 3 & 0 & 2 & 0 & 0\\
   \item \textbf{Driver: encerrar a sessão no \texttt{turn.completed}.} Ao ver
         o evento (ou o \texttt{.final}), esperar alguns segundos e matar o
         \texttt{codex exec} e os processos que ele criou, inclusive órfãos.
-        Ler o \texttt{.txt} com \texttt{FileShare.ReadWrite} e nova tentativa.
-        É a causa dos 32 min ociosos e do crash.
-  \item \textbf{Kit: fechar o que abre.} \texttt{qa/pc.ps1} e
-        \texttt{qa/phone.ps1} encerram o \texttt{pc.exe} que iniciaram e o
-        servidor \texttt{adb} que subiram (\texttt{adb kill-server}) ao fim de
-        cada comando ou execução. Candidato a \texttt{CLEAN-*}.
-  \item \textbf{Relançar com \texttt{-ReviewMinutes 40}} enquanto a fila for do
-        kit: revisão com QA no aparelho não cabe em 20 min.
-  \item \textbf{Limpar a árvore da \texttt{main} antes de relançar:} apagar ou
-        mover \texttt{qa/} e \texttt{.scratch/qa-runs/} não rastreados (o
-        \texttt{node\_modules} é reinstalável; os artefatos de QA são locais de
-        qualquer jeito), ou levar o \texttt{.gitignore} da sessão para a
-        \texttt{main}.
+        Ler o \texttt{.txt} com \texttt{FileShare.ReadWrite} e nova tentativa,
+        e gravar a linha do estágio mesmo assim. É a causa dos 37 min ociosos e
+        dos dois crashes.
+  \item \textbf{Kit: fechar o que abre.} \texttt{qa/pc.ps1},
+        \texttt{qa/phone.ps1} e o ciclo do emulador encerram o \texttt{pc.exe},
+        o servidor \texttt{adb} e o emulador que subiram, ao fim de cada
+        execução. Candidato a \texttt{CLEAN-*}.
+  \item \textbf{Limites para tickets de QA real:} \texttt{-ImplementMinutes 90
+        -ReviewMinutes 40}. O SYN-025 levou 45 min na segunda tentativa e a
+        primeira morreu no mesmo número.
+  \item \textbf{Mergear o PR \#8} antes do próximo run: leva o
+        \texttt{.gitignore} do kit para a \texttt{main} e acaba com a árvore
+        suja depois de cada run.
+  \item \textbf{Stage 1 do Wi-Fi fora:} o critério 4 do SYN-024 deveria dizer
+        o que conta como ``Wi-Fi desligado'' (estado \texttt{DISABLED} e a
+        presença em 204), para a revisão não descer um nível por rodada.
   \item \textbf{Celular destravado e aceso} nos runs do kit. Com PIN, o kit
         aborta antes de agir, e os critérios do aparelho viram débito.
   \item \textbf{Manter \texttt{gpt-6.1-sol high} $\to$ \texttt{gpt-6.1-sol max}
-        para esta fila.} Apoia-se na linha \texttt{gpt-6.1-sol high |
-        gpt-6.1-sol max} (22 revisões, 23\,\% de reabertura, S2
-        $\geq$14\,\%) e no custo de \$1,4 por ticket mergeado aqui. Não há outro
-        implementador sob o mesmo revisor para comparar.
+        para filas de scripts e QA.} Apoia-se na linha \texttt{gpt-6.1-sol high
+        | gpt-6.1-sol max} (29 revisões, 28\,\% de reabertura, S2 24\,\%) e no
+        custo de \$0,87--8,01 por ticket aqui. Não há outro implementador sob o
+        mesmo revisor para comparar.
 \end{enumerate}
 
 \section{Débito humano}
@@ -397,12 +449,17 @@ sonnet-5.5 high $\to$ gpt-6-sol max & 1 & 3 & 0 & 2 & 0 & 0\\
   \item SYN-023 critério 4: Desparear pela engrenagem, \texttt{pair} com APK
         de debug, \texttt{Na rede} no dump e \texttt{HEAD /listen} 200 no
         Redmi.
-  \item SYN-024 (na branch \texttt{syn-024}, ainda sem merge): critério 3 (D.1
-        completo), critério 4 (Wi-Fi fora: presença e reconexão), critério 5
-        (chegada dos quatro arquivos ao Redmi), critério 6 (limpeza no
-        MediaStore/\texttt{rm}), critério 7 (resource-ids no dump real). O
-        aparelho estava travado com PIN; a revisão 2, com o celular
-        destravado, verificou parte disso, mas não gravou veredito.
+  \item SYN-024 critério 3: D.1 completo (\texttt{share} abortou pelo
+        bloqueio seguro).
+  \item SYN-024 critério 4: Wi-Fi fora, transição de presença e reconexão no
+        aparelho real.
+  \item SYN-024 critério 5: chegada dos quatro arquivos ao Redmi (lado PC
+        comprovado).
+  \item SYN-024 critério 6: limpeza no MediaStore/\texttt{rm} do Redmi.
+  \item SYN-024 critério 7: resource-ids no dump real.
+  \item SYN-025, passo B.2 (não é linha \texttt{Débito humano:}, é humano por
+        desenho): parear lendo o QR pela câmera do emulador, que o spike
+        mostrou não ler.
 \end{itemize}
 
 \end{document}
