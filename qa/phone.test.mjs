@@ -78,7 +78,7 @@ if ($args[2] -eq 'push') {
   if ($env:QA_FAKE_SCENARIO -eq 'success') { exit 0 }
   'error: device offline during push'; exit 1
 }
-if ($command -match 'if \[ -f') { if (Test-Path -LiteralPath $target) { 'exists' }; exit 0 }
+if ($command.Contains('if [ -f')) { if (Test-Path -LiteralPath $target) { 'exists' }; exit 0 }
 if ($command -match 'sha256sum') { (Get-FileHash -LiteralPath $target).Hash.ToLowerInvariant() + '  upload'; exit 0 }
 if ($command -match 'wc -c') { (Get-Item -LiteralPath $target).Length; exit 0 }
 if ($command -match 'content query') { 'No result found.'; exit 0 }
