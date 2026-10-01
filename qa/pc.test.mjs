@@ -1,0 +1,58 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+test('PC cleanup protects previous, unlisted, changed files and unsafe manifests', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'syn-024-pc-'));
+  try {
+    const folder = join(directory, 'Pasta');
+    const config = join(directory, 'config.json');
+    mkdirSync(folder);
+    writeFileSync(config, JSON.stringify({ pasta: folder }));
+    const previous = join(folder, 'synchronice-qa-test-previous.txt');
+    const unlisted = join(folder, 'synchronice-qa-test-unlisted.txt');
+    const tracked = join(folder, 'synchronice-qa-test-recycle.txt');
+    const changed = join(folder, 'synchronice-qa-test-changed.txt');
+    const run = (action, path, runDir = join(directory, 'run')) => {
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        resolve('qa/pc.ps1'), action, '-Config', config, '-RunDir', runDir,
+        ...(path ? ['-Path', path] : [])], { encoding: 'utf8', timeout: 30000 });
+      assert.ifError(result.error);
+      return result;
+    };
+    writeFileSync(previous, 'previous');
+    assert.equal(run('list-files').status, 0);
+    const refused = run('track', previous);
+    assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+    assert.equal(readFileSync(previous, 'utf8'), 'previous');
+
+    writeFileSync(unlisted, 'unlisted');
+    writeFileSync(tracked, 'tracked');
+    assert.equal(run('track', tracked).status, 0);
+    const cleaned = run('clean');
+    assert.equal(cleaned.status, 0, cleaned.stderr);
+    assert.deepEqual(JSON.parse(cleaned.stdout), [{ path: tracked, destination: 'Lixeira do Windows' }]);
+    assert.equal(existsSync(tracked), false);
+    assert.equal(readFileSync(unlisted, 'utf8'), 'unlisted');
+    assert.equal(readFileSync(previous, 'utf8'), 'previous');
+    assert.equal(run('clean').status, 0);
+
+    writeFileSync(changed, 'before');
+    assert.equal(run('track', changed).status, 0);
+    writeFileSync(changed, 'after');
+    assert.equal(run('clean').status, 1);
+    assert.equal(readFileSync(changed, 'utf8'), 'after');
+
+    const unsafe = join(directory, 'unsafe');
+    mkdirSync(unsafe);
+    writeFileSync(join(unsafe, 'pc-files.json'), JSON.stringify({ folder,
+      baseline: [{ value: [previous], Count: 1 }], tracked: [], cleanup: [] }));
+    const rejected = run('clean', null, unsafe);
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /Manifesto inseguro/);
+    assert.equal(readFileSync(previous, 'utf8'), 'previous');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

@@ -9,6 +9,7 @@ Review: agent
   - qa/pc.ps1, qa/pc.mjs (clipboard e colar, listar a Pasta, limpeza)
   - New: qa/mediastore.mjs, qa/mediastore.test.mjs (saída do `content query`)
   - New: qa/phone.test.mjs (adb falso temporário, preparação opcional versus ação pedida)
+  - New: qa/pc.test.mjs (wrapper real PowerShell 5.1, Pasta/configuração temporárias, proteção da limpeza)
   - gate.ps1 (só a linha do `node --test` do kit)
   - android/app/src/main/java/synchronice/android/MainActivity.kt (só `testTag` na engrenagem, nos itens do painel e na câmera)
   - android/app/src/main/java/synchronice/android/ImageViewer.kt (só `testTag`, `testTagsAsResourceId` na raiz do Dialog e imports/opt-in necessários)
@@ -92,8 +93,25 @@ Sem o Redmi alcançável, os critérios 3–8 viram `Débito humano:`.
 - `qa/phone.test.mjs`: negativa de preparação seguida de dump (vermelho
   porque o wrapper aborta); ação negada, bloqueio seguro e falha de transporte
   continuam fatais. Fake adb só no limite externo, em diretório temporário.
+- `qa/pc.test.mjs`: arquivo anterior à fotografia inicial é recusado;
+  novo rastreado vai à Lixeira; fora da lista e alterado ficam preservados;
+  manifesto antigo malformado não permite apagar. Vermelho: PowerShell 5.1
+  serializa o baseline como objeto `{value, Count}`, permitindo `track` anterior.
 
 ## Comments
+
+- Proxy decided: acrescentar `qa/pc.test.mjs` aos Primary files e à linha do
+  gate, testando `list-files`/`track`/`clean` reais com `powershell.exe` 5.1,
+  `-Config` e `-RunDir` temporários — regressão da proteção já exigida pelo
+  critério 6. Atribuir JSON a uma variável antes de `@()` e validar o baseline
+  ao carregar o manifesto protege tanto registro quanto limpeza. Manifestos
+  antigos malformados são recusados; arquivos temporários de teste usam
+  prefixo `synchronice-qa-test-` para identificar a pequena cópia na Lixeira.
+  Decisão read-only via Claude CLI, agente `proxy`, `opus xhigh`.
+- 2026-09-30, verificação: `track` aceitou uma foto anterior pela conversão
+  de array no PowerShell 5.1. A execução foi interrompida antes de `clean`;
+  o registro inseguro foi retirado do manifesto local e a foto continua
+  intacta. O conserto será precedido do teste vermelho acima.
 
 - Proxy decided: acrescentar `qa/phone.test.mjs` e critério 9 para testar o
   wrapper real com adb falso através dos parâmetros existentes `-Adb` e
