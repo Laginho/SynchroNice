@@ -11,6 +11,7 @@ param(
     [string[]]$Paths,
     [string]$RunDir,
     [string]$Exe,
+    [switch]$Isolated,
     [string]$Config = "$env:APPDATA/dev.synchronice.pc/config.json"
 )
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,12 @@ if ($Action -in 'list-files','track','clean' -and -not $RunDir) {
     [Console]::Error.WriteLine('Informe -RunDir compartilhado por toda a execucao de QA'); exit 1
 }
 if (-not $RunDir) { $RunDir = "$PSScriptRoot/../.scratch/qa-runs/$((Get-Date).ToString('yyyy-MM-dd-HHmmss'))-redmi" }
-if (-not $Exe) { $Exe = "$PSScriptRoot/../pc/src-tauri/target/release/pc.exe" }
+$RunDir = [IO.Path]::GetFullPath($RunDir)
+if ($Isolated) { $Config = Join-Path $RunDir 'data/config.json' }
+if (-not $Exe) {
+    $build = if ($Isolated) { 'debug' } else { 'release' }
+    $Exe = "$PSScriptRoot/../pc/src-tauri/target/$build/pc.exe"
+}
 try {
     if ($Port -lt 1 -or $Port -gt 65535) { throw 'Porta CDP invalida' }
     if ($Action -in 'list-files','track','clean') {
@@ -111,12 +117,30 @@ try {
     if ($Action -eq 'start') {
         $resolvedExe = (Resolve-Path -LiteralPath $Exe).Path
         New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
-        Get-Process pc -ErrorAction SilentlyContinue | Stop-Process -Force
+        if ($Isolated) {
+            Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $resolvedExe } | Stop-Process -Force
+            if (Get-Process pc -ErrorAction SilentlyContinue) { throw 'Feche a instancia real antes de abrir o PC isolado (qa/up.ps1)' }
+            $dataDir = Join-Path $RunDir 'data'
+            New-Item -ItemType Directory -Force -Path "$dataDir/Pasta" | Out-Null
+            if (-not (Test-Path -LiteralPath $Config)) {
+                [IO.File]::WriteAllText($Config, (@{ pasta="$dataDir/Pasta" } | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+            }
+        } else { Get-Process pc -ErrorAction SilentlyContinue | Stop-Process -Force }
         $previous = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+        $previousData = $env:SYNCHRONICE_DATA_DIR
+        $previousProfile = $env:WEBVIEW2_USER_DATA_FOLDER
         try {
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "$previous --remote-debugging-port=$Port".Trim()
-            $process = Start-Process -FilePath $resolvedExe -WorkingDirectory (Split-Path $resolvedExe) -WindowStyle Hidden -RedirectStandardError "$RunDir/pc.stderr.log" -PassThru
-        } finally { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previous }
+            if ($Isolated) {
+                $env:SYNCHRONICE_DATA_DIR = $dataDir
+                $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $RunDir 'webview'
+            }
+            $process = Start-Process -FilePath $resolvedExe -WorkingDirectory (Split-Path $resolvedExe) -WindowStyle Hidden -RedirectStandardError "$RunDir/pc.stderr.log" -RedirectStandardOutput "$RunDir/pc.stdout.log" -PassThru
+        } finally {
+            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previous
+            $env:SYNCHRONICE_DATA_DIR = $previousData
+            $env:WEBVIEW2_USER_DATA_FOLDER = $previousProfile
+        }
         $ready = $false
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
             $process.Refresh()
@@ -134,4 +158,7 @@ try {
             ConvertTo-Json -Compress -Depth 30 | & node "$PSScriptRoot/pc.mjs"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
-} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+} catch {
+    if ($Isolated -and $Action -eq 'start' -and $process -and -not $process.HasExited) { $process | Stop-Process -Force }
+    [Console]::Error.WriteLine($_.Exception.Message); exit 1
+}
