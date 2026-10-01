@@ -1,5 +1,5 @@
 # SYN-023: Atalho de pareamento no build de debug
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -55,3 +55,11 @@ Sem o Redmi alcançável, o critério 4 vira `Débito humano:`.
   `DebugPairActivity` não existe.
 
 ## Comments
+
+- Stage 2: seam confirmada pelo ticket: intent de `DebugPairActivity`, extra
+  string `qr`, observando o AppState da Application, persistência após reabrir
+  AppState, intent do chat e término da activity. Casos: QR válido, inválido e
+  extra ausente. `acceptQr` já valida o JSON e é chamado pelo scanner em
+  `MainActivity` e pelos testes de pareamento, entrega e presença; não será
+  alterado. A primitiva nova passa pelo mesmo `Adb-Run` das demais ações;
+  os guardas de transporte sem fio e tela desbloqueada continuam aplicáveis.
