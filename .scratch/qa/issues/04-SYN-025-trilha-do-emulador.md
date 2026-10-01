@@ -1,5 +1,5 @@
 # SYN-025: Trilha do emulador — PC isolado, `up`/`down` e câmera com QR
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-023
 Review: agent
@@ -122,3 +122,17 @@ O kit roda o app inteiro sem aparelho e sem tocar no Par real.
 - O lançamento foi ajustado para não herdar pipes nativos do chamador:
   wrappers devolvem controle enquanto os apps permanecem vivos, com logs
   redirecionados. As variáveis de ambiente do chamador são restauradas.
+- Handoff stage 2: gate completo em primeiro plano, saída 0, `gate: passou`
+  e `BUILD SUCCESSFUL`. Fmt, clippy, typecheck e lint verdes. Rust 52,
+  UI 47 e QA 14 passaram; Android app 59 e protocol-client 62 UP-TO-DATE,
+  XMLs com zero falhas, erros ou skips. Log: `syn-025/gate-final.log`.
+  O gate anterior passou todos os testes, mas pediu formatação da última
+  asserção: corrigida no commit **somente de teste** `f60f9ad`, sem alterar
+  lógica ou contrato: o diff desse commit contém só a quebra da linha da
+  asserção, e o conteúdo sem whitespace é idêntico ao teste vermelho.
+  Nenhum commit de código toca testes.
+- Branch `syn-025`, base `sweatshop/2026-09-30-2146`. Config real e
+  autostart preservados; instância release aberta só para verificar a
+  restauração foi fechada depois, devolvendo a máquina ao estado inicial
+  (nenhum PC nem qemu). Pronto para stage 3; B.2 mantém a limitação do spike
+  registrada, conforme o critério 6.
