@@ -205,6 +205,11 @@ usa `rm` apenas no caminho registrado. O manifesto fica vinculado à Pasta
 ou ao aparelho; não o reutilize para outro alvo. Lista vazia não apaga nada.
 Os resultados ficam também em `cleanup` nos manifestos, inclusive após
 uma interrupção; `clean` pode ser repetido sem apagar arquivos adicionais.
+Se um `push` for interrompido, mantenha a fonte local no mesmo caminho até
+limpar. O kit confere o hash da fonte e compara o arquivo remoto ao prefixo
+de mesmo tamanho da fonte; só esse conteúdo parcial pode ser removido.
+Fonte ausente/alterada, conteúdo diferente ou manifesto antigo sem essa
+evidência ficam preservados e geram erro.
 
 Copie para o relatório cada `path` e `destination` retornados pelos dois
 `clean`. Se o kit abortou antes de criar arquivos, registre lista vazia e

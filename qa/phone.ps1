@@ -61,6 +61,32 @@ function Phone-Hash([string]$remote) {
     if ($hash -notmatch '^([a-fA-F0-9]{64})\s') { throw "Nao foi possivel identificar arquivo: $remote" }
     return $Matches[1]
 }
+function Upload-PrefixHash($entry) {
+    if (-not $entry.source -or -not $entry.sourceHash) {
+        throw 'Origem do upload ausente ou alterada; preserve o arquivo parcial'
+    }
+    $size = (Adb-Run @('shell', "wc -c < $(Shell-Quote $entry.path)")).Trim()
+    if ($size -notmatch '^\d+$') { throw 'Tamanho do upload parcial invalido' }
+    $remaining = [long]$size
+    $stream = [IO.File]::OpenRead($entry.source)
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        if ((Get-FileHash -InputStream $stream).Hash -ine $entry.sourceHash) {
+            throw 'Origem do upload alterada; preserve o arquivo parcial'
+        }
+        $stream.Position = 0
+        if ($remaining -gt $stream.Length) { throw 'Upload parcial maior que a origem; preservado' }
+        $buffer = [byte[]]::new(65536)
+        while ($remaining -gt 0) {
+            $count = $stream.Read($buffer, 0, [int][Math]::Min($remaining, $buffer.Length))
+            if ($count -eq 0) { throw 'Origem do upload truncada; preserve o arquivo parcial' }
+            [void]$hash.TransformBlock($buffer, 0, $count, $buffer, 0)
+            $remaining -= $count
+        }
+        [void]$hash.TransformFinalBlock([byte[]]@(), 0, 0)
+        return [BitConverter]::ToString($hash.Hash).Replace('-', '').ToLowerInvariant()
+    } finally { $stream.Dispose(); $hash.Dispose() }
+}
 function Media-Uri([string]$remote) {
     $local = [IO.Path]::GetTempFileName()
     try {
@@ -150,10 +176,13 @@ try {
             if ($file.PSIsContainer) { throw 'Informe um arquivo, nao um diretorio' }
             $remote = '/storage/emulated/0/Pictures/SynchroNiceQA/' + $file.Name
             $quoted = Shell-Quote $remote
+            $sourceHash = (Get-FileHash -LiteralPath $file.FullName).Hash
             Adb-Run @('shell','mkdir','-p','/storage/emulated/0/Pictures/SynchroNiceQA') | Out-Null
             # Reserve without overwriting an existing photo; track before push so partial writes can be cleaned.
             Adb-Run @('shell',"set -C; : > $quoted") | Out-Null
-            $fileState.tracked = @($fileState.tracked) + @{ path=$remote; hash=$null }
+            $fileState.tracked = @($fileState.tracked) + @{
+                path=$remote; hash=$null; source=$file.FullName; sourceHash=$sourceHash
+            }
             Save-Files
             Adb-Run @('push',$file.FullName,$remote) | Out-Null
             $entry = $fileState.tracked | Select-Object -Last 1
@@ -228,7 +257,9 @@ try {
                 $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
                 $destination = 'ja ausente'
                 if ($exists.Trim() -eq 'exists') {
-                    if (-not $entry.hash -or (Phone-Hash $remote) -cne $entry.hash) { throw "Arquivo sem hash ou alterado; preservado: $remote" }
+                    $expectedHash = $entry.hash
+                    if (-not $expectedHash) { $expectedHash = Upload-PrefixHash $entry }
+                    if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
                     $destination = 'rm (MediaStore indisponivel)'
                     try {
                         $uri = Media-Uri $remote
