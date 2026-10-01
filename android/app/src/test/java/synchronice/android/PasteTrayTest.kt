@@ -8,29 +8,42 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.work.testing.WorkManagerTestInitHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
+import java.io.FileNotFoundException
+import synchronice.protocolclient.FilePendingQueueStore
+import synchronice.protocolclient.PendingItem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
+@OptIn(ExperimentalCoroutinesApi::class)
 class PasteTrayTest {
     private val app get() = RuntimeEnvironment.getApplication() as SynchroNiceApplication
 
-    private fun provider(name: String?, mime: String = "image/png"): Uri {
+    private fun provider(name: String?, mime: String = "image/png", unreadable: Boolean = false): Uri {
         val authority = "paste.test"
         ShadowContentResolver.registerProviderInternal(authority, object : ContentProvider() {
             override fun onCreate() = true
             override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
                 MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME)).apply { addRow(arrayOf(name)) }
             override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+                if (unreadable) throw FileNotFoundException("permission expired")
                 val source = File(app.cacheDir, "paste-source").apply { writeText("conteudo") }
                 return ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
             }
@@ -53,5 +66,89 @@ class PasteTrayTest {
         assertTrue(state.pasteTray[0] != state.pasteTray[1])
         assertFalse(state.hasPending())
         assertTrue(state.messages.isEmpty())
+    }
+
+    @Test
+    fun sendQueuesFilesInOrderThenTextAndClearsComposer() = sending {
+        pasteUri(provider("primeiro.txt", "text/plain"))
+        pasteUri(provider("segundo.pdf", "application/pdf"))
+        val copies = pasteTray.toList()
+        composer.setTextAndPlaceCursorAtEnd("legenda")
+        sendComposer()
+        assertEquals(listOf("primeiro.txt", "segundo.pdf", "legenda"), messages.map { it.text })
+        val pending = FilePendingQueueStore(File(app.filesDir, "pending-items.txt")).load()
+        assertEquals(listOf("primeiro.txt", "segundo.pdf"), pending.filterIsInstance<PendingItem.File>().map { it.name })
+        assertEquals("legenda", (pending.last() as PendingItem.Text).text)
+        assertTrue(pending.filterIsInstance<PendingItem.File>().all { File(it.path).readText() == "conteudo" })
+        assertTrue(pasteTray.isEmpty())
+        assertEquals("", composer.text.toString())
+        assertTrue(copies.all { !it.exists() })
+    }
+
+    @Test
+    fun sendWithoutTextQueuesOnlyTheTray() = sending {
+        pasteUri(provider("arquivo.txt", "text/plain"))
+        sendComposer()
+        assertEquals(listOf("arquivo.txt"), messages.map { it.text })
+        assertTrue(pasteTray.isEmpty())
+    }
+
+    @Test
+    fun textOnlyAndEmptySendPreserveExistingBehavior() = sending {
+        sendComposer()
+        assertFalse(hasPending())
+        composer.setTextAndPlaceCursorAtEnd("só texto")
+        sendComposer()
+        assertEquals(listOf("só texto"), messages.map { it.text })
+        assertEquals("", composer.text.toString())
+    }
+
+    @Test
+    fun removeAndClearDeleteOnlyTheirStagedCopies() {
+        val state = app.state
+        val uri = provider("foto.png")
+        state.pasteUri(uri)
+        state.pasteUri(uri)
+        val copies = state.pasteTray.toList()
+        state.removePaste(copies[0])
+        assertFalse(copies[0].exists())
+        assertTrue(copies[1].exists())
+        assertEquals(listOf(copies[1]), state.pasteTray)
+        state.clearPasteTray()
+        assertFalse(copies[1].exists())
+        assertTrue(state.pasteTray.isEmpty())
+        assertTrue(File(app.cacheDir, "paste-source").exists())
+    }
+
+    @Test
+    fun ownProviderIncludingUserPrefixAndFileUrisAreRejected() {
+        val state = app.state
+        listOf("content://${app.packageName}.camera/camera/foto.jpg",
+            "content://0@${app.packageName}.camera/camera/foto.jpg", "file:///secret.txt").forEach {
+            assertFalse(state.pasteUri(Uri.parse(it)))
+        }
+        assertTrue(state.pasteTray.isEmpty())
+        assertFalse(state.hasPending())
+    }
+
+    @Test
+    fun missingDisplayNameUsesTimestampAndMimeExtension() {
+        val state = app.state
+        state.pasteUri(provider(null, "image/gif"))
+        assertTrue(Regex("imagem-[0-9]+\\.gif").matches(state.pasteTray.single().name))
+    }
+
+    @Test
+    fun failedReadLeavesNoTrayEntryOrPartialStaging() {
+        assertFailsWith<FileNotFoundException> { app.state.pasteUri(provider("broken.png", unreadable = true)) }
+        assertTrue(app.state.pasteTray.isEmpty())
+        assertTrue(File(app.cacheDir, "incoming").listFiles().orEmpty().isEmpty())
+    }
+
+    private fun sending(block: suspend AppState.() -> Unit) = runBlocking {
+        WorkManagerTestInitHelper.initializeTestWorkManager(app)
+        app.state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":7777,"token":"0123456789abcdef0123456789abcdef"}""")
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        try { app.state.block() } finally { Dispatchers.resetMain() }
     }
 }
