@@ -14,6 +14,8 @@ param(
     [string]$Config = "$env:APPDATA/dev.synchronice.pc/config.json"
 )
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
 if ($Action -in 'list-files','track','clean' -and -not $RunDir) {
     [Console]::Error.WriteLine('Informe -RunDir compartilhado por toda a execucao de QA'); exit 1
 }
@@ -42,7 +44,6 @@ try {
             }
         }
         if ($Action -eq 'list-files') {
-            $OutputEncoding = [Text.UTF8Encoding]::new($false)
             $listing = @{ action=$Action; folder=$folder } | ConvertTo-Json -Compress | & node "$PSScriptRoot/pc.mjs"
             if ($LASTEXITCODE -ne 0) { throw 'Listagem da Pasta falhou' }
             if (-not $state) {
@@ -128,7 +129,6 @@ try {
         @{ pid = $process.Id; port = $Port; stderr = "$RunDir/pc.stderr.log" } | ConvertTo-Json -Compress
     } else {
         # stdin keeps JSON, quotes and Unicode out of Windows command-line escaping.
-        $OutputEncoding = [Text.UTF8Encoding]::new($false)
         @{ action=$Action; port=$Port; selector=$Selector; text=$Text; key=$Key; command=$Command; args=($Json | ConvertFrom-Json); path=$Path; config=$Config } |
             ConvertTo-Json -Compress -Depth 30 | & node "$PSScriptRoot/pc.mjs"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
