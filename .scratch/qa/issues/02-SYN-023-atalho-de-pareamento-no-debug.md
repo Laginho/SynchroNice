@@ -1,5 +1,5 @@
 # SYN-023: Atalho de pareamento no build de debug
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -88,3 +88,14 @@ Sem o Redmi alcançável, o critério 4 vira `Débito humano:`.
   `pair` com APK de debug, ler `Na rede` no dump e confirmar `HEAD /listen`
   200 no Redmi. O shell nega WRITE_SECURE_SETTINGS, impedindo a preparação
   do kit; não houve execução física do pareamento nem evidência de presença.
+- Critério 3: `gradlew.bat :app:processReleaseMainManifest
+  :app:processReleaseManifest` terminou com `BUILD SUCCESSFUL`; leitura dos
+  manifests merged confirmou DebugPairActivity presente em debug e ausente
+  em release. Fonte e declaração ficam exclusivamente em `src/debug`.
+- Handoff stage 2: gate completo em primeiro plano, saída 0, `gate: passou`
+  e `BUILD SUCCESSFUL`. Fmt, clippy, typecheck e lint passaram. Rust: 51;
+  UI: 47; parser QA: 5; Android app: 59; protocol-client: 62. Os XMLs Android
+  confirmam zero falhas, erros ou skips; no gate final ambos UP-TO-DATE,
+  após execução verde real dos 59 testes do app no TestsOnly.
+  Testes ficam apenas no commit `4d12967`; nenhum commit posterior os alterou.
+  Branch `syn-023`, base `sweatshop/2026-09-30-2146`; pronto para stage 3.
