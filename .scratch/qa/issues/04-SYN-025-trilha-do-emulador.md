@@ -1,5 +1,5 @@
 # SYN-025: Trilha do emulador — PC isolado, `up`/`down` e câmera com QR
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-023
 Review: agent
@@ -136,3 +136,50 @@ O kit roda o app inteiro sem aparelho e sem tocar no Par real.
   restauração foi fechada depois, devolvendo a máquina ao estado inicial
   (nenhum PC nem qemu). Pronto para stage 3; B.2 mantém a limitação do spike
   registrada, conforme o critério 6.
+
+#### Resolution (2026-10-01)
+
+Verdict: Approve
+
+- Revisão de `6afa51e...b0cd98c`, após rebase sobre
+  `sweatshop/2026-09-30-2146`; integração sem squash em `c782ef9`.
+  Arquivos: `config.rs`, `lib.rs`, `tests/config.rs`, `qa/up.ps1`,
+  `qa/down.ps1`, `qa/pc.ps1` e a seção do emulador em `docs/agents/qa.md`.
+  Stage 3 não precisou alterar código nem testes.
+- ✅ Critério 1: função pura testada com e sem override; 7 testes de config
+  verdes. Vermelho confirmado no commit `40851a2` e no log E0425 pela função
+  ausente. Os commits de implementação não tocam testes; `f60f9ad` contém
+  só formatação, com conteúdo idêntico ao vermelho sem whitespace.
+- ✅ Critério 2: arquivo HTTP 201 e recibo `syn025-review-file` em
+  `data/Pasta`/`data/accepted-file-ids.txt`; Pendente criado pela API Tauri
+  em `data/outbox/manifest.json`. Hashes dos arquivos reais e valor do
+  autostart preservados.
+- ✅ Critério 3: dois `up` consecutivos com saída 0, o mesmo qemu PID
+  `29916`, presença `Na rede` nos dois dumps e `HEAD /listen` 200.
+- ✅ Critério 4: C.1 pelo composer do PC; `QA SYN-025 review C1` no DOM
+  `.item:not(.pendente)` e em `bubble-1-incoming-delivered` no celular.
+  Prints inspecionados. Config real manteve SHA-256
+  `90D3D7B3C5503FACA4BBC387B7178E35A087B7F8C4FF455135B9A6FB5C668993`.
+- ✅ Critério 5: sem release anterior, `down` deixou zero PC/qemu e não
+  abriu release. Com release anterior, `up` registrou restauração e
+  `down` deixou zero debug/qemu e um release (PID `30804`). Segundo `down`
+  preservou esse PID. O release aberto apenas para esta verificação foi
+  fechado depois; estado inicial devolvido, com zero PC/qemu.
+- ✅ Critério 6: Comments e `qa.md` registram o spike negativo permitido
+  pelo contrato. A imagem `scanner-padded.png` foi inspecionada: o QR está
+  cortado. B.2 continua 👤 no emulador; os demais passos usam `pair`.
+- Standards: nenhum desvio de Primary files/test-first. Higiene do
+  histórico: seis commits sem corpo; o corpo de `f60f9ad` explica o motivo
+  sem repetir o ID, embora todos os assuntos o citem. Possível duplicação
+  do setup WMI/ambiente em `pc.ps1` e `down.ps1`, aceita para os dois
+  consumidores. Nenhum desses apontamentos é critério não atendido,
+  violação de seam/test-first ou regressão que reabra o ticket.
+- Spec: zero achados contratuais; seis critérios atendidos, sem regressão
+  identificada. Também exercitado o launcher compartilhado no modo real.
+- Gate completo em primeiro plano, saída 0: fmt, clippy, typecheck e lint
+  verdes; Rust **52**, UI **47**, QA **14** passaram. Android app **59** e
+  protocol-client **62** UP-TO-DATE, XMLs sem falhas, erros ou skips;
+  `BUILD SUCCESSFUL` e `gate: passou`. Log local:
+  `.scratch/qa-runs/syn-025-review/gate.log`.
+- Relatório e evidências:
+  [QA da revisão](../../qa-runs/2026-10-01-025-review.md).
