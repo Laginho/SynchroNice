@@ -810,7 +810,7 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
             Text("SynchroNice", style = MaterialTheme.typography.titleLarge)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(if (state.online) "Na rede" else "Fora da rede", modifier = Modifier.testTag("presence"), color = if (state.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                TextButton(onClick = onSettings, modifier = Modifier.semantics { contentDescription = "Configurações" }) {
+                TextButton(onClick = onSettings, modifier = Modifier.testTag("settings").semantics { contentDescription = "Configurações" }) {
                     Text("⚙", style = MaterialTheme.typography.titleLarge)
                 }
             }
@@ -832,7 +832,7 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onCamera, modifier = Modifier.semantics { contentDescription = "Tirar foto" }) {
+            TextButton(onClick = onCamera, modifier = Modifier.testTag("camera").semantics { contentDescription = "Tirar foto" }) {
                 Text("📷")
             }
             OutlinedTextField(
@@ -874,13 +874,13 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
         }
     }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("Voltar") }
+        TextButton(onClick = onBack, modifier = Modifier.testTag("settings-back")) { Text("Voltar") }
         Text("Configurações", style = MaterialTheme.typography.headlineSmall)
         Text(folder?.lastPathSegment ?: "Download/SynchroNice", modifier = Modifier.padding(top = 16.dp))
-        TextButton(onClick = { chooseFolder.launch(folder) }) { Text("Mudar pasta…") }
+        TextButton(onClick = { chooseFolder.launch(folder) }, modifier = Modifier.testTag("change-folder")) { Text("Mudar pasta…") }
         folderError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row(
-            Modifier.fillMaxWidth().toggleable(
+            Modifier.fillMaxWidth().testTag("copy-formatted").toggleable(
                 value = state.copyFormatted,
                 role = Role.Checkbox,
                 onValueChange = state::setCopyWithPunctuation,
@@ -891,7 +891,7 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
             Text("Copiar com pontuação", Modifier.padding(start = 8.dp))
         }
         Row(
-            Modifier.fillMaxWidth().toggleable(
+            Modifier.fillMaxWidth().testTag("keep-photos").toggleable(
                 value = state.keepPhotos,
                 role = Role.Checkbox,
                 onValueChange = state::setKeepCameraPhotos,
@@ -901,7 +901,7 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
             Checkbox(checked = state.keepPhotos, onCheckedChange = null)
             Text("Guardar fotos tiradas", Modifier.padding(start = 8.dp))
         }
-        Button(onClick = { scope.launch { state.unpair() } }, modifier = Modifier.padding(top = 24.dp)) {
+        Button(onClick = { scope.launch { state.unpair() } }, modifier = Modifier.testTag("unpair").padding(top = 24.dp)) {
             Text("Desparear")
         }
         state.connectionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
