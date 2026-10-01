@@ -40,7 +40,16 @@ try {
             $env:SYNCHRONICE_DATA_DIR = $null
             $env:WEBVIEW2_USER_DATA_FOLDER = $null
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $null
-            Start-Process -FilePath $releaseExe -WorkingDirectory (Split-Path $releaseExe) -WindowStyle Hidden | Out-Null
+            $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+                ShowWindow=[uint16]0
+                EnvironmentVariables=[string[]]@([Environment]::GetEnvironmentVariables().GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+            }
+            $launch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+                CommandLine=('"' + $releaseExe + '"')
+                CurrentDirectory=(Split-Path $releaseExe)
+                ProcessStartupInformation=$startup
+            }
+            if ($launch.ReturnValue -ne 0) { throw "PC real nao reabriu (WMI $($launch.ReturnValue)); repita down" }
         } finally {
             $env:SYNCHRONICE_DATA_DIR = $previousData
             $env:WEBVIEW2_USER_DATA_FOLDER = $previousProfile

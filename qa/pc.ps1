@@ -135,7 +135,31 @@ try {
                 $env:SYNCHRONICE_DATA_DIR = $dataDir
                 $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $RunDir 'webview'
             }
-            $process = Start-Process -FilePath $resolvedExe -WorkingDirectory (Split-Path $resolvedExe) -WindowStyle Hidden -RedirectStandardError "$RunDir/pc.stderr.log" -RedirectStandardOutput "$RunDir/pc.stdout.log" -PassThru
+            # A WMI launcher avoids inheriting the caller's native pipes: start must return while the app lives.
+            $pidFile = Join-Path $RunDir 'pc.pid'
+            [IO.File]::WriteAllText($pidFile, '')
+            $launchScript = '$p = Start-Process -WindowStyle Hidden -PassThru -FilePath ' +
+                "'" + $resolvedExe.Replace("'", "''") + "' -WorkingDirectory '" + (Split-Path $resolvedExe).Replace("'", "''") +
+                "' -RedirectStandardError '" + "$RunDir/pc.stderr.log".Replace("'", "''") +
+                "' -RedirectStandardOutput '" + "$RunDir/pc.stdout.log".Replace("'", "''") +
+                "'; " + '$p.Id | Set-Content -LiteralPath ' + "'" + $pidFile.Replace("'", "''") + "'"
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launchScript))
+            $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+                ShowWindow=[uint16]0
+                EnvironmentVariables=[string[]]@([Environment]::GetEnvironmentVariables().GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+            }
+            $launch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+                CommandLine="powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
+                ProcessStartupInformation=$startup
+            }
+            if ($launch.ReturnValue -ne 0) { throw "Nao foi possivel abrir o PC: WMI $($launch.ReturnValue)" }
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                $startedPid = Get-Content -LiteralPath $pidFile -Raw
+                if ($startedPid -match '^\d+\s*$') { break }
+                Start-Sleep -Milliseconds 200
+            }
+            if ($startedPid -notmatch '^\d+\s*$') { throw 'Launcher do PC nao devolveu o PID' }
+            $process = Get-Process -Id ([int]$startedPid)
         } finally {
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previous
             $env:SYNCHRONICE_DATA_DIR = $previousData

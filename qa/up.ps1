@@ -75,9 +75,12 @@ class QrImage {
         if (Get-NetTCPConnection -LocalPort 5554,5555 -State Listen -ErrorAction SilentlyContinue) { throw 'infraestrutura: portas do emulador 5554/5555 ocupadas' }
         $serial = 'emulator-5554'
         $state.serial = $serial; Save-State
-        Start-Process -FilePath $emulator -WindowStyle Hidden -RedirectStandardOutput "$RunDir/emulator.stdout.log" -RedirectStandardError "$RunDir/emulator.stderr.log" -ArgumentList @('-avd','SynchroNice_API37','-port','5554',
-            '-no-window','-no-audio','-no-snapshot-save','-gpu','swiftshader_indirect','-camera-back',('"imagefile:' + "$RunDir/qr.png" + '"')) |
-            Out-Null
+        $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow=[uint16]0 }
+        $launch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine=('"' + $emulator + '" -avd SynchroNice_API37 -port 5554 -no-window -no-audio -no-snapshot-save -gpu swiftshader_indirect -camera-back "imagefile:' + "$RunDir/qr.png" + '"')
+            ProcessStartupInformation=$startup
+        }
+        if ($launch.ReturnValue -ne 0) { throw "infraestrutura: emulador nao abriu (WMI $($launch.ReturnValue))" }
     }
     $state.serial = $serial
     $state.endpoint = '127.0.0.1:' + ([int]$serial.Split('-')[1] + 1)
