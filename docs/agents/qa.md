@@ -67,12 +67,16 @@ recusar a concessão no `am`, guarde a saída integral e bloqueie SYN-024.
 
 `wifi-off` aceita 1–600 segundos (`-Seconds` também vale). Um script `nohup`
 no aparelho usa um trap para religar o Wi-Fi, mesmo sem adb. O script
-consulta `cmd wifi status` até dez vezes, com intervalo de um
+consulta `dumpsys wifi` até dez vezes, com intervalo de um
 segundo, para confirmar cada estado antes de emitir os marcadores de
-desligamento/restauração. Código 0 do `svc` sozinho não confirma a ação;
+desligamento/restauração. Os N segundos começam só em `disabled`, depois
+de terminar `disabling`; a restauração exige `enabled`.
+Código 0 do `svc` sozinho não confirma a ação;
 recusa silenciosa, consulta negada ou estado não confirmado geram falha.
-A linha `Wifi is enabled/disabled` vem do
-[WifiShellCommand do AOSP](https://android.googlesource.com/platform/packages/modules/Wifi/+/refs/heads/main/service/java/com/android/server/wifi/WifiShellCommand.java#2867).
+A linha `Wi-Fi is enabled/disabled` vem do
+[ActiveModeWarden do Android 16](https://android.googlesource.com/platform/packages/modules/Wifi/+/refs/heads/android16-release/service/java/com/android/server/wifi/ActiveModeWarden.java#1572).
+`cmd wifi status` não serve como confirmação: também imprime `disabled`
+durante `disabling`, quando a rede ainda pode estar ativa.
 Depois de reconectar o adb, aguarda até 20 segundos pelos dois marcadores;
 o transporte pode voltar antes de o trap terminar de confirmar a restauração.
 Enquanto a chamada aguarda, outra chamada a `pc.ps1 presence` permite observar 204;

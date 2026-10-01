@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -442,3 +442,28 @@ confirms device state' qa/phone.test.mjs`: 1 teste, 0 passando, 1 falhando,
 zero skips. No caso delayed, o wrapper saiu 0 com os dois marcadores,
 mas a rede ficou desligada por **0 segundos**, esperado **1**. O teste
 será committed antes da alteração de código; nenhuma operação no Redmi.
+
+Teste vermelho committed em `12763b6`, antes de qualquer alteração de
+produção. Correção mínima: `wait_wifi` consulta `dumpsys wifi` e exige
+a linha exata `Wi-Fi is disabled/enabled`, emitida pelo `ActiveModeWarden`.
+Os estados `disabling`, `enabling` e desconhecido não confirmam a ação.
+O prazo existente e o trap de restauração permanecem. Documentação
+atualizada com a fonte AOSP e o início de N só após desligamento completo.
+
+Verde pelo mesmo comando: 1 teste passou, zero falhas/skips, nove cenários.
+O caso com atraso de cinco segundos agora observa **1 segundo completo**
+de queda antes de restaurar, e um atraso além do prazo continua fatal.
+Preparação, negativas de consulta/ação, recusa silenciosa, estado desconhecido
+e log parcial permanecem cobertos no mesmo seam. Sintaxe PowerShell passou.
+
+Gate completo em primeiro plano e aguardado na mesma chamada: código 0,
+`GATE_EXIT=0`, `gate: passou`, `BUILD SUCCESSFUL in 9s`. Rust 51, UI 47,
+QA 14, Android app 59 e protocol-client 62: **233 testes**, zero falhas.
+XMLs Android UP-TO-DATE confirmados sem falhas, erros ou skips; fmt,
+clippy, typecheck, lint e `git diff --check` passaram. Log local ignorado:
+`.scratch/qa-runs/2026-10-01-024-complete-shutdown/gate.log`.
+
+Handoff e `Stage: to-review` incluídos no último commit de código, sem
+alterar testes nesse commit. Nenhuma operação real no Redmi; débitos
+anteriores dos critérios 3–8 mantidos, sem débito adicional. Sem merge
+ou ledger; próxima etapa é a revisão do único ❌ desta retomada.
