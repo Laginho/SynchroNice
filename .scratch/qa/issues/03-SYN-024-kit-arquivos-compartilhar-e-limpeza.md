@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -173,3 +173,62 @@ Sem o Redmi alcançável, os critérios 3–8 viram `Débito humano:`.
   existente precisam ser seguras na limpeza; os arquivos recebidos serão
   registrados explicitamente após uma fotografia inicial da Pasta, sem
   incluir automaticamente outros arquivos que aparecerem durante o QA.
+
+#### Review stage 3 (2026-09-30)
+
+Reaberto: quatro falhas confirmadas exigem novos testes, portanto voltam à
+etapa 2 pela regra mecânica do `ticket-flow`. Nenhuma correção de fonte foi
+feita na revisão. Branch `syn-024`; base `sweatshop/2026-09-30-2146`
+(`5f02f14`); diff inteiro até `fc384a2` e callers lidos numa única passada.
+Relatório: `.scratch/qa-runs/2026-09-30-024-review.md`.
+
+- ❌ Critério 6 — proteção de arquivo anterior no PC: em PowerShell 5.1
+  com `[Console]::OutputEncoding` 850, `list-files` registra `prévia.txt`
+  como `pr├®via.txt`; `track` aceita o arquivo anterior real, com hash e
+  caminho válidos para a limpeza. `qa/pc.ps1:45–51` define somente
+  `$OutputEncoding`, que não controla a decodificação do stdout do Node.
+  Reproduzido em Pasta temporária, sem chamar `clean` sobre esse arquivo.
+  O teste exigido de recusa de arquivo anterior precisa cobrir esse caso.
+- ❌ Critérios 4 e 9 — Wi-Fi: `qa/phone.ps1:184–208` ignora erro do
+  lançamento de `nohup` e aceita apenas `get-state=device` como sucesso.
+  Com adb falso, lançamento negado por `SecurityException: CHANGE_WIFI_STATE`
+  sai 0 e devolve `reconnected=true`, com a negativa apenas em `log`.
+  Falha da ação pedida deve continuar fatal; não se demonstrou queda real.
+- ❌ Critério 6 — upload interrompido: `qa/phone.ps1:155–161` reserva e
+  registra o arquivo com `hash=null` antes do push. Depois de uma falha de
+  transporte, `clean` em `:221` recusa permanentemente o arquivo criado
+  pelo kit. O adb falso reproduziu push com código 1 e, após reconexão,
+  limpeza com código 1, `Arquivo sem hash ou alterado; preservado`.
+  A recuperação deve preservar as proteções de conteúdo e arquivos alheios.
+- ❌ Critério 6 — Pasta na raiz: `qa/pc.ps1:32` transforma `C:\` em
+  `C:`; os guards de `track`/`clean` em `:58`/`:70` não aceitam o diretório
+  real `C:\`. O app permite essa Pasta; a desigualdade foi reproduzida
+  sem criar arquivos na raiz. Preservar a raiz ao normalizar o caminho.
+
+- Standards: escopo e separação test-only/código aprovados; 0 smells
+  relevantes. O achado Wi-Fi também viola a regra documentada de ação
+  pedida fatal. Os oito commits anteriores não têm corpo explicando o
+  motivo, exigido pelo `ticket-flow`; observação histórica não bloqueante.
+- Spec: quatro falhas acima, sem scope creep. As três decisões
+  `Proxy decided` foram revisadas: teste real PC/baseline; adb falso e
+  critério 9; semântica da raiz do Dialog e preparação opcional tolerante
+  apenas a `SecurityException`. Todas estão dentro do contrato expandido.
+- Achado adicional sem critério de confirmação/relato exato do destino:
+  escape do extra de query do MediaStore, registrado em CLEAN-019 para
+  triagem. Não faz parte dos ❌ desta retomada. Pasta inicialmente vazia
+  passou em uma verificação independente; nenhum achado nesse caso.
+- Prova red-green original reproduzida em diretórios temporários: parser
+  de `95a46e1` sem módulo falha `ERR_MODULE_NOT_FOUND`; teste de `5d65455`
+  com wrapper `44c8161` falha por preparação negada; teste de `ced5962`
+  com wrappers `6ad0599` falha por aceitar arquivo anterior (0 em vez de 1).
+  A dependência já instalada foi copiada para o harness PC; nenhuma cópia
+  da lógica testada foi criada. Cada execução vermelha: 1 teste falhou.
+- Gate completo em primeiro plano: código 0, `gate: passou`,
+  `BUILD SUCCESSFUL in 9s`. Rust 51, UI 47, QA 10, Android app 59,
+  protocol-client 62: 229 testes; XMLs Android com zero falhas, erros e
+  skips. fmt, clippy, typecheck e lint passaram. O gate atual não cobre
+  as quatro falhas novas. `git diff --check` passou.
+- Redmi atualmente só por USB, com transporte sem fio offline; USB não
+  foi usado. Os débitos já registrados permanecem. Nenhuma nova operação
+  de Wi-Fi, Par ou arquivo real do aparelho. Sem merge nem linha de ledger;
+  a retomada na branch existente cobre somente os quatro ❌ acima.
