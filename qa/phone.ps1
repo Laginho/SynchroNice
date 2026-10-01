@@ -178,12 +178,16 @@ try {
         }
         'wifi-off' {
             $remote = '/data/local/tmp/synchronice-qa-wifi-' + [guid]::NewGuid().ToString('N') + '.sh'
+            $logPath = "$remote.log"
             $local = [IO.Path]::GetTempFileName()
             try {
                 # The trap restores Wi-Fi on exit; nohup keeps it alive after wireless adb drops.
-                [IO.File]::WriteAllText($local, "trap 'svc wifi enable; rm -f $remote' EXIT`nsvc wifi disable`nsleep $Seconds`n", [Text.UTF8Encoding]::new($false))
+                $script = "trap 'if svc wifi enable; then echo QA_WIFI_RESTORED; fi; rm -f $remote' EXIT`n" +
+                    "svc wifi disable || exit 1`necho QA_WIFI_DISABLED`nsleep $Seconds`n"
+                [IO.File]::WriteAllText($local, $script, [Text.UTF8Encoding]::new($false))
                 Adb-Run @('push',$local,$remote) | Out-Null
-                Adb-Run -Arguments @('shell',"nohup sh $remote </dev/null >/data/local/tmp/synchronice-qa-wifi.log 2>&1 &") -AllowFailure | Out-Null
+                $launch = Adb-Run -Arguments @('shell',"nohup sh $remote </dev/null >$logPath 2>&1 &") -AllowFailure
+                if ($launch -match 'Error|Exception|Permission Denial') { throw "Wi-Fi recusado: $launch" }
             } finally { Remove-Item -LiteralPath $local }
             Start-Sleep -Seconds ($Seconds + 2)
             $ready = $false
@@ -205,7 +209,13 @@ try {
                 Start-Sleep -Seconds 1
             }
             if (-not $ready) { throw 'infraestrutura: Wi-Fi nao reconectou o adb; confira o aparelho' }
-            @{ seconds=$Seconds; reconnected=$true; serial=$Serial; log=(Adb-Run @('shell','cat','/data/local/tmp/synchronice-qa-wifi.log')) } | ConvertTo-Json -Compress
+            $log = Adb-Run @('shell','cat',$logPath)
+            if ($log -match 'Error|Exception|Permission Denial' -or
+                $log -notmatch '(?m)^QA_WIFI_DISABLED\r?$' -or $log -notmatch '(?m)^QA_WIFI_RESTORED\r?$') {
+                throw "Wi-Fi nao confirmou desligar e restaurar: $log"
+            }
+            Adb-Run @('shell','rm','-f',$logPath) | Out-Null
+            @{ seconds=$Seconds; reconnected=$true; serial=$Serial; log=$log } | ConvertTo-Json -Compress
         }
         'clean' {
             foreach ($entry in @($fileState.tracked)) {
