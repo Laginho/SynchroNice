@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- Synthetic uiautomator fixture: no wireless device available at authoring. -->
+<hierarchy rotation="0"><node index="0" text="" resource-id="" class="android.view.View" content-desc="" bounds="[0,0][1080,2400]">
+  <node index="0" text="Na rede" resource-id="presence" class="android.widget.TextView" content-desc="" bounds="[710,80][930,140]" />
+  <node index="1" text="Mensagem" resource-id="composer" class="android.widget.EditText" content-desc="" bounds="[150,2000][750,2101]" />
+  <node index="2" text="Enviar" resource-id="send" class="android.widget.Button" content-desc="Enviar mensagem" bounds="[800,2000][1040,2100]" />
+  <node index="3" text="oi &amp; &quot;olá&quot; &lt;3" resource-id="bubble-1-incoming-delivered" class="android.view.View" content-desc="" bounds="[20,200][501,301]" />
+  <node index="4" text="" resource-id="hidden" content-desc="" bounds="[0,0][0,0]" />
+  <node index="5" text="" resource-id="broken" content-desc="" bounds="invalid" />
+</node></hierarchy>
