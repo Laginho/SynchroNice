@@ -8,6 +8,7 @@ Review: agent
   - qa/phone.ps1 (empurrar, compartilhar, listar, Wi-Fi fora, limpeza)
   - qa/pc.ps1, qa/pc.mjs (clipboard e colar, listar a Pasta, limpeza)
   - New: qa/mediastore.mjs, qa/mediastore.test.mjs (saída do `content query`)
+  - New: qa/phone.test.mjs (adb falso temporário, preparação opcional versus ação pedida)
   - gate.ps1 (só a linha do `node --test` do kit)
   - android/app/src/main/java/synchronice/android/MainActivity.kt (só `testTag` na engrenagem, nos itens do painel e na câmera)
   - android/app/src/main/java/synchronice/android/ImageViewer.kt (só `testTag`, `testTagsAsResourceId` na raiz do Dialog e imports/opt-in necessários)
@@ -70,6 +71,11 @@ O kit passa a mover arquivos e a limpar o que criou.
    visualizador aparecem.
 8. Um relatório do kit rodando D.1 e G.7 no Redmi, com a lista da limpeza,
    está committed em `.scratch/qa-runs/`.
+9. Na preparação opcional (escalas de animação, `KEYCODE_WAKEUP`,
+   `wm dismiss-keyguard`), só `SecurityException` vira aviso no stderr e a
+   ação segue. Erro de transporte, bloqueio seguro e falha da ação pedida
+   (inclusive `INJECT_EVENTS` em `key`) continuam fatais. `qa/phone.test.mjs`
+   prova isso no wrapper real via `-Adb`/`-Serial` e roda no gate.
 
 #### Verification
 
@@ -83,8 +89,18 @@ Sem o Redmi alcançável, os critérios 3–8 viram `Débito humano:`.
 
 - `qa/mediastore.test.mjs`: várias linhas, caminho ausente, `_data` com
   vírgula ou espaço. Vermelho porque `qa/mediastore.mjs` não existe.
+- `qa/phone.test.mjs`: negativa de preparação seguida de dump (vermelho
+  porque o wrapper aborta); ação negada, bloqueio seguro e falha de transporte
+  continuam fatais. Fake adb só no limite externo, em diretório temporário.
 
 ## Comments
+
+- Proxy decided: acrescentar `qa/phone.test.mjs` e critério 9 para testar o
+  wrapper real com adb falso através dos parâmetros existentes `-Adb` e
+  `-Serial` — a preparação tolerante cria uma decisão warn/fatal que precisa
+  de regressão; sem novo parâmetro ou acesso ao aparelho real nos testes.
+  Decisão read-only via Claude CLI, agente `proxy`, modelo `opus`, esforço
+  `xhigh`. A etapa 2 em andamento continua em `implementing` até o gate.
 
 - Proxy decided: expor `testTagsAsResourceId` na raiz do Dialog de
   `ImageViewer`, com imports e opt-in necessários; tornar preparação opcional
