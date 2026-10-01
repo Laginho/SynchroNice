@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -326,3 +326,18 @@ não foram alterados nesta revisão. Relatório completo:
   anteriores do Redmi mantidos, sem operação real nem débito adicional.
   CLEAN-019 permanece separado. Nenhuma alteração de critério, merge ou
   linha de ledger; a próxima etapa 2 cobre somente o ❌ acima.
+
+#### Retomada stage 2 (2026-10-01)
+
+Seam existente: wrapper real `qa/phone.ps1 wifi-off`, por `-Adb`/`-Serial`.
+Callers conferidos: exemplos de `docs/agents/qa.md`; nenhum outro caller
+de `wifi-off` no kit. O desligamento e a restauração compartilham a
+confirmação no script enviado; o trap precisa continuar rodando após erro.
+Casos cobertos pelo novo teste: recusa silenciosa ao desligar e ao religar,
+consulta negada, saída desconhecida, transição atrasada e sucesso.
+O adb falso captura e executa o script de produção com o Bash já instalado
+com Git, substituindo somente comandos Android e tempo; não copia a lógica.
+Vermelho: `node --test --test-reporter=tap --test-name-pattern='wifi-off
+confirms device state' qa/phone.test.mjs`: 1 teste, 0 passando, 1 falhando.
+`disable-refused` devolveu código 0 (esperado 1), `reconnected=true` e ambos
+os marcadores, embora `svc` não tivesse alterado o estado simulado.

@@ -156,3 +156,83 @@ exit 0
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('wifi-off confirms device state even when svc silently refuses a transition', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'syn-024-wifi-state-'));
+  try {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    assert.ifError(git.error);
+    assert.equal(git.status, 0, git.stderr);
+    const bash = resolve(git.stdout.trim(), '../../../bin/bash.exe');
+    const adb = join(directory, 'adb.ps1');
+    writeFileSync(join(directory, 'svc'), `#!/bin/sh
+echo "$*" >> "$QA_WIFI_DIRECTORY/calls"
+case "$QA_FAKE_SCENARIO:$2" in
+  disable-refused:disable|restore-refused:enable) exit 0 ;;
+esac
+case "$2" in
+  disable) echo disabled > "$QA_WIFI_DIRECTORY/state" ;;
+  enable) echo enabled > "$QA_WIFI_DIRECTORY/state" ;;
+esac
+echo 0 > "$QA_WIFI_DIRECTORY/queries"
+`);
+    writeFileSync(join(directory, 'cmd'), `#!/bin/sh
+if [ "$QA_FAKE_SCENARIO" = status-denied ]; then
+  echo 'java.lang.SecurityException: ACCESS_WIFI_STATE' >&2
+  exit 1
+fi
+if [ "$QA_FAKE_SCENARIO" = unknown ]; then echo 'Wifi is disabled-extra'; exit 0; fi
+if [ "$QA_FAKE_SCENARIO" = delayed ]; then
+  count=$(cat "$QA_WIFI_DIRECTORY/queries")
+  echo $((count + 1)) > "$QA_WIFI_DIRECTORY/queries"
+  if [ "$count" -lt 2 ]; then echo 'Wifi is transitioning'; exit 0; fi
+fi
+printf 'Wifi is %s\\n' "$(cat "$QA_WIFI_DIRECTORY/state")"
+echo 'Other status details'
+`);
+    // Keep device-side polling fast; only Android commands and time are replaced.
+    writeFileSync(join(directory, 'sleep'), '#!/bin/sh\nexit 0\n');
+    writeFileSync(join(directory, 'rm'), '#!/bin/sh\nexit 0\n');
+    writeFileSync(adb, `
+$command = $args -join ' '
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($args[2] -eq 'push') {
+  [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'captured.sh'), [IO.File]::ReadAllText($args[3])); exit 0
+}
+if ($command -match 'nohup') {
+  $output = & $env:QA_WIFI_BASH -c 'cd "$QA_WIFI_DIRECTORY" && PATH="$PWD:$PATH" sh captured.sh' 2>&1
+  # nohup launch succeeds; the device-side result is read after reconnecting.
+  [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'log'), ($output -join "\n"))
+  exit 0
+}
+if ($command -match 'shell cat .*wifi.*log') {
+  [IO.File]::ReadAllText((Join-Path $env:QA_WIFI_DIRECTORY 'log')); exit 0
+}
+exit 0
+`);
+    for (const scenario of ['disable-refused', 'restore-refused', 'status-denied', 'unknown', 'delayed', 'success']) {
+      writeFileSync(join(directory, 'state'), 'enabled\n');
+      writeFileSync(join(directory, 'calls'), '');
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+        encoding: 'utf8', timeout: 30000, env: { ...process.env,
+          QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
+      });
+      assert.ifError(result.error);
+      const success = ['delayed', 'success'].includes(scenario);
+      assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
+      assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
+      if (success) {
+        const output = JSON.parse(result.stdout);
+        assert.equal(output.reconnected, true);
+        assert.match(output.log, /^QA_WIFI_DISABLED$/m);
+        assert.match(output.log, /^QA_WIFI_RESTORED$/m);
+        assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
+      } else {
+        assert.match(result.stderr, /Wi-Fi nao confirmou/);
+      }
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
