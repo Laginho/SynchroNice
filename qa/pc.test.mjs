@@ -61,3 +61,33 @@ test('PC cleanup protects previous, unlisted, changed files and unsafe manifests
     assert.equal(readFileSync(previous, 'utf8'), 'previous');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('PC accepts a drive root as Pasta without touching the real drive root', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'syn-024-root-'));
+  const drive = [...'ZYXWVUTSRQPONMLKJIH'].find(letter => !existsSync(`${letter}:\\`));
+  assert.ok(drive, 'a free drive letter is needed for the temporary Pasta');
+  const root = `${drive}:\\`;
+  const mounted = spawnSync('subst.exe', [`${drive}:`, directory], { encoding: 'utf8' });
+  assert.equal(mounted.status, 0, mounted.stderr);
+  try {
+    const config = join(directory, 'config.json');
+    writeFileSync(config, JSON.stringify({ pasta: root }));
+    const run = action => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+      resolve('qa/pc.ps1'), action, '-Config', config, '-RunDir', join(directory, 'run'),
+      '-Path', `${root}synchronice-qa-test-root.txt`], { encoding: 'utf8', timeout: 30000 });
+    const listed = run('list-files');
+    assert.ifError(listed.error);
+    assert.equal(listed.status, 0, listed.stderr);
+    writeFileSync(join(directory, 'synchronice-qa-test-root.txt'), 'new QA file');
+    const tracked = run('track');
+    assert.equal(tracked.status, 0, tracked.stderr);
+    rmSync(join(directory, 'synchronice-qa-test-root.txt'));
+    const cleaned = run('clean');
+    assert.equal(cleaned.status, 0, cleaned.stderr);
+    assert.deepEqual(JSON.parse(cleaned.stdout), [{ path: `${root}synchronice-qa-test-root.txt`, destination: 'ja ausente' }]);
+  } finally {
+    const unmounted = spawnSync('subst.exe', [`${drive}:`, '/D'], { encoding: 'utf8' });
+    assert.equal(unmounted.status, 0, unmounted.stderr);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
