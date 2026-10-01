@@ -67,3 +67,24 @@ Sem o Redmi alcançável, o critério 4 vira `Débito humano:`.
   em `:app:compileDebugUnitTestKotlin` por `Unresolved reference
   'DebugPairActivity'`, ausente como previsto. Rust 51, UI 47 e parser QA 5
   passaram; protocol-client estava UP-TO-DATE.
+- Verde: `gate.ps1 -TestsOnly` saiu 0, `gate: passou` e `BUILD SUCCESSFUL`.
+  Os três testes novos passaram (QR válido, inválido e extra ausente), sem
+  alterar testes nos commits de implementação. A activity usa o AppState da
+  Application, grava pelo `acceptQr`, abre MainActivity e termina.
+- Verificação da primitiva: harness temporário com adb sintético executou
+  o wrapper real com config no formato do PC (`nome_instancia` e `token`),
+  conferiu `--es qr`, JSON completo, porta 47820, IP explícito e rota padrão.
+  Config inválido e IPv4 inválido saíram 1 sem disparar a activity. O harness
+  foi removido. Um roundtrip de JSON sintético pelo shell adb real sem fio
+  confirmou a preservação das aspas no Windows PowerShell. Nenhum token real
+  foi exibido ou incluído no ticket.
+- Verificação física: `powershell -ExecutionPolicy Bypass -File
+  .\qa\phone.ps1 pair` reconectou o Redmi sem fio, mas saiu 1 na preparação
+  com `SecurityException: Permission denial ... WRITE_SECURE_SETTINGS`,
+  antes de ler o config ou disparar a activity. Mesma indisponibilidade de
+  infraestrutura registrada no SYN-022; nenhuma configuração de segurança
+  foi alterada e o Par real foi preservado.
+- Débito humano: SYN-023 critério 4 — Desparear pela engrenagem, executar
+  `pair` com APK de debug, ler `Na rede` no dump e confirmar `HEAD /listen`
+  200 no Redmi. O shell nega WRITE_SECURE_SETTINGS, impedindo a preparação
+  do kit; não houve execução física do pareamento nem evidência de presença.
