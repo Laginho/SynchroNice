@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -232,3 +232,54 @@ Relatório: `.scratch/qa-runs/2026-09-30-024-review.md`.
   foi usado. Os débitos já registrados permanecem. Nenhuma nova operação
   de Wi-Fi, Par ou arquivo real do aparelho. Sem merge nem linha de ledger;
   a retomada na branch existente cobre somente os quatro ❌ acima.
+
+#### Retomada stage 2 (2026-09-30)
+
+Os quatro achados da revisão foram corrigidos na branch `syn-024`, sobre
+a mesma base `sweatshop/2026-09-30-2146`. Callers conferidos antes dos testes:
+`list-files`, `track` e `clean` compartilham a normalização da Pasta;
+todos os comandos Node do PC passam pelo wrapper; `push` e `share`
+compartilham reserva/registro; `track`, upload e limpeza usam `Phone-Hash`.
+Casos degenerados cobertos: raiz de unidade, nome acentuado com console
+850, ausência de confirmação do Wi-Fi, upload vazio, prefixo maior que
+64 KiB, upload completo com resposta perdida e arquivo já ausente.
+
+- Critério 6, Unicode: teste vermelho `35d49b9` aceitou indevidamente o
+  arquivo anterior (`track` saiu 0, esperado 1). Correção `a3f0c8e` define
+  também `[Console]::OutputEncoding`, preservando o baseline e a saída
+  Unicode em todas as ações do wrapper. Teste verde com PowerShell 5.1.
+- Critério 6, Pasta na raiz: teste vermelho `4ac9157` falhou no baseline
+  porque `Z:\` virou `Z:`. Correção `ee5789b` preserva o separador da raiz.
+  Teste verde cobre `list-files`, `track` e `clean`, com `subst` temporário,
+  sem escrever na raiz real do disco. A unidade temporária foi desmontada.
+- Critérios 4 e 9, Wi-Fi: teste vermelho `e8494cf` devolveu sucesso após
+  negativa de `CHANGE_WIFI_STATE`. Correção `d9a7ecc` exige marcadores de
+  desligamento e restauração em log exclusivo da execução e recusa erros
+  de permissão. Teste verde também cobre negativa assíncrona, falha de
+  restauração e log sem confirmação; reconexão adb sozinha não basta.
+- Critério 6, upload interrompido: teste vermelho `ccf93b3` falhou ao
+  limpar o parcial registrado sem hash. Correção `25f052f` registra caminho
+  e SHA-256 da fonte antes do push. Na recuperação, confere a fonte aberta
+  contra esse hash e calcula, em blocos, o hash de seu prefixo com o tamanho
+  do remoto; só remove conteúdo correspondente. O teste verde cobre dez
+  cenários: parcial, vazio, prefixo acima de 64 KiB, completo, remoto
+  alterado, fonte alterada, remoto maior, ausente, sucesso e colisão.
+  Arquivo alheio é preservado em todos. Manifestos antigos sem evidência
+  da fonte permanecem recusados; a documentação explica manter a fonte.
+
+Dois erros de harness foram corrigidos em commits só de teste, antes da
+prova vermelha válida: `87f73a8` citava nomes de parâmetros PowerShell como
+strings; `35d49b9` corrigiu isso. `c30cd73` perdeu o escape de colchete no
+adb falso; `ccf93b3` passou a comparar literalmente. Nenhum desses erros
+mudou o contrato. Cada prova vermelha válida teve exatamente 1 teste
+falhando; cada correção de código foi commitada sem tocar arquivos de teste.
+
+Gate completo em primeiro plano: código 0 (`GATE_EXIT=0`), `gate: passou`,
+`BUILD SUCCESSFUL in 10s`. Rust 51, UI 47, QA 13, Android app 59 e
+protocol-client 62: **232 testes**, zero falhas. XMLs Android confirmam
+zero erros e skips; fmt, clippy, typecheck e lint passaram.
+`git diff --check` passou. Logs locais em
+`.scratch/qa-runs/syn-024-reopened/` (ignorados pelo git).
+Nenhuma nova operação no Redmi nem débito adicional: os débitos anteriores
+dos critérios 3–8 continuam registrados acima. Sem merge ou ledger nesta
+etapa; entregue para nova revisão dos quatro achados.
