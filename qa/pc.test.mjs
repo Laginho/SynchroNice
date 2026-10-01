@@ -21,14 +21,15 @@ test('PC cleanup protects previous, unlisted, changed files and unsafe manifests
         resolve('qa/pc.ps1'), action, '-Config', config, '-RunDir', runDir,
         ...(path ? ['-Path', path] : [])];
       const command = '[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(850); & ' +
-        args.map(value => "'" + value.replaceAll("'", "''") + "'").join(' ');
+        args.map(value => value.startsWith('-') ? value : "'" + value.replaceAll("'", "''") + "'").join(' ');
       const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 30000 });
       assert.ifError(result.error);
       return result;
     };
     writeFileSync(previous, 'previous');
-    assert.equal(run('list-files').status, 0);
+    const listed = run('list-files');
+    assert.equal(listed.status, 0, listed.stdout + listed.stderr);
     const refused = run('track', previous);
     assert.equal(refused.status, 1, refused.stdout + refused.stderr);
     assert.equal(readFileSync(previous, 'utf8'), 'previous');
