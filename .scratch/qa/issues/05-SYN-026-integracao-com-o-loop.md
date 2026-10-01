@@ -1,5 +1,5 @@
 # SYN-026: Kit de QA no loop — stage 3, `proxy` e pós-run do foreman
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-024, SYN-025
 Review: human
@@ -54,3 +54,8 @@ O loop passa a usar o kit, com as regras escritas só neste repo. Nada muda na
 Nenhum: o ticket altera apenas documentação.
 
 ## Comments
+
+- Stage 2 (2026-10-01): SYN-024 e SYN-025 estão `done` na base de sessão
+  `sweatshop/2026-09-30-2146`. Sem commit de testes red: a seção de testes
+  dispensa testes novos porque o escopo é apenas documentação. A verificação
+  será a leitura dos quatro critérios e o gate completo.
