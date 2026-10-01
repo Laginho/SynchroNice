@@ -9,16 +9,24 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.util.Size
 import android.widget.Toast
+import android.webkit.MimeTypeMap
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +35,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
@@ -172,12 +181,53 @@ internal class AppState(
     internal val messages = mutableStateListOf<ChatMessage>()
     private val stagedPastes = mutableStateListOf<File>()
     val pasteTray: List<File> get() = stagedPastes
+    val composer = TextFieldState()
+    var sendingComposer by mutableStateOf(false)
+        private set
 
     /** Copia antes de devolver o callback: a permissão do teclado é temporária. */
     fun pasteUri(uri: Uri): Boolean {
         if (!isForeignContentUri(appContext, uri)) return false
-        stagedPastes.add(copyToStaging(appContext, uri))
+        stagedPastes.add(copyToStaging(appContext, uri) {
+            val mime = appContext.contentResolver.getType(uri)
+            val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "bin"
+            "imagem-${System.currentTimeMillis()}.$extension"
+        })
         return true
+    }
+
+    fun removePaste(file: File) {
+        if (stagedPastes.remove(file)) file.parentFile?.deleteRecursively()
+    }
+
+    fun clearPasteTray() {
+        stagedPastes.toList().forEach(::removePaste)
+    }
+
+    suspend fun sendComposer() {
+        if (sendingComposer || pairing == null) return
+        sendingComposer = true
+        // A saída da tela não interrompe um lote que já começou a entrar nos Pendentes.
+        withContext(NonCancellable) {
+            try {
+                val batch = pasteTray.toList()
+                val text = composer.text.toString()
+                for (file in batch) {
+                    queueFile(file)
+                    removePaste(file)
+                }
+                if (text.isNotBlank()) {
+                    val id = addOutgoing(text)
+                    queueText(id, text)
+                    if (messages.any { it.localId == id && it.delivery == Delivery.FAILED }) return@withContext
+                }
+                composer.clearText()
+            } catch (error: Exception) {
+                connectionError = "Não foi possível enviar: ${error.message ?: "erro de disco"}"
+            } finally {
+                sendingComposer = false
+            }
+        }
     }
 
     internal val resolver = NsdInstanceResolver(appContext)
@@ -792,6 +842,7 @@ private fun PairingScreen(state: AppState) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> Unit) {
     val context = LocalContext.current
@@ -806,8 +857,11 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
     }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    var draft by remember { mutableStateOf("") }
+    val draft = state.composer
     var viewedImage by remember { mutableStateOf<ChatMessage?>(null) }
+    BackHandler(enabled = state.pasteTray.isNotEmpty()) {
+        if (!state.sendingComposer) state.clearPasteTray()
+    }
     ConnectionLifecycle(state)
 
     LaunchedEffect(state.messages.size) {
@@ -840,25 +894,50 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
                 }
             }
         }
+        if (state.pasteTray.isNotEmpty()) {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 160.dp).testTag("paste-tray")) {
+                items(state.pasteTray, key = { it.absolutePath }) { file ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(file.name, Modifier.weight(1f), maxLines = 2)
+                        TextButton(
+                            enabled = !state.sendingComposer,
+                            onClick = { state.removePaste(file) },
+                            modifier = Modifier.semantics { contentDescription = "Remover ${file.name}" },
+                        ) { Text("✕") }
+                    }
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onCamera, modifier = Modifier.testTag("camera").semantics { contentDescription = "Tirar foto" }) {
                 Text("📷")
             }
             OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier.weight(1f).testTag("composer"),
+                state = draft,
+                readOnly = state.sendingComposer,
+                modifier = Modifier.weight(1f).testTag("composer").contentReceiver { content ->
+                    content.consume { item ->
+                        val uri = item.uri
+                        if (uri == null || state.sendingComposer) false
+                        else {
+                            try {
+                                state.pasteUri(uri)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Não foi possível colar este arquivo.", Toast.LENGTH_LONG).show()
+                            }
+                            // URIs recusadas também não devem virar texto no composer.
+                            true
+                        }
+                    }
+                },
                 placeholder = { Text("Mensagem") },
-                maxLines = 4,
+                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
             )
             Button(
-                enabled = draft.isNotBlank(),
+                enabled = !state.sendingComposer && (draft.text.isNotBlank() || state.pasteTray.isNotEmpty()),
                 modifier = Modifier.testTag("send"),
                 onClick = {
-                    val text = draft
-                    val id = state.addOutgoing(text)
-                    draft = ""
-                    scope.launch { state.queueText(id, text) }
+                    scope.launch { state.sendComposer() }
                 },
             ) { Text("Enviar") }
         }

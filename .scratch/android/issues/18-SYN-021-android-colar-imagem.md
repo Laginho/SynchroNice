@@ -1,5 +1,5 @@
 # SYN-021: Colar imagem no chat do Android, numa bandeja como a do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -90,3 +90,25 @@ pelo Gboard provavelmente fica 👤.
   decidiu o resto.
 - Deixou de ser `Blocked by: SYN-020`: a dependência era a decisão de
   comportamento, não código. Agora as duas bandejas se comportam igual.
+
+#### Stage 2 (2026-10-01)
+
+- Implementado no branch `syn-021`, base `sweatshop/2026-10-01-2019`.
+  Bandeja em memória no AppState, cópia síncrona no recebimento, nomes por
+  DISPLAY_NAME ou MIME, filtro de URI própria, remoção e limpeza do staging.
+  O composer usa TextFieldState e contentReceiver; itens de texto restantes
+  seguem para o campo. Enviar enfileira os arquivos em ordem e o texto por
+  último. A bandeja tem remoção individual e Voltar limpa antes de sair.
+- Prova red-green: `c152121` adicionou o primeiro teste, vermelho por ausência
+  de pasteUri/pasteTray; `6b9122e` implementou a cópia e o gate de testes passou.
+  `8ce2234` adicionou os casos de envio/limpeza/segurança/nome, vermelho por
+  ausência de composer/sendComposer/removePaste/clearPasteTray. Nenhum commit
+  de produção alterou testes.
+- Gate completo: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` passou.
+  Rust: 52; UI: 47; kit QA: 14; protocolo JVM: 62; app Android: 67 testes,
+  incluindo 8 em PasteTrayTest. Zero falhas. fmt, Clippy, TypeScript e lint
+  Android passaram. Logs locais em `.scratch/run-log/syn-021-*.log`.
+- Revisão de escopo e `git diff --check` concluídas. Câmera e Compartilhar
+  mantêm seus fluxos diretos; o fallback de nome específico da colagem é
+  opcional no helper compartilhado. Critério 7 no aparelho permanece para o
+  stage 3, conforme Verification; não foi executado neste stage.

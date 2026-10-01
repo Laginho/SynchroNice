@@ -100,11 +100,11 @@ internal fun isForeignContentUri(context: Context, uri: Uri): Boolean {
     return context.packageManager.resolveContentProvider(authority, 0)?.packageName != context.packageName
 }
 
-internal fun copyToStaging(context: Context, uri: Uri): File {
+internal fun copyToStaging(context: Context, uri: Uri, fallbackName: (() -> String)? = null): File {
     val resolver = context.contentResolver
     val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor: Cursor ->
         if (cursor.moveToFirst()) cursor.getString(0) else null
-    } ?: uri.lastPathSegment ?: "arquivo"
+    }?.takeIf { it.isNotBlank() } ?: fallbackName?.invoke() ?: uri.lastPathSegment ?: "arquivo"
     val directory = File(context.cacheDir, "incoming/${UUID.randomUUID()}").apply { mkdirs() }
     val file = File(directory, safeFileName(name))
     try {
