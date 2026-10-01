@@ -46,3 +46,38 @@ exit 0
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('wifi-off requires successful disable and restore, not just a connected adb', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'syn-024-wifi-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    writeFileSync(adb, `
+$command = $args -join ' '
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($command -match 'nohup') {
+  if ($env:QA_FAKE_SCENARIO -eq 'launch-denied') { 'java.lang.SecurityException: CHANGE_WIFI_STATE'; exit 1 }
+  exit 0
+}
+if ($command -match 'shell cat .*wifi.*log') {
+  switch ($env:QA_FAKE_SCENARIO) {
+    'async-denied' { 'java.lang.SecurityException: CHANGE_WIFI_STATE' }
+    'restore-denied' { 'QA_WIFI_DISABLED'; 'java.lang.SecurityException: CHANGE_WIFI_STATE' }
+    'unproven' { 'nohup started' }
+    default { 'QA_WIFI_DISABLED'; 'QA_WIFI_RESTORED' }
+  }
+}
+exit 0
+`, 'utf8');
+    for (const scenario of ['launch-denied', 'async-denied', 'restore-denied', 'unproven', 'success']) {
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+        encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_FAKE_SCENARIO: scenario },
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, scenario === 'success' ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
+      if (scenario === 'success') assert.equal(JSON.parse(result.stdout).reconnected, true);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
