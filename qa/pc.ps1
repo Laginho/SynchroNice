@@ -31,7 +31,8 @@ try {
             $downloads = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders').'{374DE290-123F-4565-9164-39C4925E467B}'
             $folder = Join-Path ([Environment]::ExpandEnvironmentVariables($downloads)) 'SynchroNice'
         }
-        $folder = [IO.Path]::GetFullPath($folder).TrimEnd('\','/')
+        $folder = [IO.Path]::GetFullPath($folder)
+        if ($folder -ne [IO.Path]::GetPathRoot($folder)) { $folder = $folder.TrimEnd('\','/') }
         $manifest = Join-Path $RunDir 'pc-files.json'
         $state = $null
         if (Test-Path -LiteralPath $manifest) {
