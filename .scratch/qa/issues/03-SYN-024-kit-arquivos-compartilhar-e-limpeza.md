@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -99,6 +99,37 @@ Sem o Redmi alcançável, os critérios 3–8 viram `Débito humano:`.
   serializa o baseline como objeto `{value, Count}`, permitindo `track` anterior.
 
 ## Comments
+
+- 2026-09-30, stage 2 concluído: `95a46e1` é o commit vermelho do parser,
+  `5d65455` o da preparação, `ced5962` o da limpeza PC. Implementações
+  `44c8161`, `6ad0599` e `50f3d44` não alteram arquivos de teste. Vermelhos
+  reais: módulo ausente; abortar em preparação opcional negada; aceitar
+  arquivo anterior. Verdes: 3 testes MediaStore, 1 teste do wrapper Android
+  com quatro cenários e 1 teste do wrapper PC com proteções da limpeza.
+- 2026-09-30: gate completo em primeiro plano, código 0, `gate: passou`,
+  `BUILD SUCCESSFUL in 2m 25s`. Rust 51, UI 47, QA 10, Android app 59,
+  protocol-client 62 (`UP-TO-DATE`, XMLs confirmados): 229 testes, zero
+  falhas, erros ou skips. fmt, clippy, typecheck e lint passaram.
+  Sintaxe PowerShell/ESM e `git diff --check` também passaram.
+- Relatório: `.scratch/qa-runs/2026-09-30-024-redmi.md`. Clipboard real de
+  imagem/um/dois arquivos produziu quatro bolhas à direita, verificadas por
+  CDP e Computer Use. Limpeza PC enviou só os arquivos explicitamente
+  registrados à Lixeira; anteriores, fora da lista e alterados são
+  protegidos. Quatro Pendentes criados pelo QA foram descartados por id/nome
+  após enviar seus payloads à Lixeira, sem alegar entrega ao Redmi.
+- Débito humano: SYN-024 critério 3, D.1 completo — após a preparação
+  opcional corrigida, `share` aborta com `infraestrutura: aparelho bloqueado`;
+  não chegou ao push nem ao `am`. Nenhuma recusa de concessão foi observada.
+- Débito humano: SYN-024 critério 4 — `wifi-off 15` aborta pelo bloqueio
+  seguro antes do nohup; transição de presença e reconexão ainda não vistas.
+- Débito humano: SYN-024 critério 5, chegada dos quatro arquivos ao Redmi —
+  lado PC comprovado; `list-files` no celular aborta pelo bloqueio seguro.
+- Débito humano: SYN-024 critério 6, limpeza no MediaStore/rm do Redmi —
+  nenhum arquivo foi criado no aparelho; operação inacessível pelo bloqueio.
+- Débito humano: SYN-024 critério 7, resource-ids no dump real — `dump`
+  aborta pelo bloqueio seguro. Computer Use tentou a verificação visual:
+  viu as bolhas do PC, mas não há janela de espelhamento do Redmi.
+  Não houve alteração de PIN, permissões de segurança, Par ou Wi-Fi.
 
 - Proxy decided: acrescentar `qa/pc.test.mjs` aos Primary files e à linha do
   gate, testando `list-files`/`track`/`clean` reais com `powershell.exe` 5.1,
