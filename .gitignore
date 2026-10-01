@@ -12,3 +12,7 @@ android/.kotlin/
 android/*/build/
 /android/local.properties
 android/*.hprof
+
+# QA dependencies and local screenshots / stderr
+qa/node_modules/
+.scratch/qa-runs/*/

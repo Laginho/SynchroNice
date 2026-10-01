@@ -42,6 +42,10 @@ if (Test-Path "$root/pc/ui/copiaveis.test.ts") {
     Run-Step "node --test (pc/ui)" "$root" { node --test pc/ui/copiaveis.test.ts }
 }
 
+if (Test-Path "$root/qa/dump.test.mjs") {
+    Run-Step "node --test (qa)" "$root" { node --test qa/dump.test.mjs }
+}
+
 # Ancorado no settings, nao na pasta: o wrapper do Gradle entra antes do modulo,
 # e uma pasta android/ so com wrapper nao tem o que testar -- gradle falharia e
 # levaria o gate junto.
