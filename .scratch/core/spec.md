@@ -102,7 +102,8 @@ descartada ao encerrar, o Par persiste.
 - Mais de um Par (dois PCs ou dois celulares).
 - iOS, Linux, macOS.
 - Agrupar itens, álbuns, pastas compactadas.
-- Editar, apagar ou responder mensagens.
+- Editar ou responder mensagens, e apagar um Item só. Apagar a conversa
+  inteira nos dois aparelhos existe desde 2026-10-01 (SYN-019, SYN-027).
 - Publicação em loja ou instalador assinado.
 
 ## Further Notes
