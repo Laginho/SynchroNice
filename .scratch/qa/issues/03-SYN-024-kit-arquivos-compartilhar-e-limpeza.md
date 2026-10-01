@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -283,3 +283,46 @@ zero erros e skips; fmt, clippy, typecheck e lint passaram.
 Nenhuma nova operação no Redmi nem débito adicional: os débitos anteriores
 dos critérios 3–8 continuam registrados acima. Sem merge ou ledger nesta
 etapa; entregue para nova revisão dos quatro achados.
+
+#### Review stage 3 (2026-10-01)
+
+Reaberto: resta uma falha dos critérios 4 e 9, que precisa de novo teste.
+Os outros três achados anteriores estão corrigidos. Fontes e testes committed
+não foram alterados nesta revisão. Relatório completo:
+`.scratch/qa-runs/2026-10-01-024-review.md`.
+
+- ❌ Critérios 4 e 9 — recusa silenciosa do Wi-Fi ainda passa. Os marcadores
+  de `qa/phone.ps1:214–215` dependem somente de `svc` sair 0; os guards de
+  `:241–244` aceitam esses marcadores sem conferir o estado. O comando Wi-Fi
+  do AOSP ignora o boolean de `setWifiEnabled` e sai 0; o serviço Android 16
+  pode retornar false silenciosamente sob `DISALLOW_CHANGE_WIFI_STATE` para
+  caller sem papel DO/PO, inclusive shell. O wrapper real executou seu próprio
+  script gerado com esse comportamento simulado: saiu 0, stderr vazio,
+  `reconnected=true`, os dois marcadores, estado ainda `enabled`. Prova local:
+  `2026-10-01-024-review/wifi-silent-refusal.*`. Nenhuma restrição real do
+  Redmi foi afirmada. A correção Wi-Fi anterior permanece parcial; a recusa
+  silenciosa não foi identificada na revisão de 2026-09-30 (miss daquela
+  passada). Falta regressão no seam existente de `qa/phone.test.mjs` e
+  confirmação das transições no script de `qa/phone.ps1`, mantendo a
+  restauração no aparelho e acesso somente sem fio.
+- ✅ Critério 6 — Unicode/console 850, Pasta na raiz e limpeza de upload
+  interrompido aprovados. Provas vermelhas committed reproduzidas contra as
+  versões anteriores: `35d49b9`, `4ac9157`, `e8494cf`, `ccf93b3`; cada uma
+  executou um teste, que falhou pelo motivo esperado. As quatro provas
+  existentes passam no HEAD; não cobrem a recusa silenciosa nova.
+- Standards: Primary files e separação teste/código aprovados; zero smells.
+  Observação não bloqueante: `to-review` foi committed no handoff documental,
+  em vez do último commit de código. Os três `Proxy decided` conferidos:
+  teste PC/baseline; adb falso e critério 9; raiz do Dialog e preparação
+  opcional apenas para `SecurityException`.
+- Rebase na sessão `sweatshop/2026-09-30-2146` (`1cadfce`) sem conflito;
+  HEAD revisado `cde7648` remapeado a `3cd1413`, revisão anterior `9ca8337`
+  remapeada a `6b1a1df`. Fontes/testes ficaram iguais. Gate completo em
+  primeiro plano: código 0, `GATE_EXIT=0`, `gate: passou`,
+  `BUILD SUCCESSFUL in 11s`. Rust 51, UI 47, QA 13, Android app 59,
+  protocol-client 62: 232 testes, zero falhas; XMLs sem erros/skips.
+  fmt, clippy, typecheck, lint e `git diff --check` passaram.
+- `adb devices -l` e `adb mdns services` sem aparelhos/serviços. Débitos
+  anteriores do Redmi mantidos, sem operação real nem débito adicional.
+  CLEAN-019 permanece separado. Nenhuma alteração de critério, merge ou
+  linha de ledger; a próxima etapa 2 cobre somente o ❌ acima.
