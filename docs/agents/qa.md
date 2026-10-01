@@ -73,6 +73,8 @@ desligamento/restauração. Código 0 do `svc` sozinho não confirma a ação;
 recusa silenciosa, consulta negada ou estado não confirmado geram falha.
 A linha `Wifi is enabled/disabled` vem do
 [WifiShellCommand do AOSP](https://android.googlesource.com/platform/packages/modules/Wifi/+/refs/heads/main/service/java/com/android/server/wifi/WifiShellCommand.java#2867).
+Depois de reconectar o adb, aguarda até 20 segundos pelos dois marcadores;
+o transporte pode voltar antes de o trap terminar de confirmar a restauração.
 Enquanto a chamada aguarda, outra chamada a `pc.ps1 presence` permite observar 204;
 depois da reconexão, espere 200. A descoberta mDNS atualiza a porta quando
 o IP foi informado. Não interprete apenas `reconnected=true` como prova da

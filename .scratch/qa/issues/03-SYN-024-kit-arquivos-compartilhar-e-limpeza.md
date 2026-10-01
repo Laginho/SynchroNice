@@ -1,5 +1,5 @@
 # SYN-024: Kit de QA — arquivos, Compartilhar, Wi-Fi fora e limpeza
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-022
 Review: agent
@@ -358,3 +358,20 @@ Novo vermelho: 1 teste falhou em `log-pending`, código 1 (esperado 0),
 `Wi-Fi nao confirmou desligar e restaurar: QA_WIFI_DISABLED`. Os seis
 cenários anteriores passaram antes dessa falha. A espera do log será
 corrigida em commit de código separado e o gate repetido.
+
+Segundo vermelho committed em `0d74746`; a correção aguarda até 20 segundos
+pelo log completo após a reconexão e para imediatamente diante de erro
+explícito. Verde: 1 teste passou, zero falhas/skips, agora sete cenários.
+Implementações em commits separados dos testes; a última inclui este
+handoff e `Stage: to-review` depois do gate verde.
+
+Gate final completo em primeiro plano, aguardado até terminar: código 0,
+`GATE_EXIT=0`, `gate: passou`, `BUILD SUCCESSFUL in 9s`. Rust 51, UI 47,
+QA 14, Android app 59 e protocol-client 62: **233 testes**, zero falhas.
+Android `UP-TO-DATE`, XMLs confirmados sem falhas, erros ou skips.
+fmt, clippy, typecheck, lint, sintaxe PowerShell e `git diff --check` passaram.
+Log local ignorado: `.scratch/qa-runs/2026-10-01-024-state/gate-final.log`.
+Os testes usam somente ambiente temporário/adb falso; não houve operação
+no Redmi nem alteração do Par/Wi-Fi real. Débitos anteriores mantidos,
+sem débito adicional. Entrega para stage 3 na branch `syn-024`, sem merge
+ou ledger de encerramento nesta etapa.

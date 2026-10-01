@@ -256,7 +256,12 @@ sleep __SECONDS__
                 Start-Sleep -Seconds 1
             }
             if (-not $ready) { throw 'infraestrutura: Wi-Fi nao reconectou o adb; confira o aparelho' }
-            $log = Adb-Run @('shell','cat',$logPath)
+            for ($attempt = 0; $attempt -lt 21; $attempt++) {
+                $log = Adb-Run @('shell','cat',$logPath)
+                if ($log -match 'Error|Exception|Permission Denial' -or
+                    ($log -match '(?m)^QA_WIFI_DISABLED\r?$' -and $log -match '(?m)^QA_WIFI_RESTORED\r?$')) { break }
+                if ($attempt -lt 20) { Start-Sleep -Seconds 1 }
+            }
             if ($log -match 'Error|Exception|Permission Denial' -or
                 $log -notmatch '(?m)^QA_WIFI_DISABLED\r?$' -or $log -notmatch '(?m)^QA_WIFI_RESTORED\r?$') {
                 throw "Wi-Fi nao confirmou desligar e restaurar: $log"
