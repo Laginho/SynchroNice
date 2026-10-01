@@ -208,20 +208,28 @@ if ($command -match 'nohup') {
   exit 0
 }
 if ($command -match 'shell cat .*wifi.*log') {
+  if ($env:QA_FAKE_SCENARIO -eq 'log-pending') {
+    $pending = Join-Path $env:QA_WIFI_DIRECTORY 'pending'
+    if (Test-Path -LiteralPath $pending) {
+      Remove-Item -LiteralPath $pending
+      'QA_WIFI_DISABLED'; exit 0
+    }
+  }
   [IO.File]::ReadAllText((Join-Path $env:QA_WIFI_DIRECTORY 'log')); exit 0
 }
 exit 0
 `);
-    for (const scenario of ['disable-refused', 'restore-refused', 'status-denied', 'unknown', 'delayed', 'success']) {
+    for (const scenario of ['disable-refused', 'restore-refused', 'status-denied', 'unknown', 'delayed', 'success', 'log-pending']) {
       writeFileSync(join(directory, 'state'), 'enabled\n');
       writeFileSync(join(directory, 'calls'), '');
+      if (scenario === 'log-pending') writeFileSync(join(directory, 'pending'), '');
       const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
         resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
         encoding: 'utf8', timeout: 30000, env: { ...process.env,
           QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
       });
       assert.ifError(result.error);
-      const success = ['delayed', 'success'].includes(scenario);
+      const success = ['delayed', 'success', 'log-pending'].includes(scenario);
       assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
       assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
       if (success) {

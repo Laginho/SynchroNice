@@ -349,3 +349,12 @@ continua tentando religar mesmo após recusa, consulta negada ou timeout.
 Verde pelo mesmo comando: 1 teste passou, zero falhas/skips, seis cenários.
 Sintaxe PowerShell e `git diff --check` passaram. Nenhuma operação no Redmi;
 os débitos existentes permanecem. Gate completo será registrado no handoff.
+
+O primeiro gate da retomada passou com 233 testes. Antes do handoff,
+foi acrescentado o caso degenerado criado pela confirmação assíncrona:
+adb já conectado com o log ainda sem o marcador de restauração. Pelo mesmo
+seam, o adb falso devolve log parcial na primeira leitura e completo depois.
+Novo vermelho: 1 teste falhou em `log-pending`, código 1 (esperado 0),
+`Wi-Fi nao confirmou desligar e restaurar: QA_WIFI_DISABLED`. Os seis
+cenários anteriores passaram antes dessa falha. A espera do log será
+corrigida em commit de código separado e o gate repetido.
