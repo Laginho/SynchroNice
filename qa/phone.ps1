@@ -1,12 +1,14 @@
 param(
     [Parameter(Mandatory, Position=0)]
-    [ValidateSet('tap','type','key','dump','screenshot','open','stop')][string]$Action,
+    [ValidateSet('tap','type','key','dump','screenshot','open','stop','pair')][string]$Action,
     [string]$Serial = $env:SYNCHRONICE_ADB_SERIAL,
     [ValidateSet('id','text','description')][string]$By = 'id',
     [string]$Value,
     [string]$Text,
     [string]$Key,
     [string]$Path,
+    [string]$Config = "$env:APPDATA/dev.synchronice.pc/config.json",
+    [string]$Ip,
     [string]$Adb = $env:SYNCHRONICE_ADB
 )
 $ErrorActionPreference = 'Stop'
@@ -106,5 +108,28 @@ try {
         }
         'open' { Adb-Run @('shell','am','start','-n','synchronice.android/.MainActivity') }
         'stop' { Adb-Run @('shell','am','force-stop','synchronice.android') }
+        'pair' {
+            $pair = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
+            if ($pair.instance_name -cnotmatch '^synchronice-[0-9a-fA-F]{8}$' -or
+                $pair.token -cnotmatch '^[0-9a-fA-F]{32}$') { throw 'config.json sem Par valido' }
+            if (-not $Ip) {
+                # Same route lookup as the PC QR: UDP connect selects an address without sending data.
+                $socket = [Net.Sockets.UdpClient]::new()
+                try {
+                    $socket.Connect('8.8.8.8', 80)
+                    $Ip = $socket.Client.LocalEndPoint.Address.ToString()
+                } finally { $socket.Dispose() }
+            }
+            $address = $null
+            if ($Ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$' -or
+                -not [Net.IPAddress]::TryParse($Ip, [ref]$address) -or $address.ToString() -ne $Ip -or
+                $Ip -eq '0.0.0.0') { throw 'Informe -Ip como IPv4 valido do PC' }
+            $json = @{ instance_name=$pair.instance_name; port=47820; token=$pair.token; ip=$Ip } | ConvertTo-Json -Compress
+            # Preserve JSON quotes through Windows PowerShell native argv and the adb shell.
+            $quoted = "'" + $json.Replace('"', '\"') + "'"
+            $result = Adb-Run @('shell','am','start','-W','-n','synchronice.android/.DebugPairActivity','--es','qr',$quoted)
+            if ($result -match 'Error:|Exception') { throw 'pair falhou: instale o APK de debug e confira a activity' }
+            $result
+        }
     }
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }

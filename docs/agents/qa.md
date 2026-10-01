@@ -45,6 +45,21 @@ Execute da raiz do repo (prefixo de todos os exemplos:
 | Tecla | `key -Key KEYCODE_BACK` | esconde o teclado, por exemplo |
 | Árvore | `dump` | XML com textos, descrições, resource-ids e bounds |
 | Print | `screenshot -Path '.scratch/qa-runs/2026-09-30-redmi/phone.png'` | PNG local; crie o diretório antes |
+| Parear sem câmera | `pair` ou `pair -Ip '192.168.18.12'` | lê o Par do PC, dispara a activity de debug e abre o chat |
+
+`pair` só funciona com o **APK de debug**: `DebugPairActivity` e sua declaração
+exportada existem apenas no source set `debug`, nunca no release. O extra
+string `qr` recebe o JSON completo e passa pelo mesmo `acceptQr` do scanner;
+JSON inválido ou ausente apenas encerra a activity, sem criar Par.
+O wrapper lê `instance_name` e `token` de
+`%APPDATA%/dev.synchronice.pc/config.json` (`-Config` troca esse caminho),
+usa a porta 47820 e o IPv4 escolhido pela rota padrão do PC, como o QR real.
+`-Ip` sobrescreve o IPv4, por exemplo quando há VPN. O token não deve ir para
+relatórios. O pareamento substitui o Par anterior do celular.
+No Redmi, use depois de Desparear pela engrenagem (I.2–I.4); B.2 continua
+pela câmera real. Confira o dump com presença `Na rede` e `pc.ps1 presence`
+com status 200. Falta de aparelho ou negativa das permissões do shell é
+falha de infraestrutura; o atalho não contorna os pré-requisitos do kit.
 
 `adb input text` aceita aqui ASCII imprimível sem `%`. Texto Unicode não é
 suportado por essa primitiva e gera erro explícito. Espaços e caracteres de

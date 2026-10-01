@@ -63,3 +63,7 @@ Sem o Redmi alcançável, o critério 4 vira `Débito humano:`.
   `MainActivity` e pelos testes de pareamento, entrega e presença; não será
   alterado. A primitiva nova passa pelo mesmo `Adb-Run` das demais ações;
   os guardas de transporte sem fio e tela desbloqueada continuam aplicáveis.
+- Vermelho: testes committed em `4d12967`; `gate.ps1 -TestsOnly` saiu 1
+  em `:app:compileDebugUnitTestKotlin` por `Unresolved reference
+  'DebugPairActivity'`, ausente como previsto. Rust 51, UI 47 e parser QA 5
+  passaram; protocol-client estava UP-TO-DATE.
