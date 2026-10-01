@@ -1,5 +1,5 @@
 # SYN-022: Kit de QA — o agente manda texto nos dois sentidos no Redmi
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
