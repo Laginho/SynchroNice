@@ -9,7 +9,10 @@ fn diretorio_isolado_desliga_autostart_e_padrao_o_mantem() {
         config::resolve_data_dir(padrao.clone(), Some(isolado.clone().into_os_string())),
         (isolado, false)
     );
-    assert_eq!(config::resolve_data_dir(padrao.clone(), None), (padrao, true));
+    assert_eq!(
+        config::resolve_data_dir(padrao.clone(), None),
+        (padrao, true)
+    );
 }
 
 #[test]
