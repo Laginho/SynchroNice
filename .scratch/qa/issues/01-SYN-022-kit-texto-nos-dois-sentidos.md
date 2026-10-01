@@ -1,5 +1,5 @@
 # SYN-022: Kit de QA — o agente manda texto nos dois sentidos no Redmi
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -148,3 +148,33 @@ não verificados. Isso não bloqueia: com o gate verde, o ticket segue para
   `HEAD /listen` 200 com Redmi no chat) e critério 7 (C.1/C.2 completos) —
   Redmi nega `settings put global` com `WRITE_SECURE_SETTINGS`; relatório
   registra 👤, sem tratar isso como bug ou modificar segurança do aparelho.
+
+#### Resolution (2026-09-30)
+
+Verdict: Approve
+
+- Standards: 0 violações e 0 smells relevantes. Primary files respeitados;
+  no Android, só semântica e tags mudaram. O commit `7d0028a` contém os
+  testes/fixture; `cc9430e` e `279985c` não alteram testes.
+- Spec: 0 achados. Critérios 1, 2 e 6 atendidos. Nos critérios 3–5 e 7,
+  a parte dependente do Redmi permanece no débito autorizado pelo Verification;
+  o relatório não afirma que C.1/C.2 passaram.
+- Decisão `Proxy decided` revisada: tratar `WRITE_SECURE_SETTINGS` como
+  indisponibilidade de infraestrutura, registrar 👤 e manter a segurança do
+  aparelho. A revisão reproduziu a mesma negativa e confirmou a recusa USB,
+  a reconexão automática sem fio e as primitivas de leitura do PC.
+- Arquivos: wrappers/parser e dependência em `qa/`, metadados em
+  `MainActivity.kt`, `gate.ps1`, `.gitignore`, `docs/agents/qa.md` e os
+  relatórios. Nenhuma correção de fonte foi necessária nesta revisão.
+- Red-green: testes e fixture do commit `7d0028a` reproduzidos num diretório
+  temporário sem implementação: 1 arquivo falhou com `ERR_MODULE_NOT_FOUND`.
+  No HEAD, os 5 testes do parser passaram pelo gate.
+- Gate completo em primeiro plano após rebase: `gate: passou`,
+  `BUILD SUCCESSFUL`; fmt, clippy, typecheck e lint passaram. Rust: 51;
+  UI: 47; parser QA: 5. Android app: 56; protocol-client: 62, ambos
+  `UP-TO-DATE`, contagens confirmadas nos XMLs, zero falhas/erros/skips.
+- Evidência da revisão: `.scratch/qa-runs/2026-09-30-redmi-review.md`.
+  PC aberto pelo kit com CDP, DOM e screenshot lidos, `list_items=[]`,
+  `HEAD /listen` 204. Nenhum Item enviado. Débitos acima preservados.
+- Integração: rebase sem mudanças e merge sem squash `13bba5b` na branch
+  `sweatshop/2026-09-30-2146`; encerramento e ledger no mesmo commit.
