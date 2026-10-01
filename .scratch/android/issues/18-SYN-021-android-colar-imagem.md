@@ -1,5 +1,5 @@
 # SYN-021: Colar imagem no chat do Android, numa bandeja como a do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -77,6 +77,13 @@ pelo Gboard provavelmente fica 👤.
   existe.
 
 ## Comments
+
+- Stage 2 (2026-10-01): primeiro teste vermelho pelo gate `-TestsOnly`:
+  `PasteTrayTest` não compila porque `pasteUri` e `pasteTray` ainda não existem.
+  Costura: bandeja do AppState. Callers preservados: ChatScreen envia texto;
+  câmera e ShareModel usam queueFile; ShareModel usa copyToStaging e o filtro
+  isForeignContentUri. Os testes seguintes cobrem envio vazio, remoção,
+  URI própria, nome ausente e falha de leitura.
 
 - Stage 1 (2026-10-01), grilling com o dono e o `proxy`. O dono decidiu pela
   bandeja como a do PC, em vez de enviar direto como a câmera; o `proxy`
