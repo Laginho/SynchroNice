@@ -1,5 +1,5 @@
 # SYN-020: Bandeja de envio no PC antes de mandar
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: agent
@@ -264,3 +264,71 @@ Verdict: Reopen — critério 11: imagem colada acima de 10 MiB ainda recebe min
   Na primeira execução `ProtocolClientTest` "arquivo grande aceito sem
   resposta" (Android, fora dos Primary files, sem diff em `android/`)
   falhou; passou na repetição completa.
+
+#### Resolution (2026-10-02) — re-revisão
+
+Verdict: Approve
+
+- **Standards — uma observação de processo; código aprovado.**
+  Revisão independente do diff desde a reabertura. O ciclo da correção
+  pulou `implementing` no commit de testes e registrou `to-review` em
+  um commit documental separado, divergindo da tabela de transições do
+  fluxo. Não é motivo mecânico para reabertura nem para reescrever o
+  histórico. Primary files e separação entre testes e produção foram
+  respeitados; os três commits novos têm assunto convencional, ID e
+  corpo explicativo. Nenhum smell relevante ou violação pendente no
+  código. A observação sobre corpos de commits da revisão anterior
+  continua registrada naquele bloco.
+- **Spec — zero achados; critério 11 corrigido.** `temPrevia` mantém o
+  limite inclusivo de 10 MiB, e `adicionarImagem` usa `File.size` para
+  criar a URL somente dentro dele. O `File` original segue na entrada
+  e no `send_bytes`. QA nativo confirmou print pequeno com miniatura,
+  print de 15.933.610 bytes sem miniatura e envio integral: SHA-256
+  idêntico no clipboard, no Item enviado e no arquivo recebido pelo
+  emulador. Nenhuma regressão ou ampliação de escopo encontrada no diff
+  novo. As verificações alcançáveis dos demais critérios passaram.
+- As duas decisões **Proxy decided** continuam respeitadas:
+  `previa_de_caminho` é somente leitura, limita os bytes da prévia e não
+  copia para a fila; a prévia permanece uma função de `lib.rs`, testada
+  no `mod tests` existente, sem seam adicional ou alteração de config,
+  capabilities ou protocolo.
+- Prova red-green repetida: os arquivos exatos do commit de testes
+  `181183e` (`113f18e` antes do rebase) falham com código 1 porque
+  `temPrevia` não existe. No código atual, **8/8** testes da bandeja
+  passam. O commit de produção `682b1ae` (`ef84226` antes do rebase)
+  não toca testes. A prova dos ciclos anteriores permanece no histórico
+  do ticket.
+- Rebase sobre a sessão `sweatshop/2026-10-01-2019` (`04b97c0`). O
+  único conflito foi a inserção de dois registros no histórico deste
+  ticket; ambos foram preservados. Comparação com a branch anterior
+  confirmou nenhum desvio nos Primary files de produção/testes. O
+  impedimento de acesso a `pc.exe` registrado em `Attempt 1 failed`
+  não se repetiu.
+- Gate completo após o rebase saiu **0**: fmt, Clippy e TypeScript
+  verdes; **PC 80/80** (5 unitários, 7 configuração, 5 outbox, 63
+  servidor), **UI 55/55** (47 existentes + 8 bandeja), **kit 14/14**,
+  `gradle check` verde. XMLs Android: **143 testes**, zero falhas,
+  erros ou pulados. O build debug de ambas as aplicações também passou.
+- Evidências e resultados por critério no
+  [relatório de re-revisão](../../qa-runs/2026-10-02-syn-020-rereview.md).
+  Sete Itens entregues nos dois aparelhos. A espera inicial de 10 s
+  durante o envio grande foi corrigida continuando as leituras, sem
+  reenviar. O aviso do Pixel Launcher no primeiro dump foi superado
+  por uma retentativa com `Wait` e abertura do chat.
+- Débitos humanos anteriores mantidos: drop nativo, arrasto de bolha
+  de volta e completar esconder/reabrir. A nova tentativa do Computer
+  Use voltou a falhar nas capturas; Alt+F4 preservou chip e texto, mas
+  a janela escondida não pôde ser reaberta pelo helper. Nenhum desses
+  passos foi marcado como verificado integralmente.
+- Limpeza concluída antes de `down`: Pasta isolada do PC vazia; cinco
+  arquivos novos do emulador com hashes conferidos e Lixeira confirmada
+  por queries individuais, preservando todos os arquivos anteriores.
+  O problema de relato do kit já está anotado em CLEAN-019. Emulador
+  e PC isolado encerrados, sem PC real a restaurar. A regravação sem
+  mudança de conteúdo de `Cargo.toml` pela CLI foi desfeita. Nenhuma
+  mudança de produção/testes nesta revisão; sem segredos ou artefatos
+  gerados no diff final.
+- Integrado à branch da sessão, sem squash, em `24da1a4`. Resolução,
+  ledger e `Stage: done` registrados juntos nesta branch. O PR da
+  sessão e seu merge continuam com o foreman e o humano, conforme o
+  fluxo do projeto.
