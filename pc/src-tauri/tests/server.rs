@@ -2088,6 +2088,47 @@ fn original_reenviado_continua_protegido_apos_excluir_a_enviada() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn exclusao_de_print_preserva_original_reenviado_por_alias_windows() {
+    for (local, entregue) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (_base, _items, outbox, running, _raiz) = sobe_para_exclusao();
+        let base = format!("http://{}", running.addr);
+        let print = outbox.enqueue_file("print.png".into(), b"imagem").unwrap();
+        let path = outbox.session_file_path(print.id).unwrap();
+        let alias = std::path::PathBuf::from(path.to_string_lossy().to_uppercase());
+        assert_ne!(path, alias, "o cenário usa grafias diferentes");
+        assert_eq!(path.canonicalize().unwrap(), alias.canonicalize().unwrap());
+        let reenviado = outbox.enqueue_file_from_path(&alias).unwrap();
+        if entregue {
+            assert_eq!(
+                requisicao_crua(
+                    &base,
+                    "POST",
+                    &format!("/outbox/{}/ack", reenviado.id),
+                    Some(TOKEN)
+                )
+                .0,
+                204
+            );
+        }
+
+        if local {
+            running.apagar_tudo(&[], &[print.id]).unwrap();
+        } else {
+            assert_eq!(excluir_ids(&base, &[print.id], &[]), 204);
+        }
+        assert_eq!(outbox.session_items().len(), 1);
+        assert_eq!(outbox.session_items()[0].item.id, reenviado.id);
+        assert_eq!(
+            std::fs::read(outbox.session_file_path(reenviado.id).unwrap()).unwrap(),
+            b"imagem",
+            "a enviada fora da seleção conserva o original, inclusive por alias"
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"imagem");
+    }
+}
+
 fn observa_exclusoes(items: &Items) -> std::sync::mpsc::Receiver<(Vec<u64>, Vec<u64>)> {
     let (tx, rx) = std::sync::mpsc::channel();
     let snapshot = items.clone();
