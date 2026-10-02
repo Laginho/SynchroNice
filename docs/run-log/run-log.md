@@ -5,8 +5,84 @@
 | 2026-09-19 23:19 | SYN-002 | review | fable | 1 | reopened | sweatshop/2026-09-19-2249 | 18m |
 | 2026-09-19 23:19 | SYN-002 | implement | fable | 1 | api error, not counted | sweatshop/2026-09-19-2249 | 0m |
 | 2026-09-19 23:31 | SYN-002 | review | opus | 1 | review ended at to-review (exit 0) | sweatshop/2026-09-19-2324 | 7m |
+| 2026-09-20 10:07 | SYN-002 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 7m |
+| 2026-09-20 10:15 | SYN-003 | implement | sonnet | 1 | asked, blocked | sweatshop/2026-09-19-2324 | 8m |
+| 2026-09-20 10:17 | SYN-004 | implement | sonnet | 1 | asked, blocked | sweatshop/2026-09-19-2324 | 1m |
+| 2026-09-20 10:17 | SYN-005 | implement | sonnet | 1 | asked, blocked | sweatshop/2026-09-19-2324 | 1m |
+| 2026-09-20 12:51 | SYN-003 | implement | sonnet | 1 | failed (exit 0), will retry | sweatshop/2026-09-19-2324 | 10m |
+| 2026-09-20 12:53 | SYN-003 | implement | sonnet | 2 | asked, blocked | sweatshop/2026-09-19-2324 | 2m |
+| 2026-09-20 12:54 | SYN-004 | implement | sonnet | 1 | failed (exit 0), will retry | sweatshop/2026-09-19-2324 | 1m |
+| 2026-09-20 12:56 | SYN-004 | implement | sonnet | 2 | failed (exit 0), blocked | sweatshop/2026-09-19-2324 | 1m |
+| 2026-09-20 13:00 | SYN-005 | implement | sonnet | 1 | asked, blocked | sweatshop/2026-09-19-2324 | 5m |
+| 2026-09-20 13:26 | SYN-003 | implement | sonnet | 2 | to-review | sweatshop/2026-09-19-2324 | 16m |
+| 2026-09-20 13:32 | SYN-003 | review | opus | 2 | reopened | sweatshop/2026-09-19-2324 | 6m |
+| 2026-09-20 13:50 | SYN-003 | implement | sonnet | 2 | to-review | sweatshop/2026-09-19-2324 | 18m |
+| 2026-09-20 14:05 | SYN-003 | review | opus | 2 | merged | sweatshop/2026-09-19-2324 | 15m |
+| 2026-09-20 14:29 | SYN-004 | implement | sonnet | 3 | to-review | sweatshop/2026-09-19-2324 | 24m |
+| 2026-09-20 14:44 | SYN-004 | review | opus | 3 | merged | sweatshop/2026-09-19-2324 | 15m |
+| 2026-09-20 15:16 | SYN-005 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 32m |
+| 2026-09-20 15:24 | SYN-005 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 8m |
+| 2026-09-20 15:42 | SYN-006 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 18m |
+| 2026-09-20 15:56 | SYN-006 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 14m |
+| 2026-09-20 16:03 | SYN-007 | implement | sonnet | 1 | asked, blocked | sweatshop/2026-09-19-2324 | 7m |
+| 2026-09-20 16:11 | SYN-007 | implement | sonnet | 1 | asked, blocked | sweatshop/2026-09-19-2324 | 4m |
+| 2026-09-20 16:30 | SYN-007 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 12m |
+| 2026-09-20 16:37 | SYN-007 | review | opus | 1 | reopened | sweatshop/2026-09-19-2324 | 7m |
+| 2026-09-20 16:41 | SYN-007 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 4m |
+| 2026-09-20 16:54 | SYN-007 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 13m |
+| 2026-09-20 17:13 | SYN-008 | implement | sonnet | 1 | failed (exit 0), will retry | sweatshop/2026-09-19-2324 | 19m |
+| 2026-09-20 17:35 | SYN-008 | implement | sonnet | 2 | to-review | sweatshop/2026-09-19-2324 | 22m |
+| 2026-09-20 17:39 | SYN-008 | review | opus | 2 | reopened | sweatshop/2026-09-19-2324 | 4m |
+| 2026-09-20 17:46 | SYN-008 | implement | sonnet | 3 | to-review | sweatshop/2026-09-19-2324 | 7m |
+| 2026-09-20 17:55 | SYN-008 | review | opus | 3 | merged | sweatshop/2026-09-19-2324 | 9m |
+| 2026-09-20 18:08 | SYN-009 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 13m |
+| 2026-09-20 18:13 | SYN-009 | review | opus | 1 | reopened | sweatshop/2026-09-19-2324 | 5m |
+| 2026-09-20 18:17 | SYN-009 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 3m |
+| 2026-09-20 18:20 | SYN-009 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 3m |
+| 2026-09-20 18:29 | CLEAN-001 | implement | sonnet | 1 | asked, blocked | sweatshop/2026-09-19-2324 | 9m |
+| 2026-09-20 18:41 | CLEAN-002 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 12m |
+| 2026-09-20 18:47 | CLEAN-002 | review | opus | 1 | reopened | sweatshop/2026-09-19-2324 | 5m |
+| 2026-09-20 18:51 | CLEAN-002 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 4m |
+| 2026-09-20 18:58 | CLEAN-002 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 7m |
+| 2026-09-20 19:03 | CLEAN-003 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 5m |
+| 2026-09-20 19:13 | CLEAN-003 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 10m |
+| 2026-09-20 19:22 | CLEAN-004 | implement | sonnet | 1 | to-review | sweatshop/2026-09-19-2324 | 9m |
+| 2026-09-20 19:35 | CLEAN-004 | review | opus | 1 | merged | sweatshop/2026-09-19-2324 | 13m |
+| 2026-09-20 20:09 | CLEAN-001 | implement | sonnet | 1 | failed (exit 0), will retry | sweatshop/2026-09-19-2324 | 31m |
+| 2026-09-20 20:38 | CLEAN-001 | implement | sonnet | 2 | to-review | sweatshop/2026-09-19-2324 | 29m |
+| 2026-09-20 20:42 | CLEAN-001 | review | opus | 2 | review ended at to-review (exit 0) | sweatshop/2026-09-19-2324 | 4m |
+| 2026-09-20 21:01 | CLEAN-001 | review | opus | 2 | merged | sweatshop/2026-09-19-2324 | 16m |
+| 2026-09-20 21:02 | CLEAN-005 | implement | sonnet | 1 | failed (exit 0), will retry | sweatshop/2026-09-19-2324 | 1m |
+| 2026-09-20 21:24 | CLEAN-005 | implement | sonnet | 2 | to-review | sweatshop/2026-09-19-2324 | 22m |
+| 2026-09-20 21:40 | CLEAN-005 | review | opus | 2 | review ended at to-review (exit 0) | sweatshop/2026-09-19-2324 | 15m |
+| 2026-09-20 21:57 | CLEAN-005 | review | opus | 2 | review ended at to-review (exit 0) | sweatshop/2026-09-19-2324 | 10m |
+| 2026-09-20 22:07 | CLEAN-005 | review | opus | 2 | merged | sweatshop/2026-09-19-2324 | 8m |
+| 2026-09-20 22:08 | CLEAN-006 | implement | sonnet | 1 | failed (exit 0), will retry | sweatshop/2026-09-19-2324 | 1m |
+| 2026-09-20 22:09 | CLEAN-006 | implement | sonnet | 2 | failed (exit 0), blocked | sweatshop/2026-09-19-2324 | 1m |
 | 2026-09-23 11:18 | CLEAN-006 | review | opus | 3 | review ended at to-review (exit 0) | sweatshop/2026-09-19-2324 | 12m |
 | 2026-09-23 11:49 | CLEAN-006 | review | opus | 3 | merged | sweatshop/2026-09-19-2324 | 8m |
+| 2026-09-24 15:07 | SYN-010 | implement | gpt-6-luna | 1 | failed (exit 0), will retry | sweatshop/2026-09-24-1506 | 1m |
+| 2026-09-24 15:09 | SYN-010 | implement | gpt-6-luna | 2 | failed (exit 0), blocked | sweatshop/2026-09-24-1506 | 1m |
+| 2026-09-24 15:10 | SYN-012 | implement | gpt-6-luna | 1 | failed (exit 0), will retry | sweatshop/2026-09-24-1506 | 1m |
+| 2026-09-24 15:11 | SYN-012 | implement | gpt-6-luna | 2 | failed (exit 0), blocked | sweatshop/2026-09-24-1506 | 1m |
+| 2026-09-24 15:54 | SYN-010 | implement | gpt-6-luna | 3 | to-review | sweatshop/2026-09-24-1506 | 40m |
+| 2026-09-24 16:00 | SYN-010 | review | gpt-6-sol | 3 | reopened | sweatshop/2026-09-24-1506 | 6m |
+| 2026-09-24 16:15 | SYN-010 | implement | gpt-6-luna | 3 | to-review | sweatshop/2026-09-24-1506 | 15m |
+| 2026-09-24 16:18 | SYN-010 | review | gpt-6-sol | 3 | reopened | sweatshop/2026-09-24-1506 | 3m |
+| 2026-09-24 16:43 | SYN-010 | implement | gpt-6-luna | 3 | to-review | sweatshop/2026-09-24-1506 | 24m |
+| 2026-09-24 16:49 | SYN-010 | review | gpt-6-sol | 3 | merged | sweatshop/2026-09-24-1506 | 7m |
+| 2026-09-24 19:33 | SYN-011 | implement | gpt-6-luna | 1 | to-review | sweatshop/2026-09-24-1855 | 37m |
+| 2026-09-24 19:46 | SYN-011 | review | gpt-6-sol | 1 | reopened | sweatshop/2026-09-24-1855 | 13m |
+| 2026-09-24 19:52 | SYN-011 | implement | gpt-6-luna | 1 | failed (exit 0), will retry | sweatshop/2026-09-24-1855 | 5m |
+| 2026-09-24 19:54 | SYN-011 | implement | gpt-6-luna | 2 | failed (exit 0), blocked | sweatshop/2026-09-24-1855 | 3m |
+| 2026-09-24 20:35 | SYN-012 | implement | gpt-6-luna | 3 | asked, blocked | sweatshop/2026-09-24-1855 | 40m |
+| 2026-09-24 20:39 | CLEAN-007 | implement | gpt-6-luna | 1 | asked, blocked | sweatshop/2026-09-24-1855 | 4m |
+| 2026-09-24 20:52 | CLEAN-008 | implement | gpt-6-luna | 1 | to-review | sweatshop/2026-09-24-1855 | 7m |
+| 2026-09-24 21:02 | CLEAN-008 | review | gpt-6-sol | 1 | merged | sweatshop/2026-09-24-1855 | 10m |
+| 2026-09-24 21:28 | CLEAN-007 | implement | gpt-6-luna | 1 | to-review | sweatshop/2026-09-24-1855 | 25m |
+| 2026-09-24 21:40 | CLEAN-007 | review | gpt-6-sol | 1 | merged | sweatshop/2026-09-24-1855 | 12m |
+| 2026-09-24 21:46 | CLEAN-009 | implement | gpt-6-luna | 1 | to-review | sweatshop/2026-09-24-1855 | 7m |
+| 2026-09-24 21:50 | CLEAN-009 | review | gpt-6-sol | 1 | merged | sweatshop/2026-09-24-1855 | 4m |
 | 2026-09-25 21:17 | SYN-012 | implement | gpt-6-luna | 3 | api error, not counted | sweatshop/2026-09-25-2116 | 0m |
 | 2026-09-25 21:43 | SYN-012 | implement | gpt-6-luna | 3 | failed (exit 0), blocked | sweatshop/2026-09-25-2127 | 16m |
 | 2026-09-25 22:11 | SYN-012 | implement | gpt-6-luna | 4 | failed (exit 0), blocked | sweatshop/2026-09-25-2127 | 2m |
@@ -120,3 +196,9 @@
 | 2026-10-01 16:44 | SYN-025 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-09-30-2146 | 26m | 4.3M in (97% cached), 28k out | $1.390 |
 | 2026-10-01 16:49 | SYN-026 | implement | gpt-6.1-sol high | 1 | to-review | sweatshop/2026-09-30-2146 | 5m | 1.1M in (95% cached), 4k out | $0.380 |
 | 2026-10-01 16:57 | SYN-026 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-09-30-2146 | 8m | 1.3M in (94% cached), 10k out | $0.490 |
+| 2026-10-01 20:49 | SYN-021 | implement | gpt-6-astra low | 1 | to-review | sweatshop/2026-10-01-2019 | 30m | 6.7M in (98% cached), 14k out | $8.819 |
+| 2026-10-01 21:29 | SYN-021 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-01-2019 | 39m | 4.1M in (97% cached), 21k out | $1.239 |
+| 2026-10-01 21:56 | SYN-021 | implement | gpt-6-astra low | 1 | to-review | sweatshop/2026-10-01-2019 | 27m | 8.5M in (99% cached), 14k out | $10.208 |
+| 2026-10-01 22:17 | SYN-021 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-01-2019 | 22m | 2.3M in (96% cached), 13k out | $0.761 |
+| 2026-10-01 22:47 | BUG-003 | implement | gpt-6-astra low | 1 | api error, not counted | sweatshop/2026-10-01-2019 | 29m | ? | ? |
+| 2026-10-01 22:47 | BUG-003 | implement | gpt-6-astra low | 1 | api error, not counted | sweatshop/2026-10-01-2019 | 0m | ? | ? |
