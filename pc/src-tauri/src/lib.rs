@@ -480,6 +480,12 @@ mod tests {
         let previa = super::previa_de_caminho(imagem.to_string_lossy().into_owned()).unwrap();
         assert_eq!(previa.tamanho, 6);
         assert_eq!(previa.bytes.as_deref(), Some(b"imagem".as_slice()));
+        std::fs::File::create(&imagem)
+            .unwrap()
+            .set_len(10 * 1024 * 1024)
+            .unwrap();
+        let previa = super::previa_de_caminho(imagem.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.bytes.unwrap().len(), 10 * 1024 * 1024);
         let previa = super::previa_de_caminho(grande.to_string_lossy().into_owned()).unwrap();
         assert_eq!(previa.tamanho, 10 * 1024 * 1024 + 1);
         assert_eq!(previa.bytes, None);
