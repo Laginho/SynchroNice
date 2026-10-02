@@ -66,8 +66,8 @@ gerenciamento de arquivos pelo app.
 - Sem banco de dados nem histórico de chat: fora dos arquivos comuns gravados
   na Pasta, o estado persistente é o Par, a Pasta escolhida em cada aparelho,
   as preferências listadas acima, a fila de Pendentes (Itens e controles de
-  exclusão) mantida no aparelho de origem, os recibos transitórios de arquivos recebidos no Android, ligados ao
-  Par, o último IP do PC no Android e os ids de arquivo aceitos no PC. A
-  Sessão continua apenas em memória.
+  exclusão) mantida no aparelho de origem, os recibos transitórios de arquivos
+  recebidos no Android, ligados ao Par, o último IP do PC no Android e os ids
+  de arquivo aceitos no PC. A Sessão continua apenas em memória.
 - Segurança: rede doméstica, uso pessoal. Só o token do QR autentica a
   conexão; sem cifra. Decisão explícita do autor.

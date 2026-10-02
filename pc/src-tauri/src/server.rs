@@ -604,6 +604,14 @@ fn apply_delete(
             .filter_map(|item| item.sender_id.clone())
             .collect()
     });
+    // Uma recebida pode ter sido arrastada para enviar de novo. Conserva as
+    // origens antes de tirar as enviadas da Sessão, inclusive as Entregues.
+    let sent_paths: Vec<PathBuf> = state
+        .outbox
+        .session_items()
+        .into_iter()
+        .filter_map(|sent| sent.path)
+        .collect();
     let sent = state.outbox.delete_items(sent_ids, do_celular)?;
     for item in &received {
         if let Some(id) = &item.sender_id {
@@ -614,7 +622,7 @@ fn apply_delete(
     }
     drop(accepted);
     for item in &received {
-        recycle_received_file(&files, item);
+        recycle_received_file(&files, item, &sent_paths);
         files.remove(&item.id);
     }
     state.items.forget(
@@ -627,7 +635,7 @@ fn apply_delete(
     Ok(())
 }
 
-fn recycle_received_file(files: &HashMap<u64, PathBuf>, item: &Item) {
+fn recycle_received_file(files: &HashMap<u64, PathBuf>, item: &Item, sent_paths: &[PathBuf]) {
     let (Some(path), ItemBody::File { received, .. }) = (files.get(&item.id), &item.body) else {
         return;
     };
@@ -643,7 +651,13 @@ fn recycle_received_file(files: &HashMap<u64, PathBuf>, item: &Item) {
     // canonicalize também compara grafias diferentes do mesmo caminho no Windows.
     if files.iter().any(|(id, newer)| {
         *id > item.id && newer.canonicalize().is_ok_and(|path| path == canonical)
-    }) {
+    }) || sent_paths
+        .iter()
+        .any(|original| match original.canonicalize() {
+            Ok(path) => path == canonical,
+            Err(error) => error.kind() != io::ErrorKind::NotFound,
+        })
+    {
         return;
     }
     if let Err(error) = trash::delete(path) {
@@ -849,7 +863,13 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                     files.insert(item.id, final_path_bg.clone());
                     if items.delete_requested(item.id) {
                         if let Some(completed) = items.snapshot().iter().find(|i| i.id == item.id) {
-                            recycle_received_file(&files, completed);
+                            let sent_paths: Vec<PathBuf> = state
+                                .outbox
+                                .session_items()
+                                .into_iter()
+                                .filter_map(|sent| sent.path)
+                                .collect();
+                            recycle_received_file(&files, completed, &sent_paths);
                         }
                         files.remove(&item.id);
                     }
