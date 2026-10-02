@@ -123,6 +123,8 @@ está na Lixeira do Windows.
 
 ## Comments
 
+- Prova red-green do stage 2 (2026-10-02), fatias HTTP: `e4f7a89` falhou com 404 nos dois testes novos (41 HTTP existentes verdes); `d3cc51b` passou os 43 HTTP. `48a202e` + `ab46d53` falharam nos oito casos novos de arquivo/fila (43 verdes); `77ebaf2` passou os 51 HTTP. Todas essas rodadas usaram o `gate.ps1 -TestsOnly` em primeiro plano; Rust fora de HTTP (4 unitários, 7 config, 5 outbox), UI (47), QA (14) e Gradle seguiram verdes. `Cargo.lock` é a atualização gerada necessária para a dependência `trash` aprovada em `Cargo.toml`; sem atualizações de dependências existentes.
+
 - Stage 2 (2026-10-02): costura aprovada `tests/server.rs`, HTTP e API pública do servidor. Chamadores revistos: `post_text`/`post_file` criam e terminam recebidos; `FailGuard` termina uploads cancelados; a janela consulta os snapshots e caminhos, e escuta `on_new`/`on_change`; `/listen`, download, ACK e rotação do Par usam a fila. A exclusão precisa preservar ids locais monotônicos, retries já aceitos, uploads em curso (sucesso e falha), arquivos de tamanho desconhecido/zero, a Pasta original após troca, caminhos reutilizados e originais de enviados. Testes e código serão entregues em commits separados por fatia.
 
 - Stage 1 (2026-10-01), grilling com o dono e o `proxy`.
