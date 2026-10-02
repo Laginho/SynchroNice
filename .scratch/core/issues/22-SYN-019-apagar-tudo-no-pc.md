@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -282,3 +282,7 @@ como o mesmo achado, não como outro defeito.
     - Comece pelo teste de `f2b2530`, `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente` (o ❌ "proteção concorrente de original" da revisão): rode `gate.ps1 -TestsOnly` em primeiro plano e registre o vermelho. Essa prova ainda não existe: o timeout matou a rodada na compilação (`send-race-red.log`). Se falhar só pelo harness, conserte em commit de teste.
     - Depois, a correção em commit só de código. A revisão aponta o formato: uma operação da Outbox que confere os originais e faz a ação no arquivo sob a mesma trava em que `enqueue_file_from_path` confere a origem e registra o caminho, usada pelos dois chamadores (`apply_delete` e `finish_received_file`); isso também tira a captura duplicada.
     - É o último ❌. Não abra ciclos novos para outros intervalos: um risco novo vai como nota aqui, para o stage 3. Verde → gate completo em primeiro plano → `to-review`.
+
+- Stage 2, retomada final (2026-10-02): último ❌ ("proteção concorrente de original") fechado. Vermelho: `gate.ps1 -TestsOnly` em primeiro plano sobre `f2b2530` falhou só em `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente` (60 HTTP verdes, 1 vermelho: o envio aceito durante a exclusão perdeu o original, `NotFound` em `tests/server.rs:2202`); 4 unitários, 7 config e 5 outbox verdes. Verde: `2d6869a` (só código, `outbox.rs` e `server.rs`) passou os 61 HTTP. A correção é `Outbox::unless_original`, que confere o original e age no arquivo sob a trava em que `enqueue_file_from_path` registra a origem; `apply_delete` e `finish_received_file` a usam (a captura duplicada de `original_paths` saiu), e um envio cujo arquivo já foi reciclado devolve `NotFound`. A Lixeira roda com a trava da Outbox segurada; a ordem de locks é a de antes (`received_files` → Outbox) e nenhum ouvinte é chamado sob ela.
+  - Gate completo, em primeiro plano: `gate: passou`. Formatação e Clippy verdes; Rust: 61 HTTP + 4 unitários + 7 config + 5 outbox; UI 47/47; kit QA 14/14; Gradle `BUILD SUCCESSFUL`.
+  - Diff desde o último commit de teste (`f2b2530`): só `src/outbox.rs` e `src/server.rs`, nenhum arquivo de teste, tudo dentro dos Primary files.
