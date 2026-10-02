@@ -5,6 +5,13 @@ export interface Entrada<T> {
   readonly falhou: boolean;
 }
 
+/** Mesmo limite do `previa_de_caminho` em lib.rs: acima disso o chip é de documento. */
+export const LIMITE_PREVIA = 10 * 1024 * 1024;
+
+export function temPrevia(tamanho: number): boolean {
+  return tamanho <= LIMITE_PREVIA;
+}
+
 export type Envio<T> =
   | { tipo: "entrada"; entrada: Entrada<T> }
   | { tipo: "texto"; texto: string };

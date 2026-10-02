@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { segmentarTexto } from "./copiaveis.ts";
-import { Bandeja } from "./bandeja.ts";
+import { Bandeja, temPrevia } from "./bandeja.ts";
 
 interface TextItem {
   id: number;
@@ -167,7 +167,8 @@ function adicionarImagem(arquivo: File, nome: string): void {
   if (arrastandoDaBolha) return;
   const entrada = bandeja.adicionar({ tipo: "imagem", arquivo, nome });
   chips.set(entrada.id, {
-    nome, tamanho: arquivo.size, previa: URL.createObjectURL(arquivo),
+    nome, tamanho: arquivo.size,
+    previa: temPrevia(arquivo.size) ? URL.createObjectURL(arquivo) : null,
   });
   renderBandeja();
 }
