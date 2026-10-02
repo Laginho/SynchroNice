@@ -5,6 +5,10 @@ export interface Entrada<T> {
   readonly falhou: boolean;
 }
 
+export type Envio<T> =
+  | { tipo: "entrada"; entrada: Entrada<T> }
+  | { tipo: "texto"; texto: string };
+
 export class Bandeja<T> {
   private itens: Entrada<T>[] = [];
   private proximoId = 1;
@@ -21,5 +25,12 @@ export class Bandeja<T> {
 
   remover(id: number): void {
     this.itens = this.itens.filter((entrada) => entrada.id !== id);
+  }
+
+  sequencia(texto: string): Envio<T>[] {
+    const envios: Envio<T>[] = this.itens.map((entrada) => ({ tipo: "entrada", entrada }));
+    const legenda = texto.trim();
+    if (legenda) envios.push({ tipo: "texto", texto: legenda });
+    return envios;
   }
 }
