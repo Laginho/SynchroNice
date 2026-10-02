@@ -103,7 +103,8 @@ descartada ao encerrar, o Par persiste.
 - iOS, Linux, macOS.
 - Agrupar itens, álbuns, pastas compactadas.
 - Editar ou responder mensagens, e apagar um Item só. Apagar a conversa
-  inteira nos dois aparelhos existe desde 2026-10-01 (SYN-019, SYN-027).
+  inteira nos dois aparelhos existe desde 2026-10-01 (SYN-019 e SYN-028 no
+  PC, SYN-027 e SYN-029 no celular).
 - Publicação em loja ou instalador assinado.
 
 ## Further Notes

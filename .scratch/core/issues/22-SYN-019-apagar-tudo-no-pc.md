@@ -1,4 +1,4 @@
-# SYN-019: Apagar tudo nos dois aparelhos (PC e protocolo)
+# SYN-019: Apagar tudo, protocolo e backend do PC
 Stage: to-implement
 Status: ready-for-agent
 Blocked by: BUG-003
@@ -7,11 +7,10 @@ Difficulty: hard
 
 - Primary files:
   - pc/src-tauri/src/server.rs (rota `POST /items/delete`, linha `delete` no `/listen`, contrato no cabeçalho)
-  - pc/src-tauri/src/outbox.rs (corpo `apagar` na fila; tirar Pendentes da fila)
-  - pc/src-tauri/src/items.rs (id do remetente no Item recebido; esquecer Itens)
-  - pc/src-tauri/src/lib.rs (comando de Apagar tudo, Lixeira)
+  - pc/src-tauri/src/outbox.rs (corpo `apagar` na fila; tirar enviados da fila e da lista de enviados da Sessão)
+  - pc/src-tauri/src/items.rs (id do remetente no Item recebido; esquecer Itens; ouvinte de exclusão aplicada)
+  - pc/src-tauri/src/lib.rs (só `start_server`, se a exclusão precisar de algo novo para subir; o comando e o evento da janela são do SYN-028)
   - pc/src-tauri/Cargo.toml (crate `trash`)
-  - pc/ui/main.ts, pc/ui/styles.css, pc/index.html (🗑 e o aviso com Desfazer)
   - pc/src-tauri/tests/server.rs
   - docs/adr/0002-par-persistente-sessao-descartavel.md, CONTEXT.md (o app passa a apagar o que ele mesmo gravou)
 
@@ -21,23 +20,22 @@ Pedido no walkthrough de QA (2026-09-30): tirar uma foto de teste e apagá-la
 dos dois aparelhos pelo próprio app, sem ir à Pasta. Como a Sessão é
 descartável, a resposta é um **Apagar tudo**: limpa a conversa inteira nos
 dois aparelhos, com um desfazer de alguns segundos. Não há exclusão de um Item
-só. Este ticket faz o lado do PC e define o protocolo; o lado do celular é o
-SYN-027.
+só.
+
+Este ticket define o protocolo e faz o backend do PC, tudo na costura HTTP.
+A janela do PC (🗑, aviso com Desfazer, bolhas sumindo) é o SYN-028. O
+celular é o SYN-027 (cliente do protocolo e fila) e o SYN-029 (app).
 
 Decisões do stage 1 (2026-10-01; protótipo em
-`prototype/syn-019-apagar-tudo`, veredito: o botão da variante B com o
-desfazer da variante A):
+`prototype/syn-019-apagar-tudo`):
 
-- **Botão.** Um 🗑 no cabeçalho, à esquerda da ⚙, só visível com o chat não
-  vazio.
-- **Desfazer.** O clique esvazia o chat na hora e mostra um aviso embaixo,
-  acima do composer: "Conversa apagada · N Itens e M arquivos", com
-  "Desfazer" e uma barra que esvazia em 5 s. Durante a janela nada é apagado
-  nem sai pela rede, então o desfazer só devolve as bolhas. Um segundo clique
-  durante a janela fecha a anterior na hora e abre outra. Itens que chegam
-  durante a janela ficam e não entram na exclusão. Sair pela bandeja durante a
-  janela não apaga nada.
-- **Fim da janela, no PC:**
+- **A janela é do SYN-028.** Durante os 5 s do Desfazer nada é apagado nem
+  sai pela rede. No fim da janela, ela chama o Apagar tudo daqui com os Itens
+  que esvaziou: os recebidos pela chave de `Items`, os enviados pela chave da
+  lista de enviados do BUG-003 (as duas sequências colidem). Um Item que não
+  está na lista fica.
+- **Apagar tudo, no PC** (uma operação da API pública de `pc_lib`, que
+  `tests/server.rs` alcança e o comando do SYN-028 chama):
   - os enviados ainda Pendentes da lista saem da fila;
   - os arquivos que o PC gravou ao receber aqueles Itens vão para a Lixeira,
     e as cópias de print do BUG-003 são apagadas. O original de quem enviou
@@ -46,7 +44,6 @@ desfazer da variante A):
     trazer de volta;
   - uma exclusão com os ids de todos os Itens apagados entra na fila para o
     celular.
-- **Do outro lado, sem aviso.** As bolhas somem sem rastro.
 - **Protocolo.** A exclusão viaja pela fila de Pendentes dos dois lados e
   endereça cada Item pela origem e pelo id do remetente:
   `{"do_pc":[<id u64>...],"do_celular":["<X-Item-Id>"...]}`.
@@ -60,16 +57,22 @@ desfazer da variante A):
   - O Item recebido do celular passa a guardar o `X-Item-Id`, para ser achado
     por `do_celular`.
   - Até o SYN-027 entrar, o celular rejeita a linha `delete` (kind
-    desconhecido). Só acontece se alguém clicar no 🗑.
-- **Exclusão recebida pelo PC.** Faz o mesmo que o fim da janela, menos a
+    desconhecido); entre o SYN-027 e o SYN-029, o app a ignora sem ack. Só
+    acontece se alguém clicar no 🗑 do SYN-028.
+- **Exclusão recebida pelo PC.** Faz o mesmo que o Apagar tudo, menos a
   exclusão de volta. Um Item ainda recebendo é apagado quando o upload termina
   ou falha. Uma exclusão que chega depois que a Sessão acabou é ignorada, e o
   arquivo fica: não há estado persistente novo (id → arquivo).
+- **Aviso para a janela.** Depois de aplicar uma exclusão recebida, o PC chama
+  um ouvinte com os Itens que saíram (recebidos e enviados), no padrão de
+  `Items::on_new` e `Outbox::on_change`. O SYN-028 liga esse ouvinte a um
+  evento para as bolhas sumirem sem aviso.
 - **Segurança antes de apagar.** O PC só apaga o caminho que ele gravou para
   aquele Item, se o tamanho ainda é o do Item e nenhum Item mais novo da Sessão
   usa o mesmo caminho. Na dúvida, não apaga. Arquivo que não existe mais é
   ignorado; o Item sai da Sessão mesmo assim.
-- **Lixeira** pelo crate `trash`.
+- **Lixeira** pelo crate `trash`, aqui, porque a exclusão recebida também
+  apaga sem passar pela janela.
 - **Docs.** A ADR-0002 e a definição de Pasta no `CONTEXT.md` ganham a exceção:
   o app só apaga arquivos que ele mesmo gravou, e só pelo Apagar tudo. A spec
   core já tirou "apagar" do Out of Scope.
@@ -78,41 +81,45 @@ desfazer da variante A):
 
 1. `POST /items/delete` com o `X-Item-Id` de um texto recebido em `do_celular`
    responde 204 e tira o Item da lista de Itens.
-2. Com o id de um arquivo recebido, o arquivo sai da Pasta e o Item sai da
-   lista.
+2. Com o id de um arquivo recebido, o arquivo sai da Pasta, vai para a Lixeira,
+   e o Item sai da lista.
 3. Ids desconhecidos, dos dois lados, respondem 204 e não mudam nada; repetir a
    mesma exclusão também.
-4. `do_pc` com o id de um enviado ainda Pendente tira-o da fila:
-   `GET /outbox/{id}/file` responde 404, e ele não sai mais no `/listen`.
+4. `do_pc` com o id de um enviado tira-o da lista de enviados da Sessão. Se ele
+   ainda é Pendente, sai também da fila: `GET /outbox/{id}/file` responde 404,
+   e ele não sai mais no `/listen`.
 5. Um arquivo da Pasta com tamanho diferente do Item não é apagado; o Item sai
    da lista mesmo assim.
 6. Uma exclusão que chega com o arquivo ainda recebendo é aplicada quando o
    upload termina: o arquivo não fica na Pasta.
-7. O Apagar tudo do PC (a operação que o comando chama no fim da janela)
-   enfileira uma exclusão que sai no `/listen` como linha `kind:"delete"`, com
-   `do_pc` e `do_celular` de todos os Itens apagados, e sai da fila com o ack.
-8. O mesmo Apagar tudo tira da fila os enviados Pendentes e tira da Pasta os
-   arquivos recebidos.
+7. O Apagar tudo do PC, chamado com uma lista de Itens, enfileira uma exclusão
+   que sai no `/listen` como linha `kind:"delete"`, com `do_pc` e `do_celular`
+   de todos os Itens da lista, e sai da fila com o ack. Um Item fora da lista
+   continua na lista de Itens e fora da exclusão.
+8. O mesmo Apagar tudo tira da fila os enviados Pendentes, tira da Pasta os
+   arquivos recebidos, apaga a cópia do print colado, e tira das listas da
+   Sessão os Itens da lista, recebidos e enviados, Pendentes e Entregues.
 9. A exclusão enfileirada nunca dispara o evento `enviado`.
-10. Na janela: o 🗑 só aparece com o chat não vazio; o clique esvazia o chat e
-    mostra o aviso com as contagens; "Desfazer" em até 5 s devolve as bolhas e
-    nenhum arquivo sai da Pasta; sem desfazer, os arquivos saem da Pasta e
-    estão na Lixeira.
-11. Recarregar a janela depois do Apagar tudo não traz nada de volta.
-12. Os testes existentes seguem verdes.
+10. Uma exclusão recebida, depois de aplicada, chama o ouvinte de exclusão uma
+    vez, com os Itens que saíram; uma exclusão só de ids desconhecidos não o
+    chama.
+11. Os testes existentes seguem verdes.
 
 #### Verification
 
     powershell -ExecutionPolicy Bypass -File .\gate.ps1
 
-QA no stage 3: kit no emulador, critérios 10 e 11 pelo CDP, com a Pasta e a
-Lixeira conferidas pelo kit.
+QA no stage 3: kit no emulador, a Lixeira do critério 2. Agindo como o celular
+por HTTP (token do `config.json` da execução), mande um arquivo ao PC debug,
+apague-o com `POST /items/delete` e confira que ele saiu de `data/Pasta` e
+está na Lixeira do Windows.
 
 ## Tests stage 2 writes (own commit, red)
 
 - `pc/src-tauri/tests/server.rs`, na costura HTTP de sempre (o teste age como
-  o celular), critérios 1 a 9. Vermelho porque a rota, o corpo `apagar` e a
-  operação de Apagar tudo não existem.
+  o celular), critérios 1 a 10; a Lixeira do critério 2 fica para o QA.
+  Vermelho porque a rota, o corpo `apagar`, a operação de Apagar tudo e o
+  ouvinte de exclusão não existem.
 
 ## Comments
 
@@ -126,3 +133,4 @@ Lixeira conferidas pelo kit.
   - **Decisões do proxy:** o resto.
   - **Fatiamento:** o pedido virou dois tickets, um por costura de teste: este
     (PC, HTTP) e o SYN-027 (celular, cliente do protocolo).
+- 2026-10-01 Proxy decided: fatiado a pedido do dono, na costura de teste. Ficam aqui o protocolo e o backend do PC (critérios 1 a 9 do original, testados em `tests/server.rs`), a Lixeira com o crate `trash` e as mudanças da ADR-0002 e do `CONTEXT.md`; a janela (🗑, aviso com Desfazer, recarregar, critérios 10 e 11 do original) foi para o SYN-028 (`24-SYN-028-apagar-tudo-na-janela-do-pc.md`). Para o corte fechar, o critério 7 ganhou "só os Itens da lista", o 8 ganhou a lista de enviados e o print, o 10 é novo (ouvinte de exclusão), e a Lixeira tem QA aqui. Blocked by: BUG-003, sem mudança (lista de enviados e cópia do print). Difficulty: hard, sem mudança: a exclusão no meio do upload e as checagens de segurança interagem. Review: human, porque a mudança de docs fica aqui — o backend é onde o app passa a apagar arquivos, inclusive pela exclusão recebida, que não passa pela janela.
