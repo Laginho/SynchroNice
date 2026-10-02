@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -122,6 +122,11 @@ está na Lixeira do Windows.
   ouvinte de exclusão não existem.
 
 ## Comments
+
+- Stage 2 concluído (2026-10-02), branch `syn-019`: protocolo de exclusão, Apagar tudo público, descarte seguro de recebidos e cópias de prints, remoção de enviados/Pendentes e ouvinte de exclusão implementados. `CONTEXT.md` e ADR-0002 atualizados; a janela e o Android seguem nos tickets já definidos.
+  - Prova red-green restante, conferida no log da tentativa anterior: `f84bf1d` falhou por `Items::on_delete` e `Running::apagar_tudo` ausentes; `5d61d52` passou os 55 HTTP. Nesta retomada, o teste de `082a39e` falhou por original ausente (55 verdes, 1 vermelho), e `940a692` passou os 56 HTTP, incluindo as quatro combinações de exclusão local/remota e envio Pendente/Entregue.
+  - Gate completo, em primeiro plano: `powershell -ExecutionPolicy Bypass -File .\gate.ps1`, exit 0, `gate: passou`. Formatação, Clippy e TypeScript verdes; Rust: 56 HTTP + 4 unitários + 7 config + 5 outbox, sem falhas; UI: 47/47; kit QA: 14/14; Android: `check` verde (relatórios existentes de 71 testes do app e 62 do cliente, nenhum erro/falha; tarefas de teste `UP-TO-DATE`).
+  - Diff final conferido: testes em commits próprios antes do código, sem alteração de testes em commits de implementação; sem arquivos fora do escopo além do lock gerado pela dependência aprovada. A conferência da Lixeira pelo kit continua sendo o QA previsto para o stage 3, ainda não executado aqui.
 
 - Stage 2 retomado (2026-10-02): o driver recolocou o ticket em `to-implement` após o timeout. A branch `syn-019` foi reconstruída do commit preservado `082a39e`, depois de conferir os commits e a prova anterior; o registro da tentativa falha foi mantido. O `gate.ps1 -TestsOnly` reproduziu o vermelho do teste de originais de enviados: 55 HTTP verdes e 1 falha por arquivo ausente. Os 4 unitários Rust, 7 config, 5 outbox, 47 UI, 14 QA e o Gradle continuaram verdes. A correção conserva os caminhos dos enviados antes de removê-los da Sessão e os protege na exclusão de recebidos, inclusive com ids locais colidindo e ACK já recebido.
 
