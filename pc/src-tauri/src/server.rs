@@ -700,6 +700,40 @@ fn recycle_received_file(files: &HashMap<u64, PathBuf>, item: &Item, sent_paths:
     }
 }
 
+/// Rename e registro pertencem à mesma operação protegida da exclusão.
+/// Roda numa thread de bloqueio: não segura um Mutex de std através de await.
+fn finish_received_file(state: &AppState, item: &Item, temp: &Path, path: &Path) -> bool {
+    let mut files = state
+        .received_files
+        .lock()
+        .expect("arquivos recebidos sem panic");
+    if let Err(error) = std::fs::rename(temp, path) {
+        eprintln!("falha ao renomear {temp:?} para {path:?}: {error}");
+        return false;
+    }
+    #[cfg(test)]
+    tokio::runtime::Handle::current().block_on(pause_once(&state.after_file_rename));
+    #[cfg(debug_assertions)]
+    {
+        let pause = state
+            .after_file_rename_for_tests
+            .lock()
+            .expect("pausa de teste sem panic")
+            .take();
+        if let Some(pause) = pause {
+            pause.wait();
+        }
+    }
+    files.insert(item.id, path.to_path_buf());
+    if state.items.delete_requested(item.id) {
+        if let Some(completed) = state.items.snapshot().iter().find(|i| i.id == item.id) {
+            recycle_received_file(&files, completed, &state.outbox.original_paths());
+        }
+        files.remove(&item.id);
+    }
+    true
+}
+
 async fn post_file(State(state): State<AppState>, request: Request) -> StatusCode {
     if !authorized(request.headers(), &state.token) {
         return StatusCode::UNAUTHORIZED;
@@ -859,7 +893,6 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     // não é abortada por isso — sem essa separação flush/rename/file_done
     // já podiam ter acontecido pela metade e o aviso de fim nunca sair.
     let items = state.items.clone();
-    let received_files = state.received_files.clone();
     let accepted_item_ids = state.accepted_item_ids.clone();
     let accepted_file_log = state.accepted_file_log.clone();
     let final_path_bg = final_path.clone();
@@ -886,59 +919,34 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         }
         drop(file);
 
-        match tokio::fs::rename(&temp_path_bg, &final_path_bg).await {
-            Ok(()) => {
-                #[cfg(test)]
-                pause_once(&state.after_file_rename).await;
-                #[cfg(debug_assertions)]
-                {
-                    let pause = state
-                        .after_file_rename_for_tests
-                        .lock()
-                        .expect("pausa de teste sem panic")
-                        .take();
-                    if let Some(pause) = pause {
-                        tokio::task::spawn_blocking(move || pause.wait())
-                            .await
-                            .expect("pausa de teste sem panic");
-                    }
-                }
-                // Só agora o arquivo existe com o nome final: o sinal de fim
-                // não pode vir antes disso, ou a UI tentaria ler um caminho
-                // que ainda não existe.
-                {
-                    let mut files = received_files.lock().expect("arquivos recebidos sem panic");
-                    files.insert(item.id, final_path_bg.clone());
-                    if items.delete_requested(item.id) {
-                        if let Some(completed) = items.snapshot().iter().find(|i| i.id == item.id) {
-                            let sent_paths = state.outbox.original_paths();
-                            recycle_received_file(&files, completed, &sent_paths);
-                        }
-                        files.remove(&item.id);
-                    }
-                }
-                // O observador de Done pode resolver o caminho pela API do
-                // servidor, que também adquire received_files.
-                items.file_done(item.id);
-                items.notify_deleted();
-                if let Some(id) = item_id {
-                    // Depois do rename: um crash entre os dois duplica, nunca
-                    // dá 201 a um reenvio cujo arquivo não chegou à Pasta.
-                    if let Some(log) = &accepted_file_log {
-                        log.lock().expect("ids de arquivo sem panic").record(&id);
-                    }
-                    accepted_item_ids
-                        .lock()
-                        .expect("ids aceitos sem panic")
-                        .insert(id);
-                }
-                true
-            }
-            Err(e) => {
-                eprintln!("falha ao renomear {temp_path_bg:?} para {final_path_bg:?}: {e}");
-                false // _fail_guard limpa ao sair de escopo
-            }
+        let completion_item = item.clone();
+        let completed = tokio::task::spawn_blocking(move || {
+            finish_received_file(&state, &completion_item, &temp_path_bg, &final_path_bg)
+        })
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("falha ao finalizar arquivo recebido: {error}");
+            false
+        });
+        if !completed {
+            return false; // _fail_guard limpa ao sair de escopo.
         }
+        // O sinal de Done só sai depois do rename/registro, sem o lock que
+        // Running::caminho_do_arquivo também precisa para seus observadores.
+        items.file_done(item.id);
+        items.notify_deleted();
+        if let Some(id) = item_id {
+            // Depois do rename: um crash entre os dois duplica, nunca
+            // dá 201 a um reenvio cujo arquivo não chegou à Pasta.
+            if let Some(log) = &accepted_file_log {
+                log.lock().expect("ids de arquivo sem panic").record(&id);
+            }
+            accepted_item_ids
+                .lock()
+                .expect("ids aceitos sem panic")
+                .insert(id);
+        }
+        true
     })
     .await
     .unwrap_or_else(|e| {
