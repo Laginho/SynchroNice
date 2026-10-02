@@ -187,6 +187,21 @@ struct Inner {
     changed: Vec<ChangeListener>,
 }
 
+impl Inner {
+    fn is_original_file(&self, path: &Path) -> bool {
+        let Ok(canonical) = path.canonicalize() else {
+            return true; // Na dúvida, conserva o arquivo.
+        };
+        self.original_paths.iter().any(|original| {
+            original == &canonical
+                || match original.canonicalize() {
+                    Ok(path) => path == canonical,
+                    Err(error) => error.kind() != io::ErrorKind::NotFound,
+                }
+        })
+    }
+}
+
 fn notify(listeners: &mut Vec<UnboundedSender<OutItem>>, item: &OutItem) {
     listeners.retain(|tx| tx.send(item.clone()).is_ok());
 }
@@ -432,10 +447,7 @@ impl Outbox {
                     if let Some(path) = &sent.path {
                         let same_size = std::fs::symlink_metadata(path)
                             .is_ok_and(|m| m.is_file() && m.len() == size);
-                        let reused = inner.sent.iter().any(|newer| {
-                            newer.item.id > sent.item.id && newer.path.as_ref() == Some(path)
-                        });
-                        if same_size && !reused {
+                        if same_size && !inner.is_original_file(path) {
                             let _ = std::fs::remove_file(path);
                         }
                     }
