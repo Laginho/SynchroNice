@@ -54,6 +54,19 @@ fn now_ms() -> u64 {
 }
 
 type Listener = Box<dyn Fn(&Item) + Send + Sync>;
+type DeleteListener = Arc<dyn Fn(&DeletedItems) + Send + Sync>;
+
+/// Chaves locais que saíram da Sessão. As duas sequências podem colidir.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DeletedItems {
+    pub received: Vec<u64>,
+    pub sent: Vec<u64>,
+}
+
+struct PendingDeletion {
+    waiting: HashSet<u64>,
+    items: DeletedItems,
+}
 
 #[derive(Default)]
 struct Inner {
@@ -61,6 +74,8 @@ struct Inner {
     items: Vec<Item>,
     deleting: HashSet<u64>,
     listeners: Vec<Listener>,
+    deletions: Vec<PendingDeletion>,
+    deleted: Vec<DeleteListener>,
 }
 
 impl Inner {
@@ -68,6 +83,17 @@ impl Inner {
         for listener in &self.listeners {
             listener(item);
         }
+    }
+
+    fn finish_delete(&mut self, id: u64) -> bool {
+        if !self.deleting.remove(&id) {
+            return false;
+        }
+        self.items.retain(|item| item.id != id);
+        for deletion in &mut self.deletions {
+            deletion.waiting.remove(&id);
+        }
+        true
     }
 }
 
@@ -172,8 +198,7 @@ impl Items {
             _ => return,
         }
         let item = slot.clone();
-        if inner.deleting.remove(&id) {
-            inner.items.retain(|item| item.id != id);
+        if inner.finish_delete(id) {
             return;
         }
         inner.notify(&item);
@@ -196,8 +221,7 @@ impl Items {
             _ => return,
         }
         let item = slot.clone();
-        if inner.deleting.remove(&id) {
-            inner.items.retain(|item| item.id != id);
+        if inner.finish_delete(id) {
             return;
         }
         inner.notify(&item);
@@ -212,10 +236,16 @@ impl Items {
             .clone()
     }
 
-    pub(crate) fn forget(&self, ids: &[u64]) {
+    pub(crate) fn forget(&self, ids: &[u64], sent: Vec<u64>, notify: bool) {
         let mut inner = self.inner.lock().expect("lista de Itens sem panic");
         let requested: HashSet<u64> = ids.iter().copied().collect();
-        let receiving: Vec<u64> = inner
+        let received: Vec<u64> = inner
+            .items
+            .iter()
+            .filter(|item| requested.contains(&item.id) && !inner.deleting.contains(&item.id))
+            .map(|item| item.id)
+            .collect();
+        let receiving: HashSet<u64> = inner
             .items
             .iter()
             .filter(|item| {
@@ -230,6 +260,18 @@ impl Items {
             })
             .map(|item| item.id)
             .collect();
+        if notify && (!received.is_empty() || !sent.is_empty()) {
+            // Repetir um pedido durante o upload não agenda outro aviso.
+            let waiting = receiving
+                .iter()
+                .copied()
+                .filter(|id| received.contains(id))
+                .collect();
+            inner.deletions.push(PendingDeletion {
+                waiting,
+                items: DeletedItems { received, sent },
+            });
+        }
         inner.deleting.extend(receiving);
         let deleting = inner.deleting.clone();
         inner
@@ -243,6 +285,36 @@ impl Items {
             .expect("lista de Itens sem panic")
             .deleting
             .contains(&id)
+    }
+
+    /// Chamado uma vez por exclusão recebida aplicada, depois de todos os
+    /// uploads selecionados terminarem ou falharem. Nunca sob o lock da lista.
+    pub fn on_delete(&self, listener: impl Fn(&DeletedItems) + Send + Sync + 'static) {
+        self.inner
+            .lock()
+            .expect("lista de Itens sem panic")
+            .deleted
+            .push(Arc::new(listener));
+    }
+
+    pub(crate) fn notify_deleted(&self) {
+        let (ready, listeners) = {
+            let mut inner = self.inner.lock().expect("lista de Itens sem panic");
+            let mut ready = Vec::new();
+            for deletion in std::mem::take(&mut inner.deletions) {
+                if deletion.waiting.is_empty() {
+                    ready.push(deletion.items);
+                } else {
+                    inner.deletions.push(deletion);
+                }
+            }
+            (ready, inner.deleted.clone())
+        };
+        for items in ready {
+            for listener in &listeners {
+                listener(&items);
+            }
+        }
     }
 
     /// Chamado a cada Item novo ou atualizado, na thread que o gerou.

@@ -20,8 +20,19 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OutBody {
-    Text { text: String },
-    File { name: String, size: u64 },
+    Text {
+        text: String,
+    },
+    File {
+        name: String,
+        size: u64,
+    },
+    /// Controle persistido na fila; nunca integra a lista de enviados.
+    #[serde(rename = "delete")]
+    Apagar {
+        do_pc: Vec<u64>,
+        do_celular: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -350,9 +361,14 @@ impl Outbox {
             .and_then(|sent| sent.path.clone())
     }
 
-    /// Esquece só enviadas desta Sessão. Persiste o descarte dos Pendentes
-    /// antes de remover payloads; o original de um drop nunca é apagado.
-    pub(crate) fn forget(&self, ids: &[u64]) -> io::Result<Vec<u64>> {
+    /// Esquece enviadas desta Sessão. Some enfileira também o controle para
+    /// o celular, na mesma escrita do descarte dos Pendentes. Nunca apaga o
+    /// original de um drop nem emite on_change por controles.
+    pub(crate) fn delete_items(
+        &self,
+        ids: &[u64],
+        do_celular: Option<Vec<String>>,
+    ) -> io::Result<Vec<u64>> {
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
         let requested: HashSet<u64> = ids.iter().copied().collect();
         let removed: Vec<SentItem> = inner
@@ -362,10 +378,10 @@ impl Outbox {
             .cloned()
             .collect();
         let removed_ids: HashSet<u64> = removed.iter().map(|sent| sent.item.id).collect();
-        if removed_ids.is_empty() {
+        if removed_ids.is_empty() && do_celular.as_ref().is_none_or(Vec::is_empty) {
             return Ok(Vec::new());
         }
-        let manifest = Manifest {
+        let mut manifest = Manifest {
             next_id: inner.manifest.next_id,
             items: inner
                 .manifest
@@ -375,6 +391,19 @@ impl Outbox {
                 .cloned()
                 .collect(),
         };
+        let control = do_celular.map(|do_celular| {
+            let item = OutItem {
+                id: manifest.next_id,
+                at_ms: now_ms(),
+                body: OutBody::Apagar {
+                    do_pc: removed.iter().map(|sent| sent.item.id).collect(),
+                    do_celular,
+                },
+            };
+            manifest.next_id += 1;
+            manifest.items.push(item.clone());
+            item
+        });
         save_manifest(&self.dir, &manifest)?;
         inner.manifest = manifest;
         for sent in &removed {
@@ -397,6 +426,9 @@ impl Outbox {
         inner
             .sent
             .retain(|sent| !removed_ids.contains(&sent.item.id));
+        if let Some(control) = control {
+            notify(&mut inner.listeners, &control);
+        }
         Ok(removed.iter().map(|sent| sent.item.id).collect())
     }
 

@@ -20,8 +20,14 @@ gerenciamento de arquivos pelo app.
 - A **Sessão** (conteúdo do chat) é descartada quando o app encerra de fato
   (sair pela bandeja, reiniciar Windows, Android matar o app). Esconder a
   janela não encerra.
-- Arquivos recebidos são gravados na Pasta como arquivos comuns e sobrevivem;
-  o app não os gerencia depois.
+- Arquivos recebidos são gravados na Pasta como arquivos comuns e sobrevivem
+  ao fim da Sessão. A exceção é **Apagar tudo**, que descarta a conversa nos
+  dois aparelhos e pode apagar os arquivos da Sessão atual que o app gravou.
+  No PC, os recebidos vão para a Lixeira e as cópias internas de prints são
+  descartadas; o original de um Item enviado nunca é tocado. O PC só apaga
+  o caminho registrado para o Item se o tamanho ainda confere e nenhum Item
+  mais novo da Sessão usa o mesmo caminho. Sem a Sessão, uma exclusão de id
+  antigo é ignorada; não há novo estado persistente de id → arquivo.
 - No Android, um recibo mínimo de arquivo recebido persiste ligado ao **Par**
   enquanto o ACK não foi aceito: a intenção de criar o destino (no SAF, com o
   marcador do nome), o destino em escrita, o rename que tira o marcador e, com
@@ -41,6 +47,11 @@ gerenciamento de arquivos pelo app.
   Sessão.
 - Itens ficam **pendentes** no aparelho de origem enquanto o destino não está
   na rede e são entregues sozinhos depois.
+- Pedidos de **Apagar tudo** também viajam pela fila de Pendentes e endereçam
+  Itens pela origem e pelo id do remetente. São controles, sem bolha ou evento
+  de envio. A janela espera os 5 s de Desfazer antes de chamar o backend;
+  uma exclusão recebida não gera exclusão de volta. No PC, um upload em curso
+  é descartado quando termina ou falha, e só então seu aviso de exclusão sai.
 
 ## Alternativas rejeitadas
 
@@ -54,8 +65,8 @@ gerenciamento de arquivos pelo app.
   com IP variável. É a parte mais delicada do projeto.
 - Sem banco de dados nem histórico de chat: fora dos arquivos comuns gravados
   na Pasta, o estado persistente é o Par, a Pasta escolhida em cada aparelho,
-  as preferências listadas acima, a fila de Pendentes mantida no aparelho de
-  origem, os recibos transitórios de arquivos recebidos no Android, ligados ao
+  as preferências listadas acima, a fila de Pendentes (Itens e controles de
+  exclusão) mantida no aparelho de origem, os recibos transitórios de arquivos recebidos no Android, ligados ao
   Par, o último IP do PC no Android e os ids de arquivo aceitos no PC. A
   Sessão continua apenas em memória.
 - Segurança: rede doméstica, uso pessoal. Só o token do QR autentica a

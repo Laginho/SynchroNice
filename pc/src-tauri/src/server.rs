@@ -59,6 +59,21 @@
 //!                                 para reenvio da confirmação ser inofensivo).
 //!   Authorization: Bearer <token>
 //!
+//! Apagar tudo (SYN-019), depois dos 5 s de Desfazer da janela (SYN-028):
+//!   POST /items/delete       JSON {"do_pc":[<id u64>...],
+//!                                 "do_celular":["<X-Item-Id>"...]}
+//!   Authorization: Bearer <token>
+//!   204 sem corpo; ids desconhecidos/repetidos são ignorados. 400 se o
+//!   JSON não contiver as duas listas com os tipos acima. Não há eco nem
+//!   id/dedup próprio. O vínculo id → arquivo só existe nesta Sessão.
+//!   Upload em curso termina ou falha antes de sair da lista.
+//!
+//!   PC -> celular: controle na fila de Pendentes, anunciado pelo /listen:
+//!   {"id":N,"at_ms":...,"kind":"delete","do_pc":[...],"do_celular":[...]}
+//!   POST /outbox/N/ack o remove normalmente; nunca vira bolha/enviado.
+//!   Android anterior ao SYN-027 rejeita kind desconhecido; entre SYN-027
+//!   e SYN-029 o app ignora sem ACK. A janela só oferece a ação no SYN-028.
+//!
 //! Pareamento e descoberta (SYN-005). O celular não compila do mesmo fonte,
 //! então os dois formatos abaixo são contrato (ADR-0001):
 //!
@@ -298,26 +313,34 @@ pub struct Running {
     /// Alça para o sinal de presença — quem sobe o servidor usa
     /// `on_change` para avisar a janela quando o celular conecta ou some.
     pub presence: Presence,
-    pasta: Arc<Mutex<Option<PathBuf>>>,
-    received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
+    state: AppState,
 }
 
 impl Running {
     /// Persiste a escolha e a aplica ao servidor que já está escutando.
     pub fn escolher_pasta(&self, config_dir: &Path, pasta: &Path) -> io::Result<()> {
         crate::config::save_pasta(config_dir, pasta)?;
-        *self.pasta.lock().expect("Pasta sem panic") = Some(pasta.to_path_buf());
+        *self.state.pasta.lock().expect("Pasta sem panic") = Some(pasta.to_path_buf());
         Ok(())
     }
 
     /// Caminho do arquivo recebido que pertence ao Item `id`, se ele chegou
     /// a terminar de gravar. O caminho não depende da Pasta atualmente ativa.
     pub fn caminho_do_arquivo(&self, id: u64) -> Option<PathBuf> {
-        self.received_files
+        self.state
+            .received_files
             .lock()
             .expect("arquivos recebidos sem panic")
             .get(&id)
             .cloned()
+    }
+
+    /// Apagar tudo após o Desfazer: chaves locais dos recebidos e enviados,
+    /// em listas separadas. Só os Itens selecionados desta Sessão saem; a
+    /// exclusão para o celular persiste junto do descarte dos Pendentes.
+    pub fn apagar_tudo(&self, received: &[u64], sent: &[u64]) -> io::Result<()> {
+        let requested: HashSet<u64> = received.iter().copied().collect();
+        apply_delete(&self.state, |item| requested.contains(&item.id), sent, true)
     }
 }
 
@@ -402,11 +425,24 @@ fn spawn_inner(
     let token = token.into();
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
-    let presence_da_thread = presence.clone();
-    let pasta = Arc::new(Mutex::new(pasta));
-    let pasta_da_thread = pasta.clone();
-    let received_files = Arc::new(Mutex::new(HashMap::new()));
-    let received_files_da_thread = received_files.clone();
+    let state = AppState {
+        token,
+        items,
+        outbox,
+        presence: presence.clone(),
+        pasta: Arc::new(Mutex::new(pasta)),
+        leases: Arc::new(Mutex::new(HashSet::new())),
+        received_files: Arc::new(Mutex::new(HashMap::new())),
+        accepted_item_ids: Arc::new(Mutex::new(accepted_item_ids)),
+        accepted_file_log,
+        file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+        upload_inactivity_timeout,
+        #[cfg(test)]
+        before_file_item_id_lock: Arc::new(Mutex::new(None)),
+        #[cfg(test)]
+        after_file_rename: Arc::new(Mutex::new(None)),
+    };
+    let state_da_thread = state.clone();
 
     std::thread::Builder::new()
         .name("synchronice-http".into())
@@ -431,23 +467,7 @@ fn spawn_inner(
                 };
                 let local = listener.local_addr();
                 let _ = tx.send(local);
-                let app = router(AppState {
-                    token,
-                    items,
-                    outbox,
-                    presence: presence_da_thread,
-                    pasta: pasta_da_thread,
-                    leases: Arc::new(Mutex::new(HashSet::new())),
-                    received_files: received_files_da_thread,
-                    accepted_item_ids: Arc::new(Mutex::new(accepted_item_ids)),
-                    accepted_file_log,
-                    file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
-                    upload_inactivity_timeout,
-                    #[cfg(test)]
-                    before_file_item_id_lock: Arc::new(Mutex::new(None)),
-                    #[cfg(test)]
-                    after_file_rename: Arc::new(Mutex::new(None)),
-                });
+                let app = router(state_da_thread);
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
                 }
@@ -460,8 +480,7 @@ fn spawn_inner(
     Ok(Running {
         addr,
         presence,
-        pasta,
-        received_files,
+        state,
     })
 }
 
@@ -534,7 +553,21 @@ async fn post_delete(
     let Ok(request) = serde_json::from_str::<DeleteRequest>(&body) else {
         return StatusCode::BAD_REQUEST;
     };
-    match tokio::task::spawn_blocking(move || apply_delete(&state, request)).await {
+    match tokio::task::spawn_blocking(move || {
+        let requested: HashSet<String> = request.do_celular.into_iter().collect();
+        apply_delete(
+            &state,
+            |item| {
+                item.sender_id
+                    .as_ref()
+                    .is_some_and(|id| requested.contains(id))
+            },
+            &request.do_pc,
+            false,
+        )
+    })
+    .await
+    {
         Ok(Ok(())) => StatusCode::NO_CONTENT,
         result => {
             eprintln!("não foi possível aplicar a exclusão: {result:?}");
@@ -543,7 +576,12 @@ async fn post_delete(
     }
 }
 
-fn apply_delete(state: &AppState, request: DeleteRequest) -> io::Result<()> {
+fn apply_delete(
+    state: &AppState,
+    selected: impl Fn(&Item) -> bool,
+    sent_ids: &[u64],
+    to_peer: bool,
+) -> io::Result<()> {
     // O mesmo lock protege o registro do caminho e a conclusão do upload:
     // a exclusão vê o arquivo completo ou fica marcada para o seu término.
     let mut files = state
@@ -554,18 +592,19 @@ fn apply_delete(state: &AppState, request: DeleteRequest) -> io::Result<()> {
         .accepted_item_ids
         .lock()
         .expect("ids aceitos sem panic");
-    let requested: HashSet<String> = request.do_celular.into_iter().collect();
     let received: Vec<Item> = state
         .items
         .snapshot()
         .into_iter()
-        .filter(|item| {
-            item.sender_id
-                .as_ref()
-                .is_some_and(|id| requested.contains(id))
-        })
+        .filter(|item| selected(item) && !state.items.delete_requested(item.id))
         .collect();
-    state.outbox.forget(&request.do_pc)?;
+    let do_celular = to_peer.then(|| {
+        received
+            .iter()
+            .filter_map(|item| item.sender_id.clone())
+            .collect()
+    });
+    let sent = state.outbox.delete_items(sent_ids, do_celular)?;
     for item in &received {
         if let Some(id) = &item.sender_id {
             // Mesmo um upload que falhe depois do pedido não pode ressuscitar
@@ -578,9 +617,13 @@ fn apply_delete(state: &AppState, request: DeleteRequest) -> io::Result<()> {
         recycle_received_file(&files, item);
         files.remove(&item.id);
     }
-    state
-        .items
-        .forget(&received.iter().map(|item| item.id).collect::<Vec<_>>());
+    state.items.forget(
+        &received.iter().map(|item| item.id).collect::<Vec<_>>(),
+        sent,
+        !to_peer,
+    );
+    drop(files);
+    state.items.notify_deleted();
     Ok(())
 }
 
@@ -812,6 +855,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                     }
                     items.file_done(item.id);
                 }
+                items.notify_deleted();
                 if let Some(id) = item_id {
                     // Depois do rename: um crash entre os dois duplica, nunca
                     // dá 201 a um reenvio cujo arquivo não chegou à Pasta.
@@ -1058,6 +1102,7 @@ impl Drop for FailGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.temp_path);
         self.items.file_failed(self.item_id);
+        self.items.notify_deleted();
     }
 }
 
