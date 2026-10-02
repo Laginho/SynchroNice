@@ -6,7 +6,7 @@ use pc_lib::par::Par;
 use pc_lib::server;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const TOKEN: &str = "segredo-de-teste";
 
