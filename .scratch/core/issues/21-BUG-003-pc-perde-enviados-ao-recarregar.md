@@ -1,5 +1,5 @@
 # BUG-003: O PC perde os enviados ao recarregar, e a bolha enviada não abre nem arrasta
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -88,3 +88,5 @@ CDP). Arrastar para fora da janela continua 👤.
   tudo em `Pasta\Enviados` ou de manter a cópia da fila até o fim da Sessão.
   O `proxy` decidiu o resto. Paridade no Android fica fora: lá a imagem enviada
   já abre, e o PDF enviado não; não há ticket.
+
+- 2026-10-02 Review ended at to-review (timeout); branch bug-003 holds the review; left for a human
