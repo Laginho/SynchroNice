@@ -1,5 +1,6 @@
 package synchronice.android
 
+import android.content.ClipData
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.pm.ProviderInfo
@@ -53,6 +54,34 @@ class PasteTrayTest {
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
         }.apply { attachInfo(app, ProviderInfo().apply { this.authority = authority }) })
         return Uri.parse("content://$authority/item")
+    }
+
+    @Test
+    fun mixedPasteStagesImageAndLeavesCaptionForTheTextField() {
+        val item = ClipData.Item("legenda", null, provider("foto.png"))
+        assertFalse(app.state.pasteItem(item))
+        assertEquals("legenda", item.text.toString())
+        assertEquals("conteudo", app.state.pasteTray.single().readText())
+        assertFalse(app.state.hasPending())
+    }
+
+    @Test
+    fun textOnlyPasteIsLeftForTheTextFieldAndUriOnlyPasteIsConsumed() {
+        assertFalse(app.state.pasteItem(ClipData.Item("só texto")))
+        assertTrue(app.state.pasteTray.isEmpty())
+        assertTrue(app.state.pasteItem(ClipData.Item(provider("foto.png"))))
+        assertEquals(1, app.state.pasteTray.size)
+    }
+
+    @Test
+    fun rejectedOrUnreadableUriStillPreservesItsCaptionWithoutStaging() {
+        val own = Uri.parse("content://${app.packageName}.camera/camera/foto.jpg")
+        assertFalse(app.state.pasteItem(ClipData.Item("legenda própria", null, own)))
+        assertTrue(app.state.pasteItem(ClipData.Item(own)))
+        assertFalse(app.state.pasteItem(ClipData.Item("legenda indisponível", null,
+            provider("broken.png", unreadable = true))))
+        assertTrue(app.state.pasteTray.isEmpty())
+        assertFalse(app.state.hasPending())
     }
 
     @Test

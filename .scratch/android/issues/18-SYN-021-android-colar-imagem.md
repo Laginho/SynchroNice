@@ -1,5 +1,5 @@
 # SYN-021: Colar imagem no chat do Android, numa bandeja como a do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -77,6 +77,12 @@ pelo Gboard provavelmente fica 👤.
   existe.
 
 ## Comments
+
+- Retomada stage 2 (2026-10-01): regressões da revisão na costura do
+  AppState e na integração de Voltar da MainActivity, nos Primary files.
+  Callers: contentReceiver usa a colagem; câmera e Compartilhar continuam
+  usando queueFile/copyToStaging diretamente. Casos de fronteira: texto
+  sem URI, URI sem texto, URI recusada ou ilegível com legenda, bandeja vazia.
 
 - Stage 2 (2026-10-01): primeiro teste vermelho pelo gate `-TestsOnly`:
   `PasteTrayTest` não compila porque `pasteUri` e `pasteTray` ainda não existem.
