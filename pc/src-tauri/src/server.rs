@@ -604,14 +604,9 @@ fn apply_delete(
             .filter_map(|item| item.sender_id.clone())
             .collect()
     });
-    // Uma recebida pode ter sido arrastada para enviar de novo. Conserva as
-    // origens antes de tirar as enviadas da Sessão, inclusive as Entregues.
-    let sent_paths: Vec<PathBuf> = state
-        .outbox
-        .session_items()
-        .into_iter()
-        .filter_map(|sent| sent.path)
-        .collect();
+    // Uma recebida pode ter sido reenviada e sua bolha enviada já excluída.
+    // A proteção da origem dura toda a Sessão, independentemente da bolha.
+    let sent_paths = state.outbox.original_paths();
     let sent = state.outbox.delete_items(sent_ids, do_celular)?;
     for item in &received {
         if let Some(id) = &item.sender_id {
@@ -863,12 +858,7 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                     files.insert(item.id, final_path_bg.clone());
                     if items.delete_requested(item.id) {
                         if let Some(completed) = items.snapshot().iter().find(|i| i.id == item.id) {
-                            let sent_paths: Vec<PathBuf> = state
-                                .outbox
-                                .session_items()
-                                .into_iter()
-                                .filter_map(|sent| sent.path)
-                                .collect();
+                            let sent_paths = state.outbox.original_paths();
                             recycle_received_file(&files, completed, &sent_paths);
                         }
                         files.remove(&item.id);

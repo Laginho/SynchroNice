@@ -24,7 +24,9 @@ gerenciamento de arquivos pelo app.
   ao fim da Sessão. A exceção é **Apagar tudo**, que descarta a conversa nos
   dois aparelhos e pode apagar os arquivos da Sessão atual que o app gravou.
   No PC, os recebidos vão para a Lixeira e as cópias internas de prints são
-  descartadas; o original de um Item enviado nunca é tocado. O PC só apaga
+  descartadas; o original de um Item enviado nunca é tocado. Sua proteção
+  dura toda a Sessão, mesmo após excluir a bolha enviada; os caminhos
+  protegidos ficam somente em memória. O PC só apaga
   o caminho registrado para o Item se o tamanho ainda confere e nenhum Item
   mais novo da Sessão usa o mesmo caminho. Sem a Sessão, uma exclusão de id
   antigo é ignorada; não há novo estado persistente de id → arquivo.

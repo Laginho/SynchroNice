@@ -176,6 +176,8 @@ type ChangeListener = Box<dyn Fn(&OutItem, bool) + Send + Sync>;
 struct Inner {
     manifest: Manifest,
     sent: Vec<SentItem>,
+    /// Originais desta Sessão, inclusive de bolhas já excluídas. Nunca persistidos.
+    original_paths: HashSet<PathBuf>,
     session_files: SessionFiles,
     /// Um remetente por conexão `/listen` viva, para anunciar um Item novo
     /// assim que ele é enfileirado. Descartados sob demanda: um `send` que
@@ -217,6 +219,7 @@ impl Outbox {
             inner: Arc::new(Mutex::new(Inner {
                 manifest,
                 sent: Vec::new(),
+                original_paths: HashSet::new(),
                 session_files,
                 listeners: Vec::new(),
                 changed: Vec::new(),
@@ -286,6 +289,9 @@ impl Outbox {
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
         let id = inner.manifest.next_id;
         let session_copy = path.is_none();
+        let original = path
+            .as_ref()
+            .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()));
         let path = match path {
             Some(path) => path,
             None => {
@@ -309,6 +315,9 @@ impl Outbox {
         inner.manifest.next_id += 1;
         inner.manifest.items.push(item.clone());
         save_manifest(&self.dir, &inner.manifest)?;
+        if let Some(original) = original {
+            inner.original_paths.insert(original);
+        }
         inner.sent.push(SentItem {
             item: item.clone(),
             entregue: false,
@@ -359,6 +368,16 @@ impl Outbox {
             .iter()
             .find(|sent| sent.item.id == id)
             .and_then(|sent| sent.path.clone())
+    }
+
+    pub(crate) fn original_paths(&self) -> Vec<PathBuf> {
+        self.inner
+            .lock()
+            .expect("fila de saída sem panic")
+            .original_paths
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// Esquece enviadas desta Sessão. Some enfileira também o controle para
