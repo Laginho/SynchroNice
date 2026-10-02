@@ -24,6 +24,9 @@ interface PendingQueueStore {
 
     /** Descarta todos os Pendentes e suas cópias internas. */
     fun clear()
+
+    /** Tira da fila os Pendentes com esses ids, no meio dela, e apaga as cópias internas; os demais seguem na ordem. */
+    fun remove(ids: Set<String>)
 }
 
 class InMemoryPendingQueueStore : PendingQueueStore {
@@ -34,6 +37,8 @@ class InMemoryPendingQueueStore : PendingQueueStore {
     override fun dequeueFirst() {}
 
     override fun clear() {}
+
+    override fun remove(ids: Set<String>) {}
 }
 
 /**
@@ -84,6 +89,15 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
             items.filterIsInstance<PendingItem.File>().forEach { Files.deleteIfExists(File(it.path).toPath()) }
         }
         items.clear()
+    }
+
+    override fun remove(ids: Set<String>) {
+        val removed = items.filter { it.id in ids }
+        if (removed.isEmpty()) return
+        persist(items - removed.toSet()) {
+            removed.filterIsInstance<PendingItem.File>().forEach { Files.deleteIfExists(File(it.path).toPath()) }
+        }
+        items.removeAll(removed.toSet())
     }
 
     /**
@@ -145,6 +159,8 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
     private fun encodeLine(item: PendingItem): String = when (item) {
         is PendingItem.Text -> "T\t${escape(item.id)}\t${escape(item.text)}"
         is PendingItem.File -> "F\t${escape(item.id)}\t${escape(item.path)}\t${escape(item.name)}"
+        is PendingItem.Delete ->
+            "D\t${escape(item.id)}\t${item.doPc.joinToString(",")}\t${escape(item.doCelular.joinToString(","))}"
     }
 
     /**
@@ -166,8 +182,14 @@ class FilePendingQueueStore(private val file: File) : PendingQueueStore {
             fields.size >= 2 && fields[0] == "T" -> PendingItem.Text(fields[1])
             fields.size >= 4 && fields[0] == "F" -> PendingItem.File(fields[2], fields[3], fields[1])
             fields.size >= 3 && fields[0] == "F" -> PendingItem.File(fields[1], fields[2])
+            fields.size >= 4 && fields[0] == "D" -> decodeDelete(fields)
             else -> null
         }
+    }
+
+    private fun decodeDelete(fields: List<String>): PendingItem.Delete? {
+        val doPc = fields[2].split(",").filter { it.isNotEmpty() }.map { it.toLongOrNull() ?: return null }
+        return PendingItem.Delete(doPc, fields[3].split(",").filter { it.isNotEmpty() }, fields[1])
     }
 
     private fun escape(value: String): String = value

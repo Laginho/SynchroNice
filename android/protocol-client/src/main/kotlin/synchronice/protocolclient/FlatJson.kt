@@ -1,12 +1,20 @@
 package synchronice.protocolclient
 
 /**
- * Parser mínimo para o JSON plano que o PC manda em `/listen` (spec,
- * `server.rs`): um objeto de um nível, chaves e valores string ou número,
- * sem aninhamento nem listas. Não é um parser de JSON geral.
+ * Parser mínimo para os objetos planos do protocolo (spec, `server.rs`):
+ * um objeto de um nível, chaves e valores string ou número, sem aninhamento
+ * nem listas. O `/listen` usa [parseListenObject], que também aceita as
+ * listas da exclusão. Não é um parser de JSON geral.
  */
-internal fun parseFlatJsonObject(json: String): Map<String, String> {
-    val result = LinkedHashMap<String, String>()
+@Suppress("UNCHECKED_CAST")
+internal fun parseFlatJsonObject(json: String): Map<String, String> =
+    parseJsonObject(json, allowLists = false) as Map<String, String>
+
+/** Como [parseFlatJsonObject], mas um valor pode ser uma lista de strings ou números (`do_pc`, `do_celular`). */
+internal fun parseListenObject(json: String): Map<String, Any> = parseJsonObject(json, allowLists = true)
+
+private fun parseJsonObject(json: String, allowLists: Boolean): Map<String, Any> {
+    val result = LinkedHashMap<String, Any>()
     var i = skipWhitespace(json, 0)
     require(i < json.length && json[i] == '{') { "esperava '{': $json" }
     i = skipWhitespace(json, i + 1)
@@ -20,7 +28,11 @@ internal fun parseFlatJsonObject(json: String): Map<String, String> {
         i = skipWhitespace(json, afterKey)
         require(json[i] == ':') { "esperava ':': $json" }
         i = skipWhitespace(json, i + 1)
-        val (value, afterValue) = if (json[i] == '"') parseJsonString(json, i) else parseJsonNumber(json, i)
+        val (value, afterValue) = when {
+            json[i] == '"' -> parseJsonString(json, i)
+            allowLists && json[i] == '[' -> parseJsonList(json, i)
+            else -> parseJsonNumber(json, i)
+        }
         require(key !in result) { "chave JSON duplicada: $key" }
         result[key] = value
         i = skipWhitespace(json, afterValue)
@@ -69,9 +81,26 @@ private fun parseJsonString(json: String, start: Int): Pair<String, Int> {
     return sb.toString() to (i + 1)
 }
 
+private fun parseJsonList(json: String, start: Int): Pair<List<String>, Int> {
+    val values = mutableListOf<String>()
+    var i = skipWhitespace(json, start + 1)
+    if (json[i] == ']') return values to (i + 1)
+    while (true) {
+        i = skipWhitespace(json, i)
+        val (value, afterValue) = if (json[i] == '"') parseJsonString(json, i) else parseJsonNumber(json, i)
+        values.add(value)
+        i = skipWhitespace(json, afterValue)
+        when (json[i]) {
+            ',' -> i++
+            ']' -> return values to (i + 1)
+            else -> error("esperava ',' ou ']': $json")
+        }
+    }
+}
+
 private fun parseJsonNumber(json: String, start: Int): Pair<String, Int> {
     var i = start
-    while (i < json.length && json[i] != ',' && json[i] != '}' && !json[i].isWhitespace()) i++
+    while (i < json.length && json[i] != ',' && json[i] != '}' && json[i] != ']' && !json[i].isWhitespace()) i++
     val number = json.substring(start, i)
     require(jsonNumber.matches(number)) { "número JSON inválido" }
     return number to i
