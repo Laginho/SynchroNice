@@ -569,6 +569,39 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
     }
 
+    #[test]
+    fn snapshot_da_janela_esconde_upload_ja_selecionado_para_exclusao() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let concluido = items.start_file("b.bin".into(), 100);
+        items.file_done(concluido.id);
+        let texto = items.push_text("fica".into());
+
+        items.forget(&[enviando.id, concluido.id], vec![], false);
+
+        let ids: Vec<u64> = super::recebidos_visiveis(&items)
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, vec![texto.id]);
+        assert!(items.delete_requested(enviando.id));
+    }
+
+    #[test]
+    fn snapshot_da_janela_mantem_upload_nao_selecionado() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let outro = items.start_file("b.bin".into(), 100);
+
+        items.forget(&[outro.id], vec![], false);
+
+        let ids: Vec<u64> = super::recebidos_visiveis(&items)
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, vec![enviando.id]);
+    }
+
     use super::executavel;
     use std::path::Path;
 

@@ -39,7 +39,7 @@ if ((Test-Path "$root/pc/ui") -and (-not $TestsOnly)) {
 }
 
 if (Test-Path "$root/pc/ui/copiaveis.test.ts") {
-    Run-Step "node --test (pc/ui)" "$root" { node --test pc/ui/copiaveis.test.ts pc/ui/bandeja.test.ts }
+    Run-Step "node --test (pc/ui)" "$root" { node --test pc/ui/copiaveis.test.ts pc/ui/bandeja.test.ts pc/ui/apagados.test.ts }
 }
 
 if (Test-Path "$root/qa/dump.test.mjs") {
