@@ -1270,4 +1270,263 @@ class ProtocolClientTest {
             destination.delete()
         }
     }
+
+    // --- SYN-027: Apagar tudo no celular ---
+
+    @Test
+    fun `listen entrega a exclusao com do_pc e do_celular ao lado dos Itens`() {
+        val port = freePort()
+        val server = fakeServer(port, "/listen") { exchange ->
+            val body = "{\"id\":1,\"at_ms\":100,\"kind\":\"text\",\"text\":\"oi\"}\n" +
+                "{\"id\":2,\"at_ms\":200,\"kind\":\"delete\",\"do_pc\":[5,6],\"do_celular\":[\"a-b\",\"c\"]}\n" +
+                "{\"id\":3,\"at_ms\":300,\"kind\":\"delete\",\"do_pc\":[],\"do_celular\":[]}\n" +
+                "{\"id\":4,\"at_ms\":400,\"kind\":\"file\",\"name\":\"foto.png\",\"size\":42}"
+            val bytes = body.toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        try {
+            assertEquals(
+                listOf(
+                    Item.Text(1, 100, "oi"),
+                    Item.Delete(2, 200, listOf(5L, 6L), listOf("a-b", "c")),
+                    Item.Delete(3, 300, emptyList(), emptyList()),
+                    Item.FileMeta(4, 400, "foto.png", 42),
+                ),
+                client(port).listen(),
+            )
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `ack de exclusao recebida e POST outbox id ack`() {
+        val port = freePort()
+        val calls = mutableListOf<String>()
+        val server = fakeServer(port, "/outbox/7/ack") { exchange ->
+            calls.add("${exchange.requestMethod} ${exchange.requestURI.path} ${exchange.requestHeaders.getFirst("Authorization")}")
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        try {
+            client(port).acknowledgeDelete(Item.Delete(7, 100, listOf(1L), emptyList()))
+
+            assertEquals(listOf("POST /outbox/7/ack Bearer $TOKEN"), calls)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `exclusao enfileirada sobrevive a recriar o store e sai como POST items delete na ordem da fila`() {
+        val port = freePort()
+        val dir = kotlin.io.path.createTempDirectory("pending-delete").toFile()
+        val queueFile = File(dir, "pending.txt")
+        try {
+            val sender = client(port, FilePendingQueueStore(queueFile))
+            sender.enqueueText("A")
+            sender.enqueueDelete(listOf(1L, 2L), listOf("x", "y"))
+            sender.enqueueText("B")
+            assertTrue(sender.hasPending())
+
+            val requests = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requests.add("text:" + exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            server.createContext("/items/delete") { exchange ->
+                requests.add(
+                    "delete:${exchange.requestMethod}:${exchange.requestHeaders.getFirst("Authorization")}:" +
+                        exchange.requestBody.readBytes().toString(Charsets.UTF_8),
+                )
+                exchange.sendResponseHeaders(204, -1)
+                exchange.close()
+            }
+            try {
+                val restored = client(port, FilePendingQueueStore(queueFile))
+
+                restored.retryPending()
+
+                assertEquals(
+                    listOf(
+                        "text:A",
+                        "delete:POST:Bearer $TOKEN:{\"do_pc\":[1,2],\"do_celular\":[\"x\",\"y\"]}",
+                        "text:B",
+                    ),
+                    requests,
+                )
+                assertFalse(restored.hasPending())
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `enfileirar a exclusao tira da fila os Pendentes listados e apaga a copia interna`() {
+        val port = freePort()
+        val dir = kotlin.io.path.createTempDirectory("pending-delete-drop").toFile()
+        val queueFile = File(dir, "pending.txt")
+        val original = File(dir, "video.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        try {
+            val sender = client(port, FilePendingQueueStore(queueFile))
+            val idA = sender.enqueueTextItem("A")!!
+            val idFile = sender.enqueueFileItem(original)!!
+            sender.enqueueTextItem("B")
+
+            sender.enqueueDelete(emptyList(), listOf(idA, idFile))
+
+            assertTrue(File(dir, "pending.txt.payloads").listFiles().isNullOrEmpty())
+            val requests = mutableListOf<String>()
+            val server = fakeServer(port, "/items/text") { exchange ->
+                requests.add("text:" + exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            server.createContext("/items/file") { exchange ->
+                requests.add("file")
+                exchange.requestBody.readBytes()
+                exchange.sendResponseHeaders(201, -1)
+                exchange.close()
+            }
+            server.createContext("/items/delete") { exchange ->
+                requests.add("delete:" + exchange.requestBody.readBytes().toString(Charsets.UTF_8))
+                exchange.sendResponseHeaders(204, -1)
+                exchange.close()
+            }
+            try {
+                client(port, FilePendingQueueStore(queueFile)).retryPending()
+
+                assertEquals(listOf("text:B", "delete:{\"do_pc\":[],\"do_celular\":[\"$idA\",\"$idFile\"]}"), requests)
+            } finally {
+                server.stop(0)
+            }
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `tirar da fila os Pendentes de uma exclusao vinda do PC nao enfileira nada`() {
+        val port = freePort()
+        val dir = kotlin.io.path.createTempDirectory("pending-delete-from-pc").toFile()
+        val queueFile = File(dir, "pending.txt")
+        val original = File(dir, "video.bin").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        try {
+            val sender = client(port, FilePendingQueueStore(queueFile))
+            val idA = sender.enqueueTextItem("A")!!
+            val idFile = sender.enqueueFileItem(original)!!
+            val idB = sender.enqueueTextItem("B")!!
+
+            sender.discardPending(listOf(idA, idFile))
+
+            assertTrue(sender.hasPending())
+            assertTrue(File(dir, "pending.txt.payloads").listFiles().isNullOrEmpty())
+            assertEquals(listOf(idB), FilePendingQueueStore(queueFile).load().map { it.id })
+
+            sender.discardPending(listOf(idB))
+
+            assertFalse(sender.hasPending())
+            assertTrue(FilePendingQueueStore(queueFile).load().isEmpty())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `204 tira a exclusao da fila e 503 ou falha de rede a mantem`() {
+        val port = freePort()
+        val sender = client(port)
+        sender.enqueueDelete(listOf(1L), emptyList())
+
+        sender.retryPending()
+        assertTrue(sender.hasPending())
+
+        val status = java.util.concurrent.atomic.AtomicInteger(503)
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val server = fakeServer(port, "/items/delete") { exchange ->
+            calls.incrementAndGet()
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(status.get(), -1)
+            exchange.close()
+        }
+        try {
+            sender.retryPending()
+            assertTrue(sender.hasPending())
+            assertEquals(1, calls.get())
+
+            status.set(204)
+            sender.retryPending()
+
+            assertFalse(sender.hasPending())
+            assertEquals(2, calls.get())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `sendText e sendFile devolvem o X-Item-Id que o servidor recebeu`() {
+        val port = freePort()
+        val ids = mutableListOf<String?>()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        server.createContext("/items/file") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            val sender = client(port)
+            val textId = sender.sendText("oi")
+            val fileId = sender.sendFile(tempFile(byteArrayOf(1, 2, 3)))
+
+            assertEquals(listOf(textId, fileId), ids)
+            assertTrue(textId?.isNotBlank() == true && fileId?.isNotBlank() == true && textId != fileId)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `id devolvido a um Item que ficou Pendente e o que sai depois`() {
+        val port = freePort()
+        val sender = client(port)
+        val textId = sender.sendText("fora")
+        val fileId = sender.sendFile(tempFile(byteArrayOf(4, 5)))
+        val queuedText = sender.enqueueTextItem("enfileirado")
+        val queuedFile = sender.enqueueFileItem(tempFile(byteArrayOf(6)))
+        assertTrue(sender.hasPending())
+
+        val ids = mutableListOf<String?>()
+        val server = fakeServer(port, "/items/text") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        server.createContext("/items/file") { exchange ->
+            ids.add(exchange.requestHeaders.getFirst("X-Item-Id"))
+            exchange.requestBody.readBytes()
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
+        try {
+            sender.retryPending()
+
+            assertEquals(listOf(textId, fileId, queuedText, queuedFile), ids)
+            assertTrue(ids.all { it?.isNotBlank() == true })
+        } finally {
+            server.stop(0)
+        }
+    }
 }

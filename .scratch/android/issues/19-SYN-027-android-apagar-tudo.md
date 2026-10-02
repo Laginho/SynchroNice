@@ -1,5 +1,5 @@
 # SYN-027: Apagar tudo no celular, cliente do protocolo e fila
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
