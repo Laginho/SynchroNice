@@ -1,5 +1,5 @@
 # SYN-028: Apagar tudo na janela do PC
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -196,3 +196,108 @@ caminho do teste). Correção sem tocar em teste:
   (Rust 7 unitários novos incluídos, 63 HTTP; UI e QA verdes).
 - Limite conhecido, o mesmo da primeira passagem: recarregar a janela *dentro*
   dos 5 s devolve as bolhas, pois nada foi apagado ainda. QA no stage 3.
+
+#### Review stage 3, reabertura (2026-10-02)
+
+Verdict: Reopen — critérios 3 e 4: snapshot de upload concluído entre leituras e exclusão perdida antes do registro de `apagado`.
+
+Re-revisão dos ❌ anteriores e do diff `git diff 09228ef...386f452`,
+com Standards e Spec em subagentes independentes. Base do loop:
+`sweatshop/2026-10-01-2019` (`7e866dd`); rebase no-op. Conferidos
+também o diff completo desde a base, os commits e as duas decisões do
+proxy. Nenhuma correção de produção ou teste foi feita pelo stage 3.
+
+##### Standards
+
+- ❌ **P2 — snapshot e visibilidade não são consistentes.**
+  `lib.rs:87-92` chama `Items::snapshot()` e depois
+  `Items::delete_requested()` sob locks separados. O upload selecionado
+  pode estar na cópia; antes do filtro, `file_done` ou `file_failed`
+  chama `Inner::finish_delete` (`items.rs:88-95,201,224`), removendo
+  tanto o Item quanto a marca. O filtro vê `false` e devolve a cópia
+  antiga. Viola Engineering Workflow, quality gate 1, e deixa parcial
+  o ❌ do critério 3. Achado no helper novo, não omissão da passagem
+  anterior. Os dois testes novos só verificam o upload que continua em
+  `Receiving` durante a consulta. **Evidência estática**; não atribuir
+  a esse caso o resultado do cenário dinâmico estável de reload.
+- ✅ A lápide marcada antes do IPC (`main.ts:671`) continua bloqueando
+  progresso/ACK após os 5 s (`520/626`). QA confirmou que o chunk real
+  durante o IPC retido e o término posterior não recriam a bolha.
+- ✅ A exclusão observada marca ids em `731`; filtros do Desfazer e
+  carga inicial, mais os guards, bloqueiam snapshots atrasados. Ambos
+  os caminhos passaram no CDP com respostas reais retidas.
+- ✅ Primary files e test-first respeitados: `d4d3d47` só testes e sua
+  inclusão no gate; `386f452` só produção/ticket, sem tocar testes.
+  `items.rs` e a operação do SYN-019 não foram alterados. Nenhum smell
+  acionável adicional.
+
+##### Spec
+
+- ❌ **P2 — critério 3:** “Recarregar a janela depois do Apagar tudo
+  não traz nada de volta”. O interleaving do helper descrito acima
+  ainda pode devolver o upload excluído depois da aplicação. Ao
+  recarregar, `Apagados` começa vazio, e a exclusão local usa
+  `notify=false` (`server.rs:390,676-679`); nenhum `apagado` posterior
+  corrige a bolha antiga. O caso estável original foi corrigido e
+  passou no executável; falta fechar a conclusão concomitante à
+  consulta. Encontrado no código novo.
+- ❌ **P2 — critério 4, omissão da primeira passagem:** “Uma exclusão
+  vinda do celular tira as bolhas daqueles Itens da janela, sem
+  aviso”. `main.ts:974-978` registra `item` e `enviado` antes de
+  `apagado`, com `await` entre eles. Um Item recebido nessa janela
+  cria bolha; sua exclusão antes do registro de `apagado` se perde.
+  O snapshot posterior vem vazio, mas `1012-1013` apenas adicionam
+  ou atualizam, sem retirar a bolha antiga. **Reproduzido duas vezes
+  no app:** reter só o pedido real de registro de `apagado`, enviar
+  e excluir por HTTP, liberar o registro e conferir o snapshot.
+  Backend vazio e uma bolha residual após duas leituras em cada
+  execução. Este código já estava em `09228ef`; a primeira revisão
+  deixou escapar essa variante, agora explicitamente registrada.
+- ✅ Critérios 1 e 2 e os cenários anteriores passam: Desfazer mantém
+  arquivo e restaura três bolhas; expiração recicla; segundo clique
+  finaliza só a seleção anterior; chegada posterior permanece;
+  progresso pós-5 s não recria; reload estável de upload selecionado
+  fica vazio; exclusão comum e snapshots atrasados observados são
+  respeitados. Critério 5 verde. Nenhum escopo indevido identificado.
+
+**Prova vermelho→verde:** registro real do stage 2 conferido:
+`d4d3d47` falha com `E0425` para o helper e
+`ERR_MODULE_NOT_FOUND` para `apagados.ts`; `386f452` passa no gate
+atual sem editar testes. Extrato `stage2-red.log` no RunDir do QA.
+Essa prova cobre as costuras declaradas; não cobre os dois interleavings
+que ainda falham na revisão.
+
+**Validação:** gate completo em primeiro plano, exit 0, `gate: passou`.
+Rust 82/82 (7 unitários + 7 config + 5 outbox + 63 HTTP); UI 58/58;
+kit QA 14/14; fmt, Clippy e TypeScript verdes. Android `check` verde;
+XMLs `UP-TO-DATE` com 71 testes do app e 72 do cliente, sem
+falhas/erros/pulos. O build de QA compilou APK e PC debug da branch.
+
+**QA:** [relatório da re-revisão](../../qa-runs/2026-10-02-syn-028-rereview.md).
+Critérios 1 a 4 por HTTP/CDP reais, com a exceção explicitada da corrida
+interna do Rust, analisada estaticamente. Pasta vazia; arquivo na Lixeira
+com origem e SHA-256 conferidos; baseline do emulador preservada;
+`clean` e `down` concluídos. Sem débito humano neste recorte.
+
+**Decisões do proxy conferidas:** (1) `2026-10-01 Proxy decided` mantém
+o fatiamento: backend/protocolo/Lixeira no SYN-019, cola/janela aqui,
+critérios 2 e 4 explícitos e `Review: agent`; (2) `2026-10-02 Proxy
+decided (após a revisão abaixo)` autoriza as lápides em módulo puro,
+os testes próprios, o caminho no gate e o helper de `list_items`,
+sem tocar em `items.rs`. Ambas foram respeitadas. Nenhum critério ou
+decisão foi reescrito por esta revisão.
+
+**Para o stage 2:** fechar os dois ❌ numa passagem, preservando todos
+os casos aprovados. Acrescentar provas de regressão da finalização
+concomitante ao snapshot e da exclusão antes do registro do ouvinte,
+nas costuras permitidas, com commit próprio vermelho antes do código.
+Se a solução exigir outra costura ou alterar `items.rs`, consultar
+stage 1/proxy antes de ampliar Primary files. Rodar o gate e repetir
+o QA da abertura e os cenários comuns.
+
+`Stage: to-implement` e esta revisão são committed em `syn-028`,
+sem merge, push ou PR individual. Não havia linha SYN-028 no ledger
+a retirar. Resumo por eixo: Standards, **1 bloqueador** (snapshot
+inconsistente); Spec, **2 achados** (snapshot e exclusão perdida na
+abertura). São dois problemas distintos; o de snapshot consta dos
+dois eixos.
