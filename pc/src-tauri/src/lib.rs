@@ -293,6 +293,47 @@ fn read_clipboard_file_list() -> Result<Vec<String>, String> {
     clipboard_win::get_clipboard(clipboard_win::formats::FileList).map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct PreviaDeCaminho {
+    tamanho: u64,
+    bytes: Option<Vec<u8>>,
+}
+
+/// Prévia somente leitura: nunca usa a fila nem cria cópias de entrega.
+#[tauri::command]
+fn previa_de_caminho(caminho: String) -> Result<PreviaDeCaminho, String> {
+    use std::io::Read;
+    const LIMITE: u64 = 10 * 1024 * 1024;
+    let caminho = Path::new(&caminho);
+    let arquivo = std::fs::File::open(caminho).map_err(|e| e.to_string())?;
+    let metadata = arquivo.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("a origem não é um arquivo".to_string());
+    }
+    let imagem = caminho
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
+                .contains(&ext.to_ascii_lowercase().as_str())
+        });
+    let bytes = if imagem && metadata.len() <= LIMITE {
+        let mut bytes = Vec::new();
+        // Também limita o caso em que o arquivo cresce depois do metadata.
+        arquivo
+            .take(LIMITE + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        (bytes.len() as u64 <= LIMITE).then_some(bytes)
+    } else {
+        None
+    };
+    Ok(PreviaDeCaminho {
+        tamanho: metadata.len(),
+        bytes,
+    })
+}
+
 /// Sobe o servidor HTTP com o token do Par, anuncia o serviço por mDNS, liga
 /// a lista de Itens e a fila de saída à janela, e disponibiliza a fila para
 /// os comandos de envio.
@@ -433,6 +474,7 @@ pub fn run() {
             send_files,
             send_bytes,
             read_clipboard_file_list,
+            previa_de_caminho,
             caminho_para_arrastar,
             caminho_enviado_para_arrastar,
             abrir_arquivo,
