@@ -873,8 +873,10 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                         }
                         files.remove(&item.id);
                     }
-                    items.file_done(item.id);
                 }
+                // O observador de Done pode resolver o caminho pela API do
+                // servidor, que também adquire received_files.
+                items.file_done(item.id);
                 items.notify_deleted();
                 if let Some(id) = item_id {
                     // Depois do rename: um crash entre os dois duplica, nunca
