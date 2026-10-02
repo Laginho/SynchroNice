@@ -1970,6 +1970,45 @@ fn exclusao_durante_upload_que_falha_descarta_item_e_retry() {
     assert!(!raiz.path().join("pasta/curso.bin").exists());
 }
 
+#[test]
+fn exclusao_de_recebido_reenviado_preserva_o_original_do_enviado() {
+    for (local, entregue) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (base, items, outbox, running, _raiz) = sobe_para_exclusao();
+        assert_eq!(
+            post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"original"),
+            201
+        );
+        let recebido = items.snapshot()[0].id;
+        let original = running.caminho_do_arquivo(recebido).unwrap();
+        let enviado = outbox.enqueue_file_from_path(&original).unwrap();
+        if entregue {
+            assert_eq!(
+                requisicao_crua(
+                    &base,
+                    "POST",
+                    &format!("/outbox/{}/ack", enviado.id),
+                    Some(TOKEN)
+                )
+                .0,
+                204
+            );
+        }
+        if local {
+            running.apagar_tudo(&[recebido], &[enviado.id]).unwrap();
+            assert!(outbox.session_items().is_empty());
+        } else {
+            assert_eq!(excluir_ids(&base, &[], &["foto"]), 204);
+            assert_eq!(outbox.session_items().len(), 1);
+        }
+        assert!(items.snapshot().is_empty());
+        assert_eq!(
+            std::fs::read(original).unwrap(),
+            b"original",
+            "a origem de um enviado, Pendente ou Entregue, continua protegida"
+        );
+    }
+}
+
 fn observa_exclusoes(items: &Items) -> std::sync::mpsc::Receiver<(Vec<u64>, Vec<u64>)> {
     let (tx, rx) = std::sync::mpsc::channel();
     let snapshot = items.clone();
