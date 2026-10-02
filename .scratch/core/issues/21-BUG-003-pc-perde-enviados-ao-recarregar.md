@@ -1,5 +1,5 @@
 # BUG-003: O PC perde os enviados ao recarregar, e a bolha enviada não abre nem arrasta
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -102,6 +102,16 @@ duas instâncias com a mesma pasta de dados, e a abertura com a fila quebrada
   quebrada em Verification.
 
 ## Comments
+
+- Stage 2, reabertura (2026-10-02): chamadores reconferidos: criação da fila
+  em `start_server` e nos testes do servidor; cópias usadas por envio de bytes,
+  leitura/abertura/drag da enviada, ACK e último clone. `clear` continua
+  descartando só Pendentes. Novo teste na API pública reproduziu a perda:
+  `filas_vivas_preservam_prints_umas_das_outras` falha com `NotFound` ao ler
+  o print confirmado depois de criar a segunda fila; `outbox` 4/5 verdes.
+  O harness do critério 4 usa agora o próprio binário em processo filho,
+  `process::exit` sem destrutores, com os mesmos asserts de Sessão/Pendentes;
+  passou na implementação anterior. O `mem::forget` não simulava processo morto.
 
 - Stage 2 (2026-10-01): chamadores conferidos: comandos de envio em `lib.rs`,
   download/ACK/escuta no servidor e `Par::rotate` (`clear`). Primeiro vermelho:
