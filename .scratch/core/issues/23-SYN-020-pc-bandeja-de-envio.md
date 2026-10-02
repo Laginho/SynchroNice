@@ -1,5 +1,5 @@
 # SYN-020: Bandeja de envio no PC antes de mandar
-Stage: reviewing
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: agent
@@ -202,3 +202,57 @@ alcançável, ele fica 👤.
   antes do Enviar em vez do envio imediato. Permitido pela regra de
   documentação obsoleta do `ticket-flow`; nenhuma mudança de produção ou
   de testes. Revisões Standards e Spec realizadas separadamente.
+
+#### Resolution (2026-10-02)
+
+Verdict: Reopen — critério 11: imagem colada acima de 10 MiB ainda recebe miniatura.
+
+- **Standards — duas observações; nenhuma violação pendente no código.**
+  A descrição obsoleta de envio imediato em `.scratch/core/spec.md` foi
+  corrigida em `c1f91f0`. Oito commits de stage 2 têm assunto conforme
+  Conventional Commits e ID, mas faltam os corpos explicativos exigidos
+  pelo fluxo: `42dafcb`, `d08b8e8`, `35a5f3f`, `3c4deb8`, `b728e9d`,
+  `f1fd396`, `85d31de`, `55855b5`. É uma divergência de processo, sem
+  reescrever o histórico nem reabrir por ela. Primary files e separação
+  entre testes e produção respeitados; nenhum smell de baseline relevante
+  para este ticket encontrado.
+- **Spec — uma falha, confiança alta, critério 11.** Em
+  `pc/ui/main.ts:170`, `adicionarImagem` cria a URL da miniatura para todo
+  `File`, sem verificar o tamanho. Um PNG válido de 2300×2300 com
+  15.877.742 bytes, colado por `paste-image` nativo, chega ao evento como
+  `image/png`, `File.size=15933610`. O chip mostra miniatura carregada de
+  2300×2300 e `15,2 MB`; o contrato exige chip de documento acima de
+  10 MiB. O mesmo arquivo por `paste-files` mostra `15,1 MB` sem imagem,
+  corretamente. Nenhuma outra falha demonstrada de critério, regressão ou
+  ampliação de escopo encontrada.
+- As duas decisões **Proxy decided** foram respeitadas: comando de prévia
+  somente leitura em `lib.rs`, com bytes limitados a imagens de até 10 MiB;
+  função no módulo existente, sem seam novo, testada diretamente no
+  `mod tests`. O histórico confirma os commits próprios de testes antes
+  da produção e a prova red-before-green registrada no stage 2.
+- Gate completo de revisão saiu **0**: fmt, Clippy e TypeScript verdes,
+  **PC 58/58**, **UI 54/54**, **kit 14/14**, `gradle check` verde.
+  XMLs Android: **133 testes**, zero falhas/erros, tarefas de teste
+  `UP-TO-DATE`. Na primeira execução houve timeout no teste antigo
+  `dois_envios_concorrentes_do_mesmo_nome_preservam_ambos`; ele passou na
+  repetição completa. O QA nativo confirmou a falha visual apesar do gate
+  verde, portanto o ticket volta a `to-implement` conforme a regra local
+  de QA.
+- Evidências e veredito por critério no
+  [relatório de QA](../../qa-runs/2026-10-02-syn-020-review.md).
+  Pendência de implementação: aplicar o limite de prévia também à imagem
+  colada, preservando o `File` original para o envio; verificar imagem
+  colada pequena e maior que 10 MiB, além do caminho que já funciona.
+- Débito humano: verificar o drop nativo e o arrasto de uma bolha de volta
+  à janela. Computer Use leu a árvore, mas as duas capturas falharam por
+  timeout e o clique informou `coordinate input geometry is unavailable`.
+  Os guards de arrasto permanecem presentes, conferidos por inspeção.
+- Débito humano: completar esconder/reabrir do critério 8. Alt+F4 nativo
+  escondeu a janela e o CDP confirmou bandeja e texto preservados; a janela
+  escondida deixou de ser exposta pelo helper, e `get_window`/
+  `activate_window` não permitiram reabri-la. A preservação após reabrir
+  ficou sem verificação.
+- Limpeza concluída e destinos reais confirmados no relatório; a falha de
+  confirmação da Lixeira do kit foi registrada somente em Comments do
+  CLEAN-019, que já trata dela. PC isolado e emulador encerrados. Revisão
+  final sem mudança de produção/testes, segredos ou artefatos gerados.
