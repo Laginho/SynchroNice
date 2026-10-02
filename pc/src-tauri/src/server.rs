@@ -636,7 +636,10 @@ fn apply_delete(
 ) -> io::Result<()> {
     // O mesmo lock protege o registro do caminho e a conclusão do upload:
     // a exclusão vê o arquivo completo ou fica marcada para o seu término.
-    let ops = state.file_ops.lock().expect("operações de arquivo sem panic");
+    let ops = state
+        .file_ops
+        .lock()
+        .expect("operações de arquivo sem panic");
     let mut accepted = state
         .accepted_item_ids
         .lock()
@@ -729,7 +732,10 @@ fn recycle_received_file(state: &AppState, files: &HashMap<u64, PathBuf>, item: 
 /// Rename e registro pertencem à mesma operação protegida da exclusão.
 /// Roda numa thread de bloqueio: não segura um Mutex de std através de await.
 fn finish_received_file(state: &AppState, item: &Item, temp: &Path, path: &Path) -> bool {
-    let _ops = state.file_ops.lock().expect("operações de arquivo sem panic");
+    let _ops = state
+        .file_ops
+        .lock()
+        .expect("operações de arquivo sem panic");
     if let Err(error) = std::fs::rename(temp, path) {
         eprintln!("falha ao renomear {temp:?} para {path:?}: {error}");
         return false;
