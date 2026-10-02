@@ -1,5 +1,5 @@
 # SYN-021: Colar imagem no chat do Android, numa bandeja como a do PC
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -214,3 +214,62 @@ independentes. Todos os achados desta passagem estão abaixo.
 - Diff revisado e `git diff --check` limpo; commits de produção não alteram
   testes. QA visual do critério 7 permanece para o stage 3; esta retomada
   verificou a navegação em Robolectric, sem execução em aparelho/emulador.
+
+#### Resolution (2026-10-01)
+
+Verdict: Approve
+
+Revisão da retomada `9ce3c44...24fda0e`, contra a base de sessão `b3d1d2b`.
+Standards e Spec foram revisados por agentes independentes. Nenhuma mudança
+de produção ou de testes foi feita nesta revisão.
+
+##### Standards
+
+- Zero achados pendentes. Cada botão ✕ agora tem `testTag` baseada no UUID
+  do staging e preserva a descrição acessível, conforme `docs/agents/qa.md`.
+- Primary files e separação test-first respeitados: `4294ac5` e `387c7b9`
+  adicionam testes antes das correções; `bbc892c` e `24fda0e` não alteram
+  testes. Os testes exercitam o AppState e a navegação Compose de produção.
+- Nenhum desvio documentado ou smell acionável no diff da retomada.
+
+##### Spec
+
+- Corrigida a regressão de colagem mista: `pasteItem` copia a URI dentro do
+  callback e retorna `false` quando o item contém texto explícito. O
+  bytecode do Compose 1.12.1 instalado confirma que o campo insere o texto
+  dos itens restantes. As legendas também sobrevivem à URI recusada ou
+  ilegível; texto sozinho e URI sozinha têm cobertura.
+- Corrigido o critério 7: o BackHandler na raiz da MainActivity continua
+  ativo em Configurações. O teste abre essa tela pela ação Compose real,
+  verifica exclusão da cópia e bandeja vazia sem encerrar a Activity no
+  primeiro Voltar, e saída no segundo. O envio em andamento segue protegido.
+- Critérios 1–6 preservados, câmera e Compartilhar continuam enviando
+  diretamente. Nenhum requisito faltante, escopo extra ou regressão
+  identificado no diff desta passagem. Spec: zero achados pendentes.
+
+##### Validação e integração
+
+- Prova red-green conferida nos commits e logs: `4294ac5` falha por ausência
+  de `pasteItem`, seguido de `bbc892c` verde; `387c7b9` falha na asserção de
+  bandeja vazia após Voltar em Configurações, seguido de `24fda0e` verde.
+  A prova original permanece em `c152121`/`6b9122e` e `8ce2234`/`b2f8fd3`.
+- Rebase sobre `sweatshop/2026-10-01-2019`: já atualizado, sem conflito.
+  Gate completo passou: Rust 52, UI 47, kit QA 14, protocolo JVM 62 e app
+  Android 71 (12 em PasteTrayTest), total 246, zero falhas ou ignorados.
+  fmt, Clippy, TypeScript e lint Android passaram. As tarefas JVM estavam
+  `UP-TO-DATE`; as contagens foram conferidas nos XMLs do runner.
+  Log local: `.scratch/run-log/syn-021-rereview-gate.log`.
+- QA do critério 7 abortou por infraestrutura: SDK sem
+  `emulator/emulator.exe`, `qa/up.ps1` retornou WMI 9 e adb não listou
+  aparelhos. Computer Use inicializou e não encontrou janela Android.
+  Relatório: `.scratch/qa-runs/2026-10-01-syn-021-rereview.md`.
+  Isso não reprova o ticket, conforme a regra local de QA.
+- `qa/down.ps1` confirmado com o mesmo RunDir e SDK: `stopped=true`,
+  `restored=false`, estado inativo. Nenhum arquivo de usuário criado ou
+  apagado. `git diff --check` limpo; diff final restrito ao ticket, ledger
+  e relatório QA.
+- Integrado sem squash na branch de sessão pelo merge `b1700f5`;
+  implementação final `24fda0e`, registrada no ledger. O PR da sessão
+  continua sendo responsabilidade do driver e seu merge, do humano.
+
+- Débito humano: verificar no aparelho o critério 7 do SYN-021: colar imagem pelo teclado/menu e ver a bandeja acima do campo, remover pelo ✕, usar Voltar com a bandeja cheia antes de sair e confirmar que a câmera continua enviando diretamente. Kit e Computer Use tentados; não havia emulador, aparelho conectado ou janela Android disponível.
