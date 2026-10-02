@@ -62,3 +62,29 @@ test("limpar esvazia a bandeja e não reutiliza a identidade das entradas", () =
   assert.notEqual(nova.id, antiga.id);
   assert.deepStrictEqual(bandeja.sequencia(""), [{ tipo: "entrada", entrada: nova }]);
 });
+
+test("envio parcial deixa só a entrada que falhou, marcada, e permite tentar de novo", () => {
+  const bandeja = new Bandeja<string>();
+  const primeira = bandeja.adicionar("foto.png");
+  const falha = bandeja.adicionar("foto.png");
+  const ultima = bandeja.adicionar("documento.pdf");
+  bandeja.concluir(primeira.id, true);
+  bandeja.concluir(falha.id, false);
+  bandeja.concluir(ultima.id, true);
+  assert.deepStrictEqual(bandeja.entradas(), [{ id: falha.id, origem: "foto.png", falhou: true }]);
+  bandeja.concluir(falha.id, true);
+  assert.deepStrictEqual(bandeja.entradas(), []);
+});
+
+test("resultados de um envio não retiram entradas adicionadas depois", () => {
+  const bandeja = new Bandeja<string>();
+  const antiga = bandeja.adicionar("foto.png");
+  bandeja.limpar();
+  const nova = bandeja.adicionar("foto.png");
+  bandeja.concluir(antiga.id, true);
+  bandeja.concluir(antiga.id, false);
+  assert.deepStrictEqual(bandeja.entradas(), [nova]);
+  bandeja.remover(nova.id);
+  bandeja.concluir(nova.id, false);
+  assert.deepStrictEqual(bandeja.entradas(), []);
+});
