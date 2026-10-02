@@ -80,7 +80,12 @@ descartada ao encerrar, o Par persiste.
 - **Fila de Pendentes.** Cada lado guarda em disco os Itens que não conseguiu entregar (texto em linha, arquivo copiado para uma pasta interna do app, nunca só o caminho, porque PNG temporário, arquivo movido e URI de Compartilhar do Android não sobrevivem até a entrega). Ao detectar o outro lado, drena em ordem. É o único estado persistido além do Par e da Pasta.
 - **Sessão em memória.** O chat visível é uma lista em memória. Encerrar de fato o app limpa. Fechar a janela do PC esconde na bandeja.
 - **Pasta.** Escolhida via diálogo nativo no primeiro uso, gravada na configuração. Nomes repetidos recebem sufixo ` (1)`, ` (2)`, como o Windows.
-- **Entrada no PC.** Enter envia texto. Drop nativo da janela recebe caminhos. Ctrl+V: se o clipboard tem imagem, grava um PNG temporário e envia; se tem lista de arquivos (formato de lista do Windows, lido no lado Rust), envia cada um. Sem botão de anexar.
+- **Entrada no PC.** Drop nativo da janela e Ctrl+V de imagem ou de arquivos
+  preparam uma bandeja acima do composer. Texto puro colado cai no campo.
+  Enter e ➤ enviam cada entrada como um Item separado, na ordem de entrada,
+  com o texto por último, inclusive quando o campo está vazio. Os arquivos
+  por caminho só são copiados para a fila ao enviar; o print colado mantém
+  seus bytes no estado da janela até lá. Sem botão de anexar.
 - **Arrastar para fora no PC.** A bolha de arquivo inicia um drag nativo de arquivo (API do Tauri), com o caminho na Pasta. Funciona para qualquer tipo, não só imagem.
 - **Android.** Activity única com o chat. Intent filter de SEND e SEND_MULTIPLE para texto e qualquer mime. Múltiplos itens viram Itens separados. Envio roda em um serviço em primeiro plano com notificação de progresso, para sobreviver ao app sair de tela. Miniatura de imagem recebida fica no cache do app; salvar na galeria é um toque.
 - **UI.** Variante A do protótipo: bolhas, "eu" à direita. Estilo Slip: fundo escuro, bolhas claras. Progresso é uma barra animada dentro da bolha. Pendente reduz a opacidade e mostra um indicador girando.

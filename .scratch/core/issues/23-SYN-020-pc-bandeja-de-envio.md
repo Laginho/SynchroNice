@@ -1,5 +1,5 @@
 # SYN-020: Bandeja de envio no PC antes de mandar
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: agent
@@ -196,3 +196,9 @@ alcançável, ele fica 👤.
   de conteúdo; essa regravação foi desfeita, mantendo o arquivo fora do
   ticket. Diff final conferido: sem segredos, artefatos gerados ou fonte
   fora dos Primary files.
+
+- Stage 3 (2026-10-02): pequeno ajuste de documentação em
+  `.scratch/core/spec.md`, seção "Entrada no PC", para descrever a bandeja
+  antes do Enviar em vez do envio imediato. Permitido pela regra de
+  documentação obsoleta do `ticket-flow`; nenhuma mudança de produção ou
+  de testes. Revisões Standards e Spec realizadas separadamente.
