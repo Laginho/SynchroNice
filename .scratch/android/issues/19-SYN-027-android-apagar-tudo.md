@@ -1,5 +1,5 @@
 # SYN-027: Apagar tudo no celular, cliente do protocolo e fila
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -80,3 +80,63 @@ QA no stage 3: nenhum passo visível; os critérios são da costura do cliente.
 - 2026-10-02 Stage 2: a prova vermelha do commit só-teste é de compilação (`Unresolved reference` em `Item.Delete`, `enqueueDelete`, `discardPending`, `enqueueTextItem`, `enqueueFileItem`, `PendingItem.Delete`, `remove`): os tipos novos não existem, então não há como o teste compilar e falhar por comportamento sem pôr código de produção no commit de teste. Verde: `protocol-client` 72 testes, 0 falhas (ProtocolClientTest 54, PendingQueueStoreTest 5, PairingInfoTest 13), 9 deles novos; `gate.ps1` completo passou (fmt, clippy, cargo test, tsc, node --test, gradle check).
 - 2026-10-02 Stage 2: `enqueueDelete` enfileira a exclusão antes de tirar os Pendentes listados. Um crash no meio deixa Pendentes que o PC apaga logo em seguida, nunca uma exclusão perdida.
 - 2026-10-02 Stage 3: corrigido somente o comentário de `parseFlatJsonObject`, que ainda descrevia o `/listen` sem listas; a escuta usa agora `parseListenObject`. Nenhum comportamento ou teste alterado. Prova vermelha repetida na worktree isolada do commit `29e76b5`: `gate.ps1 -TestsOnly` falhou em `:protocol-client:compileTestKotlin` pelas APIs ausentes, incluindo `Delete`, `enqueueDelete`, `discardPending`, `enqueueTextItem`, `enqueueFileItem`, `acknowledgeDelete` e `remove`.
+
+#### Resolution (2026-10-02)
+Verdict: Approve
+
+**Standards:** nenhuma violação documentada ou regressão encontrada. Os
+commits `29e76b5` (testes) e `06659c1` (implementação) respeitam os Primary
+files e a separação teste antes de código. O ajuste do review (`5e9b94c`)
+altera somente o comentário do parser e este ticket.
+
+Uma observação não bloqueante: possível Duplicated Code entre
+`trySendDelete` e `trySendText`, no ciclo de conexão e no tratamento de
+`IOException`. O padrão continua simples e legível; uma abstração não tem
+benefício concreto neste recorte, conforme o Engineering Workflow. Nenhum
+refactor foi feito.
+
+**Spec:** nenhum requisito ausente, escopo indevido ou comportamento
+incorreto encontrado no diff completo.
+
+- ✅ Critérios 1–2: `/listen` entrega `Item.Delete` com as duas listas junto
+  aos textos e arquivos; a confirmação usa `POST /outbox/{id}/ack`. Formato,
+  Bearer e rotas conferidos contra o contrato e os handlers reais do PC em
+  `server.rs`.
+- ✅ Critérios 3–5: a exclusão persiste, sai em ordem como
+  `POST /items/delete`, remove os Pendentes selecionados e suas cópias
+  internas, e permanece na fila após falha de rede ou 503. `discardPending`
+  faz a remoção sem enfileirar outro controle; 204 confirma a entrega.
+- ✅ Critério 6: os ids devolvidos por `sendText`, `sendFile`,
+  `enqueueTextItem` e `enqueueFileItem` são os enviados em `X-Item-Id`,
+  inclusive depois de um Item ficar Pendente. Os wrappers Boolean mantêm
+  compatibilidade com os chamadores existentes.
+- ✅ Critério 7: todas as suítes existentes passaram. O app ignora controles
+  persistidos ao criar bolhas e ignora as exclusões recebidas sem ACK,
+  conforme o recorte. Chamadores atuais serializam a fila com
+  `outboundMutex`; a aplicação das exclusões no chat fica no SYN-029.
+
+Conferida a decisão `Proxy decided` de 2026-10-01: o fatiamento mantém
+protocolo/fila, parser de listas, adaptação mínima do app e retorno de id
+aqui; interface, Desfazer e exclusão de arquivos recebidos no app ficam no
+SYN-029. Esta revisão não alterou decisões ou critérios.
+
+**Validação:** vermelho repetido no commit só-teste `29e76b5` com
+`gate.ps1 -TestsOnly`, em worktree isolada contendo o Android: falha de
+compilação pelas APIs novas ausentes, antes de qualquer execução dos testes
+novos. Verde no HEAD revisado: `gate.ps1` completo em primeiro plano,
+exit 0, `gate: passou`; fmt, clippy, testes Rust, tsc, testes Node e
+`gradle check` passaram. Contagens: Rust 79, PC/UI 47, QA 14,
+protocol-client 72 (54 ProtocolClientTest, 5 PendingQueueStoreTest,
+13 PairingInfoTest; 9 testes novos), app Android 71; zero falhas, erros
+ou testes ignorados. Logs locais em
+`.scratch/qa-runs/2026-10-02-syn-027-review/{red,gate}.log`.
+
+QA do ticket: nenhum critério visível, conforme Verification; a interface
+será verificada no SYN-029. Sem débito humano novo.
+
+Rebase na sessão sem conflitos; merge sem squash `3bab10a` em
+`sweatshop/2026-10-01-2019`. `Stage: done` e a linha do ledger são gravados
+juntos no commit de encerramento, sem PR individual nem push.
+
+Totais da revisão: Standards 0 violações e 1 observação não bloqueante;
+Spec 0 achados.
