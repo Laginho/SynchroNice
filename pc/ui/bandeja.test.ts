@@ -50,3 +50,15 @@ test("sequência é um retrato: adicionar depois não muda o envio já iniciado"
   bandeja.adicionar("depois.pdf");
   assert.deepStrictEqual(envio, [{ tipo: "entrada", entrada: primeira }]);
 });
+
+test("limpar esvazia a bandeja e não reutiliza a identidade das entradas", () => {
+  const bandeja = new Bandeja<string>();
+  const antiga = bandeja.adicionar("foto.png");
+  bandeja.adicionar("arquivo.pdf");
+  bandeja.limpar();
+  assert.deepStrictEqual(bandeja.entradas(), []);
+  bandeja.limpar();
+  const nova = bandeja.adicionar("foto.png");
+  assert.notEqual(nova.id, antiga.id);
+  assert.deepStrictEqual(bandeja.sequencia(""), [{ tipo: "entrada", entrada: nova }]);
+});
