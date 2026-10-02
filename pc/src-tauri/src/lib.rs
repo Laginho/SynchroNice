@@ -82,11 +82,20 @@ fn pasta_efetiva(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, S
 /// Evento que a janela escuta para desenhar a bolha de um Item novo.
 const ITEM_EVENT: &str = "item";
 
+/// Itens da Sessão sem os que já foram selecionados para exclusão: um upload
+/// em andamento fica em `Items` até terminar, mas a janela não o redesenha.
+fn recebidos_visiveis(items: &Items) -> Vec<Item> {
+    items
+        .snapshot()
+        .into_iter()
+        .filter(|item| !items.delete_requested(item.id))
+        .collect()
+}
+
 /// A Sessão atual, para a janela se alinhar ao abrir (ou reabrir).
 #[tauri::command]
 fn list_items(items: State<'_, Items>, order: State<'_, SessionOrder>) -> Vec<Recebido> {
-    items
-        .snapshot()
+    recebidos_visiveis(&items)
         .into_iter()
         .map(|item| Recebido {
             ordem: order.of(false, item.id),

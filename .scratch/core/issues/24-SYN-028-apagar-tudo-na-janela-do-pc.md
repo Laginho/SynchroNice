@@ -1,5 +1,5 @@
 # SYN-028: Apagar tudo na janela do PC
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -177,3 +177,22 @@ sem merge/push/PR individual. Não havia linha SYN-028 no ledger a retirar.
 Resumo por eixo: Standards, 2 falhas de correção (pior: seleção deixa de
 proteger o chat antes da aplicação); Spec, 3 falhas (pior: reload mantém
 bolha de upload excluído mesmo depois de terminar).
+
+#### Stage 2, reabertura (2026-10-02)
+
+Provas vermelhas em `d4d3d47` (test-only: `apagados.test.ts` sem o módulo,
+dois testes de `recebidos_visiveis` sem a função; `gate.ps1` ganhou o
+caminho do teste). Correção sem tocar em teste:
+
+- `pc/ui/apagados.ts`: lápide definitiva de ids excluídos (recebidos e
+  enviados separados). `main.ts` marca antes do `invoke("apagar_tudo")` (também
+  no segundo clique), em `removerExcluidos` (exclusão do celular), e filtra
+  `renderRecebido`/`renderEnviado`, o snapshot do Desfazer e a carga inicial
+  por ela. Fecha os ❌ de progresso/ACK pós-5 s e de snapshot atrasado.
+- `lib.rs`: `list_items` passa por `recebidos_visiveis`, que esconde o upload
+  já selecionado (`Items::delete_requested`) e ainda não descartado. Fecha o
+  ❌ do reload (critério 3).
+- Não toquei `items.rs` nem a operação do SYN-019. Gate completo verde
+  (Rust 7 unitários novos incluídos, 63 HTTP; UI e QA verdes).
+- Limite conhecido, o mesmo da primeira passagem: recarregar a janela *dentro*
+  dos 5 s devolve as bolhas, pois nada foi apagado ainda. QA no stage 3.

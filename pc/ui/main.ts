@@ -7,6 +7,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { segmentarTexto } from "./copiaveis.ts";
 import { Bandeja, temPrevia } from "./bandeja.ts";
+import { Apagados } from "./apagados.ts";
 
 interface TextItem {
   id: number;
@@ -516,7 +517,7 @@ function renderArquivo(item: FileItem): HTMLElement {
 }
 
 function renderRecebido(item: Item): void {
-  if (janelaDeDesfazer?.recebidas.has(item.id)) return;
+  if (apagados.recebido(item.id) || janelaDeDesfazer?.recebidas.has(item.id)) return;
   const existente = recebidas.get(item.id);
   if (existente) {
     // Só um arquivo em andamento gera evento repetido para o mesmo id.
@@ -622,7 +623,7 @@ function renderArquivoEnviado(item: EnviadoArquivo): HTMLElement {
 }
 
 function renderEnviado(item: Enviado): void {
-  if (janelaDeDesfazer?.enviadas.has(item.id)) return;
+  if (apagados.enviado(item.id) || janelaDeDesfazer?.enviadas.has(item.id)) return;
   const existente = enviadas.get(item.id);
   if (existente) {
     const rodape = existente.querySelector<HTMLElement>(".rodape")!;
@@ -653,6 +654,7 @@ interface JanelaDeDesfazer {
   timer: number;
 }
 let janelaDeDesfazer: JanelaDeDesfazer | null = null;
+const apagados = new Apagados();
 const JANELA_DE_DESFAZER_MS = 5000;
 
 /** Fecha a janela e só então chama o Apagar tudo, com os Itens que ela esvaziou. */
@@ -662,10 +664,12 @@ function fecharJanelaDeDesfazer(): void {
   janelaDeDesfazer = null;
   clearTimeout(janela.timer);
   document.querySelector<HTMLElement>("#aviso-apagar")!.hidden = true;
-  invoke("apagar_tudo", {
-    received: [...janela.recebidas.keys()],
-    sent: [...janela.enviadas.keys()],
-  }).catch((e) => console.error(`não foi possível apagar a conversa: ${e}`));
+  const received = [...janela.recebidas.keys()];
+  const sent = [...janela.enviadas.keys()];
+  // Marca antes do comando: até ele terminar, o backend ainda emite progresso
+  // e entregas desses Itens, e nenhum evento ou snapshot pode recriá-los.
+  apagados.marcar(received, sent);
+  invoke("apagar_tudo", { received, sent }).catch((e) => console.error(`não foi possível apagar a conversa: ${e}`));
 }
 
 function apagarTudo(): void {
@@ -713,13 +717,18 @@ async function desfazerApagarTudo(): Promise<void> {
     invoke<Item[]>("list_items").catch((): Item[] => []),
     invoke<Enviado[]>("list_sent_items").catch((): Enviado[] => []),
   ]);
-  for (const item of novosRecebidos) if (janela.recebidas.has(item.id)) renderRecebido(item);
-  for (const item of novosEnviados) if (janela.enviadas.has(item.id)) renderEnviado(item);
+  for (const item of apagados.filtrarRecebidos(novosRecebidos)) {
+    if (janela.recebidas.has(item.id)) renderRecebido(item);
+  }
+  for (const item of apagados.filtrarEnviados(novosEnviados)) {
+    if (janela.enviadas.has(item.id)) renderEnviado(item);
+  }
 }
 
 /** Uma exclusão vinda do celular (ou a nossa, já concluída) tira as bolhas
  * sem rastro — também das que estão guardadas na janela de Desfazer. */
 function removerExcluidos(excluidos: { received: number[]; sent: number[] }): void {
+  apagados.marcar(excluidos.received, excluidos.sent);
   for (const id of excluidos.received) {
     recebidas.get(id)?.remove();
     recebidas.delete(id);
@@ -1000,8 +1009,8 @@ async function main(): Promise<void> {
       return [];
     }),
   ]);
-  for (const item of recebidos) renderRecebido(item);
-  for (const item of enviados) renderEnviado(item);
+  for (const item of apagados.filtrarRecebidos(recebidos)) renderRecebido(item);
+  for (const item of apagados.filtrarEnviados(enviados)) renderEnviado(item);
 
   document.querySelector<HTMLElement>("#clear-all")!.addEventListener("click", apagarTudo);
   document.querySelector<HTMLElement>("#desfazer")!.addEventListener("click", () => {
