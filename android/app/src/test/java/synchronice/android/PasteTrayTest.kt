@@ -7,9 +7,17 @@ import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import android.view.View
+import android.view.ViewGroup
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getAllSemanticsNodes
+import androidx.compose.ui.semantics.getOrNull
 import androidx.work.testing.WorkManagerTestInitHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,12 +25,15 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
 import java.io.FileNotFoundException
+import java.time.Duration
 import synchronice.protocolclient.FilePendingQueueStore
 import synchronice.protocolclient.PendingItem
 import kotlin.test.Test
@@ -54,6 +65,44 @@ class PasteTrayTest {
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
         }.apply { attachInfo(app, ProviderInfo().apply { this.authority = authority }) })
         return Uri.parse("content://$authority/item")
+    }
+
+    @Test
+    fun backInSettingsClearsTrayBeforeAllowingExit() {
+        WorkManagerTestInitHelper.initializeTestWorkManager(app)
+        app.state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":7777,"token":"0123456789abcdef0123456789abcdef"}""")
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup().visible()
+        try {
+            val activity = controller.get()
+            app.state.pasteUri(provider("foto.png"))
+            val copy = app.state.pasteTray.single()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+            val root = checkNotNull(composeRoot(activity.window.decorView))
+            val settings = root.semanticsOwner.getAllSemanticsNodes(mergingEnabled = true)
+                .single { it.config.getOrNull(SemanticsProperties.TestTag) == "settings" }
+            assertTrue(settings.config[SemanticsActions.OnClick].action!!.invoke())
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+            assertTrue(root.semanticsOwner.getAllSemanticsNodes(mergingEnabled = true)
+                .any { it.config.getOrNull(SemanticsProperties.TestTag) == "settings-back" })
+
+            activity.onBackPressedDispatcher.onBackPressed()
+            assertTrue(app.state.pasteTray.isEmpty())
+            assertFalse(copy.exists())
+            assertFalse(activity.isFinishing)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+            activity.onBackPressedDispatcher.onBackPressed()
+            assertTrue(activity.isFinishing)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    private fun composeRoot(view: View): ViewRootForTest? {
+        if (view is ViewRootForTest) return view
+        if (view is ViewGroup) for (index in 0 until view.childCount) {
+            composeRoot(view.getChildAt(index))?.let { return it }
+        }
+        return null
     }
 
     @Test
