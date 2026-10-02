@@ -50,6 +50,7 @@ fn now_ms() -> u64 {
 }
 
 const MANIFEST_FILE: &str = "manifest.json";
+const SESSION_FILES: &str = "session-files";
 
 #[derive(Serialize, Deserialize)]
 struct Manifest {
@@ -87,12 +88,20 @@ type ChangeListener = Box<dyn Fn(&OutItem, bool) + Send + Sync>;
 struct Inner {
     manifest: Manifest,
     sent: Vec<SentItem>,
+    session_dir: PathBuf,
     /// Um remetente por conexão `/listen` viva, para anunciar um Item novo
     /// assim que ele é enfileirado. Descartados sob demanda: um `send` que
     /// falha (celular desconectou) tira o remetente da lista na próxima
     /// notificação, em vez de vazar para sempre.
     listeners: Vec<UnboundedSender<OutItem>>,
     changed: Vec<ChangeListener>,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // Última alça: elimina só as cópias da Sessão, nunca os Pendentes.
+        let _ = std::fs::remove_dir_all(&self.session_dir);
+    }
 }
 
 fn notify(listeners: &mut Vec<UnboundedSender<OutItem>>, item: &OutItem) {
@@ -119,12 +128,19 @@ impl Outbox {
     /// é o que faz a fila sobreviver a sair e reabrir o app.
     pub fn new(dir: PathBuf) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
+        let session_dir = dir.join(SESSION_FILES);
+        match std::fs::remove_dir_all(&session_dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         let manifest = load_manifest(&dir);
         Ok(Self {
             dir,
             inner: Arc::new(Mutex::new(Inner {
                 manifest,
                 sent: Vec::new(),
+                session_dir,
                 listeners: Vec::new(),
                 changed: Vec::new(),
             })),
@@ -145,6 +161,11 @@ impl Outbox {
         inner.manifest.next_id += 1;
         inner.manifest.items.push(item.clone());
         save_manifest(&self.dir, &inner.manifest)?;
+        inner.sent.push(SentItem {
+            item: item.clone(),
+            entregue: false,
+            path: None,
+        });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
         Ok(item)
@@ -158,7 +179,8 @@ impl Outbox {
 
     /// Copia `bytes` para dentro da fila (nunca só um caminho: a origem —
     /// PNG temporário do clipboard, caminho de um drop — pode sumir antes da
-    /// entrega) e enfileira o Item de arquivo.
+    /// entrega) e enfileira o Item de arquivo. Sem origem, cria também uma
+    /// cópia com o nome do Item, que dura até o fim da Sessão.
     pub fn enqueue_file(&self, name: String, bytes: &[u8]) -> io::Result<OutItem> {
         self.enqueue_file_with_origin(name, bytes, None)
     }
@@ -180,8 +202,22 @@ impl Outbox {
         bytes: &[u8],
         path: Option<PathBuf>,
     ) -> io::Result<OutItem> {
+        if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', ':']) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "nome inválido"));
+        }
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
         let id = inner.manifest.next_id;
+        let path = match path {
+            Some(path) => path,
+            None => {
+                // Um diretório por Item evita sobrescrever prints homônimos.
+                let dir = inner.session_dir.join(id.to_string());
+                std::fs::create_dir_all(&dir)?;
+                let path = dir.join(&name);
+                std::fs::write(&path, bytes)?;
+                path
+            }
+        };
         std::fs::write(self.file_path(id), bytes)?;
         let item = OutItem {
             id,
@@ -194,13 +230,11 @@ impl Outbox {
         inner.manifest.next_id += 1;
         inner.manifest.items.push(item.clone());
         save_manifest(&self.dir, &inner.manifest)?;
-        if path.is_some() {
-            inner.sent.push(SentItem {
-                item: item.clone(),
-                entregue: false,
-                path,
-            });
-        }
+        inner.sent.push(SentItem {
+            item: item.clone(),
+            entregue: false,
+            path: Some(path),
+        });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
         Ok(item)
@@ -227,7 +261,11 @@ impl Outbox {
 
     /// Enviadas da Sessão, em ordem de inserção, incluindo as confirmadas.
     pub fn session_items(&self) -> Vec<SentItem> {
-        self.inner.lock().expect("fila de saída sem panic").sent.clone()
+        self.inner
+            .lock()
+            .expect("fila de saída sem panic")
+            .sent
+            .clone()
     }
 
     /// Consulta a origem de novo a cada tentativa; a ausência no disco não
@@ -279,12 +317,18 @@ impl Outbox {
             return;
         };
         let item = inner.manifest.items.remove(pos);
-        if let Some(sent) = inner.sent.iter_mut().find(|sent| sent.item.id == id) {
+        let nesta_sessao = if let Some(sent) = inner.sent.iter_mut().find(|sent| sent.item.id == id)
+        {
             sent.entregue = true;
-        }
+            true
+        } else {
+            false
+        };
         let _ = std::fs::remove_file(self.file_path(id));
         let _ = save_manifest(&self.dir, &inner.manifest);
-        notify_change(&inner, &item, true);
+        if nesta_sessao {
+            notify_change(&inner, &item, true);
+        }
     }
 
     /// Os Pendentes de agora, mais um canal para os que forem enfileirados

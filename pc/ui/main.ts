@@ -10,6 +10,7 @@ import { segmentarTexto } from "./copiaveis.ts";
 interface TextItem {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "text";
   text: string;
 }
@@ -17,6 +18,7 @@ interface TextItem {
 interface FileItem {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "file";
   name: string;
   size: number;
@@ -29,6 +31,7 @@ type Item = TextItem | FileItem;
 interface EnviadoTexto {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "text";
   text: string;
   entregue: boolean;
@@ -37,6 +40,7 @@ interface EnviadoTexto {
 interface EnviadoArquivo {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "file";
   name: string;
   size: number;
@@ -189,12 +193,13 @@ function renderTexto(item: TextItem): HTMLElement {
 }
 
 /** Troca a miniatura por uma imagem real assim que o arquivo termina de chegar. */
-function carregarMiniatura(id: number, nome: string, thumb: HTMLElement): void {
-  invoke<number[]>("read_file_bytes", { id })
+function carregarMiniatura(id: number, nome: string, thumb: HTMLElement, enviada = false): void {
+  invoke<number[]>(enviada ? "read_sent_file_bytes" : "read_file_bytes", { id })
     .then((bytes) => {
       const blob = new Blob([new Uint8Array(bytes)]);
       const img = document.createElement("img");
       img.src = URL.createObjectURL(blob);
+      img.onload = img.onerror = () => URL.revokeObjectURL(img.src);
       img.alt = nome;
       thumb.replaceChildren(img);
     })
@@ -237,7 +242,9 @@ function marcarArquivoSumido(bubble: HTMLElement): void {
   const meta = bubble.querySelector<HTMLElement>(".file-meta");
   if (meta && !bubble.classList.contains("sumiu")) meta.dataset.antes = meta.textContent ?? "";
   bubble.classList.add("sumiu");
-  if (meta) meta.textContent = "o arquivo não está mais na Pasta";
+  if (meta) meta.textContent = bubble.classList.contains("mine")
+    ? "o arquivo de origem não está mais disponível"
+    : "o arquivo não está mais na Pasta";
 }
 
 /** Ligada enquanto um drag saído de uma bolha está no ar (SYN-006). Soltar
@@ -254,15 +261,17 @@ function desmarcarArquivoSumido(bubble: HTMLElement): void {
   if (meta?.dataset.antes !== undefined) meta.textContent = meta.dataset.antes;
 }
 
-/** Arrasta o arquivo de uma bolha recebida para fora da janela, como o
- * arquivo real que está na Pasta (SYN-006). O backend resolve o caminho e
+/** Arrasta o arquivo de uma bolha para fora da janela. O backend resolve o caminho e
  * confere que o arquivo ainda existe; só então o plugin de drag assume o
  * rastreio nativo do mouse, no lugar da Drag and Drop API da web (que só
  * entrega o arquivo dentro da própria janela). */
 async function iniciarDrag(id: number, nome: string, bubble: HTMLElement): Promise<void> {
   let caminho: string;
   try {
-    caminho = await invoke<string>("caminho_para_arrastar", { id });
+    const comando = bubble.classList.contains("mine")
+      ? "caminho_enviado_para_arrastar"
+      : "caminho_para_arrastar";
+    caminho = await invoke<string>(comando, { id });
   } catch (e) {
     // Se o caminho não puder ser resolvido, a bolha deixa de oferecer drag.
     marcarArquivoSumido(bubble);
@@ -296,9 +305,7 @@ async function iniciarDrag(id: number, nome: string, bubble: HTMLElement): Promi
   }
 }
 
-function renderArquivo(item: FileItem): HTMLElement {
-  const bubble = document.createElement("div");
-  bubble.className = "item file";
+function ligarAcoesDeArquivo(bubble: HTMLElement, item: FileItem | EnviadoArquivo): void {
   let arrastou = false;
   // Só uma bolha terminada arrasta: em progresso, `.enviando` ainda está
   // presente (ver `atualizarProgresso`), e não há arquivo com nome final
@@ -352,13 +359,26 @@ function renderArquivo(item: FileItem): HTMLElement {
     ) {
       return;
     }
-    invoke("abrir_arquivo", { id: item.id })
-      .then(() => desmarcarArquivoSumido(bubble))
+    const comando = bubble.classList.contains("mine") ? "abrir_arquivo_enviado" : "abrir_arquivo";
+    invoke(comando, { id: item.id })
+      .then(() => {
+        desmarcarArquivoSumido(bubble);
+        const thumb = bubble.querySelector<HTMLElement>(".file-thumb");
+        if (thumb && !thumb.querySelector("img")) {
+          carregarMiniatura(item.id, item.name, thumb, bubble.classList.contains("mine"));
+        }
+      })
       .catch((e) => {
         marcarArquivoSumido(bubble);
         console.error(`não foi possível abrir ${item.name}: ${e}`);
       });
   });
+}
+
+function renderArquivo(item: FileItem): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = "item file";
+  ligarAcoesDeArquivo(bubble, item);
 
   const ehImagem = IMAGEM.has(extensao(item.name));
   if (ehImagem) {
@@ -396,14 +416,34 @@ function renderRecebido(item: Item): void {
   const existente = recebidas.get(item.id);
   if (existente) {
     // Só um arquivo em andamento gera evento repetido para o mesmo id.
-    if (item.kind === "file") atualizarProgresso(existente, item);
+    if (item.kind === "file") {
+      // Snapshot e evento podem se cruzar durante a carga inicial. Um estado
+      // antigo de progresso não reabre uma bolha que já terminou.
+      if (item.status === "receiving" && !existente.classList.contains("enviando")) return;
+      if (item.received < Number(existente.dataset.received ?? 0)) return;
+      existente.dataset.received = String(item.received);
+      atualizarProgresso(existente, item);
+    }
     return;
   }
 
   empty.hidden = true;
   const bubble = item.kind === "text" ? renderTexto(item) : renderArquivo(item);
+  if (item.kind === "file") bubble.dataset.received = String(item.received);
   recebidas.set(item.id, bubble);
-  scroll.append(bubble);
+  inserirBolha(bubble, item);
+}
+
+/** Eventos e snapshots usam a mesma ordenação, mesmo quando a bolha nova
+ * chega antes da lista inicial. Os ids de cada lado continuam separados. */
+function inserirBolha(bubble: HTMLElement, item: Item | Enviado): void {
+  bubble.dataset.atMs = String(item.at_ms);
+  bubble.dataset.ordem = String(item.ordem);
+  const depois = Array.from(scroll.querySelectorAll<HTMLElement>(".item")).find((outra) => {
+    const atMs = Number(outra.dataset.atMs);
+    return atMs > item.at_ms || (atMs === item.at_ms && Number(outra.dataset.ordem) > item.ordem);
+  });
+  scroll.insertBefore(bubble, depois ?? null);
   bubble.scrollIntoView({ block: "end" });
 }
 
@@ -439,6 +479,14 @@ function renderTextoEnviado(item: EnviadoTexto): HTMLElement {
 function renderArquivoEnviado(item: EnviadoArquivo): HTMLElement {
   const bubble = document.createElement("div");
   bubble.className = "item file mine";
+  ligarAcoesDeArquivo(bubble, item);
+
+  if (IMAGEM.has(extensao(item.name))) {
+    const thumb = document.createElement("div");
+    thumb.className = "file-thumb";
+    bubble.append(thumb);
+    carregarMiniatura(item.id, item.name, thumb, true);
+  }
 
   const info = document.createElement("div");
   info.className = "file-info";
@@ -466,21 +514,15 @@ function renderEnviado(item: Enviado): void {
   const existente = enviadas.get(item.id);
   if (existente) {
     const rodape = existente.querySelector<HTMLElement>(".rodape")!;
-    atualizarEstadoEnvio(existente, rodape, item.entregue);
+    // Um snapshot Pendente atrasado não desfaz o ACK que chegou por evento.
+    atualizarEstadoEnvio(existente, rodape, item.entregue || !existente.classList.contains("pendente"));
     return;
   }
-
-  // Confirmação de um Item que esta Sessão nunca desenhou: ele foi enfileirado
-  // antes de sair pela bandeja e o celular só o buscou agora. A fila sobrevive
-  // ao reinício, a Sessão não — desenhar a bolha aqui encheria um chat que
-  // precisa abrir vazio.
-  if (item.entregue) return;
 
   empty.hidden = true;
   const bubble = item.kind === "text" ? renderTextoEnviado(item) : renderArquivoEnviado(item);
   enviadas.set(item.id, bubble);
-  scroll.append(bubble);
-  bubble.scrollIntoView({ block: "end" });
+  inserirBolha(bubble, item);
 }
 
 function atualizarPresenca(online: boolean): void {
@@ -689,11 +731,14 @@ async function main(): Promise<void> {
   if (estadoPar.mostrar_qr) mostrarQr(estadoPar.svg);
   else mostrarChat();
 
-  // Só os recebidos da Sessão: a lista de Itens é em memória e morre com o
-  // processo. A fila de saída é persistida e sobrevive, mas não é Sessão —
-  // sair pela bandeja e reabrir tem que mostrar um chat vazio, com os
-  // Pendentes ainda na fila, esperando o celular.
-  for (const item of await invoke<Item[]>("list_items")) renderRecebido(item);
+  // Os dois lados da Sessão vivem no backend até o processo terminar.
+  // Pendentes herdados continuam na fila de entrega, fora desta lista.
+  const [recebidos, enviados] = await Promise.all([
+    invoke<Item[]>("list_items"),
+    invoke<Enviado[]>("list_sent_items"),
+  ]);
+  for (const item of recebidos) renderRecebido(item);
+  for (const item of enviados) renderEnviado(item);
 
   ligarComposer();
   ligarDrop();

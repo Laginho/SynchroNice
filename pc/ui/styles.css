@@ -351,13 +351,15 @@ body {
 .item.file time {
   grid-column: 1 / 3;
 }
-/* Clicar abre, arrastar leva para fora da janela (SYN-006) — só a bolha recebida e terminada:
- * a enviada (`.mine`) não tem arquivo na Pasta para arrastar, e não ganha o
- * `mousedown` de drag. */
-.item.file:not(.mine):not(.enviando):not(.falhou) {
+.item.file .rodape {
+  grid-column: 1 / 3;
+}
+/* Clicar abre, arrastar leva para fora da janela. A enviada já tem arquivo
+ * desde Pendente; a recebida espera terminar de gravar. */
+.item.file:not(.enviando):not(.falhou) {
   cursor: pointer;
 }
-.item.file:not(.mine):not(.enviando):not(.falhou):active {
+.item.file:not(.enviando):not(.falhou):active {
   cursor: grabbing;
 }
 .item.file.sumiu,

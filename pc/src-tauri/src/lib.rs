@@ -9,7 +9,9 @@ pub mod server;
 use items::{Item, Items};
 use outbox::{OutItem, Outbox};
 use par::Par;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State, WindowEvent};
@@ -31,6 +33,27 @@ struct Enviado {
     #[serde(flatten)]
     item: OutItem,
     entregue: bool,
+    ordem: usize,
+}
+
+#[derive(serde::Serialize)]
+struct Recebido {
+    #[serde(flatten)]
+    item: Item,
+    ordem: usize,
+}
+
+/// Desempate de horário entre os dois espaços de ids, conservado no backend
+/// para que recarregar mantenha a ordem em que as bolhas entraram na Sessão.
+#[derive(Clone, Default)]
+struct SessionOrder(Arc<Mutex<HashMap<(bool, u64), usize>>>);
+
+impl SessionOrder {
+    fn of(&self, enviado: bool, id: u64) -> usize {
+        let mut order = self.0.lock().expect("ordem da Sessão sem panic");
+        let next = order.len();
+        *order.entry((enviado, id)).or_insert(next)
+    }
 }
 
 /// Se um Par já estava gravado antes desta abertura do app — só para decidir
@@ -57,8 +80,30 @@ const ITEM_EVENT: &str = "item";
 
 /// A Sessão atual, para a janela se alinhar ao abrir (ou reabrir).
 #[tauri::command]
-fn list_items(items: State<'_, Items>) -> Vec<Item> {
-    items.snapshot()
+fn list_items(items: State<'_, Items>, order: State<'_, SessionOrder>) -> Vec<Recebido> {
+    items
+        .snapshot()
+        .into_iter()
+        .map(|item| Recebido {
+            ordem: order.of(false, item.id),
+            item,
+        })
+        .collect()
+}
+
+/// Só enviadas desta Sessão, inclusive as Entregues; nunca restaura o chat
+/// a partir do manifesto persistido de Pendentes.
+#[tauri::command]
+fn list_sent_items(outbox: State<'_, Outbox>, order: State<'_, SessionOrder>) -> Vec<Enviado> {
+    outbox
+        .session_items()
+        .into_iter()
+        .map(|sent| Enviado {
+            ordem: order.of(true, sent.item.id),
+            item: sent.item,
+            entregue: sent.entregue,
+        })
+        .collect()
 }
 
 /// Se a janela deve abrir na tela de QR (Par ainda não existia antes desta
@@ -147,6 +192,26 @@ fn caminho_para_arrastar(app: tauri::AppHandle, id: u64) -> Result<String, Strin
         .ok_or_else(|| "o caminho do arquivo não é válido".to_string())
 }
 
+fn caminho_do_arquivo_enviado(outbox: &Outbox, id: u64) -> Result<PathBuf, String> {
+    outbox
+        .session_file_path(id)
+        .filter(|path| path.is_file())
+        .ok_or_else(|| "o arquivo de origem não está mais disponível".to_string())
+}
+
+#[tauri::command]
+fn read_sent_file_bytes(outbox: State<'_, Outbox>, id: u64) -> Result<Vec<u8>, String> {
+    std::fs::read(caminho_do_arquivo_enviado(&outbox, id)?).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn caminho_enviado_para_arrastar(outbox: State<'_, Outbox>, id: u64) -> Result<String, String> {
+    caminho_do_arquivo_enviado(&outbox, id)?
+        .to_str()
+        .map(str::to_string)
+        .ok_or_else(|| "o caminho do arquivo não é válido".to_string())
+}
+
 /// Extensões que o Windows executa ao abrir: um clique na bolha mostra o
 /// arquivo no Explorer em vez de rodar o que veio da rede.
 const EXECUTAVEIS: &[&str] = &[
@@ -165,8 +230,20 @@ fn executavel(caminho: &std::path::Path) -> bool {
 /// mostra no Explorer se for executável.
 #[tauri::command]
 fn abrir_arquivo(app: tauri::AppHandle, id: u64) -> Result<(), String> {
+    abrir_caminho(&app, caminho_do_arquivo_recebido(&app, id)?)
+}
+
+#[tauri::command]
+fn abrir_arquivo_enviado(
+    app: tauri::AppHandle,
+    outbox: State<'_, Outbox>,
+    id: u64,
+) -> Result<(), String> {
+    abrir_caminho(&app, caminho_do_arquivo_enviado(&outbox, id)?)
+}
+
+fn abrir_caminho(app: &tauri::AppHandle, caminho: PathBuf) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let caminho = caminho_do_arquivo_recebido(&app, id)?;
     if executavel(&caminho) {
         app.opener().reveal_item_in_dir(&caminho)
     } else {
@@ -191,14 +268,8 @@ fn send_text(outbox: State<'_, Outbox>, text: String) -> Result<(), String> {
 #[tauri::command]
 fn send_files(outbox: State<'_, Outbox>, paths: Vec<String>) -> Result<(), String> {
     for caminho in paths {
-        let bytes = std::fs::read(&caminho).map_err(|e| e.to_string())?;
-        let nome = std::path::Path::new(&caminho)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("arquivo")
-            .to_string();
         outbox
-            .enqueue_file(nome, &bytes)
+            .enqueue_file_from_path(Path::new(&caminho))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -266,17 +337,24 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     app.manage(outbox.clone());
 
     let handle = app.clone();
+    let order = app.state::<SessionOrder>().inner().clone();
     items.on_new(move |item| {
-        if let Err(e) = handle.emit(ITEM_EVENT, item) {
+        let payload = Recebido {
+            ordem: order.of(false, item.id),
+            item: item.clone(),
+        };
+        if let Err(e) = handle.emit(ITEM_EVENT, payload) {
             eprintln!("não foi possível avisar a janela do Item {}: {e}", item.id);
         }
     });
 
     let handle = app.clone();
+    let order = app.state::<SessionOrder>().inner().clone();
     outbox.on_change(move |item, entregue| {
         let payload = Enviado {
             item: item.clone(),
             entregue,
+            ordem: order.of(true, item.id),
         };
         if let Err(e) = handle.emit(SENT_EVENT, payload) {
             eprintln!("não foi possível avisar a janela do envio {}: {e}", item.id);
@@ -342,18 +420,23 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_drag::init())
         .manage(Items::new())
+        .manage(SessionOrder::default())
         .invoke_handler(tauri::generate_handler![
             list_items,
+            list_sent_items,
             estado_par_inicial,
             parear_de_novo,
             mudar_pasta,
             read_file_bytes,
+            read_sent_file_bytes,
             send_text,
             send_files,
             send_bytes,
             read_clipboard_file_list,
             caminho_para_arrastar,
-            abrir_arquivo
+            caminho_enviado_para_arrastar,
+            abrir_arquivo,
+            abrir_arquivo_enviado
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
