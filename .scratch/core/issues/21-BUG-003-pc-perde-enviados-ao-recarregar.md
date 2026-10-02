@@ -1,5 +1,5 @@
 # BUG-003: O PC perde os enviados ao recarregar, e a bolha enviada não abre nem arrasta
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -252,3 +252,49 @@ os dois achados no código da branch. Base `sweatshop/2026-10-01-2019`
 - Próximo passo: stage 3 independente, incluindo QA no emulador e os passos
   de Verification. O smoke não verifica Android nem gesto de drag externo.
   Sem merge, push ou ledger nesta etapa.
+
+#### Resolution (2026-10-02)
+
+Verdict: Approve
+
+- Stage 3 independente: Standards e Spec em agentes separados; nenhum
+  achado novo que reprove o ticket. Re-review dos dois ❌ anteriores e do
+  diff da reabertura. A sugestão anterior sobre `classList.contains("mine")`
+  continua sem reprovação; nenhuma refatoração ou correção de produção nesta
+  etapa. Os dois `Proxy decided:` foram conferidos: reabrir pelas falhas
+  reproduzidas e permitir a correção da carga sem teste unitário, usando
+  morte real de processo no harness. A implementação segue ambos.
+- Arquivos de produção: `pc/src-tauri/src/outbox.rs`,
+  `pc/src-tauri/src/lib.rs`, `pc/ui/main.ts`, `pc/ui/styles.css`; testes
+  públicos em `pc/src-tauri/tests/outbox.rs`. Primary files respeitados.
+- Prova red-green da reabertura: testes em `7759b1f` (após rebase `b2e2ed2`),
+  outbox **4/5**, falha `NotFound` da cópia ao criar outra fila viva;
+  produção em `7460447` (após rebase `b61edba`), outbox **5/5** no gate desta
+  revisão. Produção não altera testes; harness do critério 4 usa processo
+  filho que termina sem destrutores. Vermelho histórico conferido no log.
+- Gate completo em primeiro plano após rebase sobre a sessão: saída 0,
+  **PC 57/57**, **UI 47/47**, **kit 14/14**; fmt, Clippy e typecheck verdes.
+  `gradle check` verde, 133 testes Android sem falhas/erros nos XMLs
+  reutilizados como `UP-TO-DATE`. Diff final sem alterações semânticas
+  geradas pelo build ou arquivos fora do escopo de produção.
+- QA do executável: reload conserva seis bolhas, ordem e estados;
+  miniaturas de origem e print colado, abertura real do TXT, original
+  ausente/restaurado e comandos com ids colidentes passaram. Print confirmado
+  continua legível com dois processos vivos na mesma pasta de dados e após
+  encerrar o segundo; thumbnail e nome correto voltam no reload. Com
+  `data/outbox` como arquivo, lista de enviados falha, mas engrenagem
+  abre/fecha e volta a abrir após reload. Os dois motivos da reabertura
+  estão resolvidos. Evidências e limpeza em
+  `.scratch/qa-runs/2026-10-02-bug-003-rereview.md`.
+- Infraestrutura: kit compilou e pareou o emulador (presença 200), mas a UI
+  apresentou ANR do app e, após uma retentativa, do System UI. Trilha
+  interativa abortada; cenários do PC verificados com kit/CDP e HTTP real,
+  sem afirmar entrega pelo app Android. Computer Use tentou o Explorer;
+  as duas capturas nativas falharam. Emulador e processos de QA encerrados;
+  os dois recebidos artificiais foram para a Lixeira pelo kit.
+- Integrado sem squash em `sweatshop/2026-10-01-2019`, merge `f7ae9fb`.
+  `Stage: done` e ledger registrados juntos na sessão. Sem push ou PR
+  individual; merge do PR de sessão continua no fluxo humano.
+- Débito humano: verificar o gesto de arrastar uma bolha enviada para fora
+  da janela; caminho/nome do arquivo verificados, mas a captura do Computer
+  Use falhou em duas tentativas.
