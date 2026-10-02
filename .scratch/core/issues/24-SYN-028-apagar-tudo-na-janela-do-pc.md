@@ -6,8 +6,11 @@ Review: agent
 Difficulty: normal
 
 - Primary files:
-  - pc/src-tauri/src/lib.rs (comando de Apagar tudo; evento para a janela ligado ao ouvinte de exclusão do SYN-019)
+  - New: pc/ui/apagados.ts (ids excluídos, puro, sem DOM, no molde de `bandeja.ts`)
+  - New: pc/ui/apagados.test.ts
+  - pc/src-tauri/src/lib.rs (comando de Apagar tudo; evento para a janela ligado ao ouvinte de exclusão do SYN-019; `list_items` sem os Itens em exclusão diferida, por um helper com teste no `mod tests` que já existe). Sem mexer em `items.rs` nem na operação do SYN-019.
   - pc/ui/main.ts, pc/ui/styles.css, pc/index.html (🗑, aviso com Desfazer, bolhas sumindo)
+  - gate.ps1 (roda `apagados.test.ts` junto com os outros testes de `pc/ui`)
 
 #### What to build
 
@@ -61,14 +64,25 @@ mande `POST /items/delete` com o `X-Item-Id` de um Item recebido.
 
 ## Tests stage 2 writes (own commit, red)
 
-- Nenhum. A operação, a exclusão recebida e o ouvinte são testados no SYN-019;
-  aqui é a cola Tauri e a interface, verificadas pelo QA. Stage 2 registra isso
-  no commit.
+- Primeira passagem: nenhum (a operação, a exclusão recebida e o ouvinte são
+  testados no SYN-019; a cola e a interface ficaram para o QA).
+- Reabertura (2026-10-02), provas de regressão dos três ❌ da revisão:
+  - `pc/ui/apagados.test.ts` (novo), com `node --test`: um id marcado como
+    excluído (fim da janela de Desfazer ou evento `apagado`) continua fora
+    para sempre; um snapshot antigo com ele é filtrado; recebidos e enviados
+    não se confundem (ids de espaços diferentes); o Desfazer não marca nada.
+    Vermelho porque `apagados.ts` não existe. O `gate.ps1` passa a rodá-lo no
+    mesmo commit.
+  - Um teste no `mod tests` de `pc/src-tauri/src/lib.rs`, critério 3: um
+    upload em `Receiving` passado ao `Items::forget` sai do que a janela
+    recebe ao abrir, e um Item não selecionado continua. Chama o helper
+    direto, sem `State`. Vermelho porque o helper não existe.
 
 ## Comments
 
 - 2026-10-01 Proxy decided: nasceu do fatiamento do SYN-019 a pedido do dono. Veio para cá a janela do PC (critérios 10 e 11 do original, aqui 1 e 3), mais o comando Tauri e o evento de exclusão recebida no `lib.rs`; os critérios 2 e 4 deixam explícitas decisões que no original eram só prosa, para cada metade ter o seu lado verificável. Ficaram no SYN-019 o protocolo, o backend, a Lixeira e as docs. Blocked by: SYN-019, que dá a operação e o ouvinte que esta janela chama. Difficulty: normal: interface e cola fina, sem concorrência nem lógica de arquivo. Review: agent, porque as docs ficaram no SYN-019.
 - 2026-10-02 stage 2: sem testes novos, como o ticket manda (cola Tauri e interface; operação, exclusão recebida e ouvinte são do SYN-019). Gate verde. Interface não exercida no app: fica para o QA do stage 3. Notas: durante a janela de Desfazer o `apagar_tudo` ainda não rodou, então recarregar a janela nesse intervalo devolve as bolhas (nada é apagado); o Desfazer refaz um snapshot (`list_items`/`list_sent_items`) para pôr em dia progresso e entregas ocorridos na janela.
+- 2026-10-02 Proxy decided (após a revisão abaixo): aprovado o plano da reabertura: lápides permanentes de ids excluídos num módulo puro novo, `pc/ui/apagados.ts` (marcadas quando o timer fecha a janela, antes do `invoke`, e no `apagado`; o Desfazer nunca marca; render e snapshots, inicial e do Desfazer, passam por ele), mais um helper em `lib.rs` que tira de `list_items` os ids com `delete_requested`; testes vermelhos em `apagados.test.ts` e no `mod tests` de `lib.rs`, e o `gate.ps1` ganha o caminho — dobrado em Primary files e em Tests stage 2 writes. — Mesmo molde aprovado no SYN-020 (módulo puro + `node --test` + uma linha no gate), não toca a operação nem o `items.rs` do SYN-019 e a revisão exige as provas de regressão.
 
 #### Review stage 3 (2026-10-02)
 
