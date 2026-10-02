@@ -255,11 +255,12 @@ internal class AppState(
 
     init {
         queueStore.load().forEach { pending ->
-            val id = nextMessageId++
             val label = when (pending) {
                 is PendingItem.Text -> pending.text
                 is PendingItem.File -> pending.name
+                is PendingItem.Delete -> return@forEach
             }
+            val id = nextMessageId++
             messages.add(if (pending is PendingItem.File) outgoingFile(id, pending, decodeNow = false)
                 else ChatMessage(id, label, true, Delivery.PENDING))
             if (pending is PendingItem.File && fileMimeType(pending.name).startsWith("image/")) {
