@@ -1,5 +1,5 @@
 # BUG-003: O PC perde os enviados ao recarregar, e a bolha enviada não abre nem arrasta
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -82,6 +82,12 @@ CDP). Arrastar para fora da janela continua 👤.
   confirmados, e `confirm` apaga a única cópia.
 
 ## Comments
+
+- Stage 2 (2026-10-01): chamadores conferidos: comandos de envio em `lib.rs`,
+  download/ACK/escuta no servidor e `Par::rotate` (`clear`). Primeiro vermelho:
+  `gate.ps1 -TestsOnly` sai 1, com E0599 nas APIs de origem/lista/caminho da
+  Sessão. O teste cobre ACK repetido, origem apagada/restaurada e cópia de
+  entrega independente da origem. UI 47/47, kit 14/14 e Android verdes.
 
 - Stage 1 (2026-10-01), grilling com o dono e o `proxy`. O dono escolheu o
   caminho original, com cópia só para o print colado, em vez de uma cópia de
