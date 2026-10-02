@@ -92,7 +92,10 @@ fn textos_e_prints_conservam_a_sessao_ate_o_processo_acabar() {
         captura.lock().unwrap().push((item.id, entregue));
     });
     recriada.confirm(vazio.id);
-    assert!(avisos.lock().unwrap().is_empty(), "ACK herdado não cria bolha");
+    assert!(
+        avisos.lock().unwrap().is_empty(),
+        "ACK herdado não cria bolha"
+    );
     assert!(recriada.session_items().is_empty());
     let nova = recriada.enqueue_text("nova Sessão".into()).unwrap();
     assert!(nova.id > vazio.id);
