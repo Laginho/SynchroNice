@@ -113,3 +113,7 @@ CDP). Arrastar para fora da janela continua 👤.
   tudo em `Pasta\Enviados` ou de manter a cópia da fila até o fim da Sessão.
   O `proxy` decidiu o resto. Paridade no Android fica fora: lá a imagem enviada
   já abre, e o PDF enviado não; não há ticket.
+
+- 2026-10-02 Review ended at to-review (timeout); branch bug-003 holds the review; left for a human
+
+- 2026-10-02 Foreman: o review (gpt-6.1-sol max, 23:42) estourou os 40 min compilando o PC e montando o QA (pareamento do emulador falhou; abrir o Explorer pelo Computer Use estourou o tempo) e não registrou nada. Suspeitas que ele anotou antes de parar: a limpeza de prints entre instâncias e os controles da bolha interrompidos quando a fila falha. Log: `.scratch/run-log/BUG-003-review-20261001-234229.txt`. Stage de volta a `to-review` para nova tentativa.
