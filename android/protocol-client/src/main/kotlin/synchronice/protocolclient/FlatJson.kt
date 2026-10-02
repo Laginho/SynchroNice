@@ -1,9 +1,10 @@
 package synchronice.protocolclient
 
 /**
- * Parser mínimo para o JSON plano que o PC manda em `/listen` (spec,
- * `server.rs`): um objeto de um nível, chaves e valores string ou número,
- * sem aninhamento nem listas. Não é um parser de JSON geral.
+ * Parser mínimo para os objetos planos do protocolo (spec, `server.rs`):
+ * um objeto de um nível, chaves e valores string ou número, sem aninhamento
+ * nem listas. O `/listen` usa [parseListenObject], que também aceita as
+ * listas da exclusão. Não é um parser de JSON geral.
  */
 @Suppress("UNCHECKED_CAST")
 internal fun parseFlatJsonObject(json: String): Map<String, String> =

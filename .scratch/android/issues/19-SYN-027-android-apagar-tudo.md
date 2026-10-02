@@ -1,5 +1,5 @@
 # SYN-027: Apagar tudo no celular, cliente do protocolo e fila
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -79,3 +79,4 @@ QA no stage 3: nenhum passo visível; os critérios são da costura do cliente.
 - 2026-10-02 Stage 2: nomes da API escolhidos aqui (o ticket não os fixa). `Item.Delete`, `PendingItem.Delete`, `ProtocolClient.enqueueDelete(doPc, doCelular)`, `discardPending(ids)` (exclusão vinda do PC), `acknowledgeDelete(item)`, `PendingQueueStore.remove(ids)`. Critério 6: `sendText`/`sendFile` passam a devolver `String?` e entram `enqueueTextItem`/`enqueueFileItem` (`String?`; `null` só quando o arquivo original já sumiu). `enqueueText`/`enqueueFile` seguem devolvendo `Boolean`, porque `DeliveryWorkerTest.kt` (fora dos Primary files, e o critério 7 manda os testes existentes seguirem verdes) faz `assertTrue(client.enqueueFile(...))`; mudar o tipo quebraria a compilação dele. SYN-029 usa os `*Item`.
 - 2026-10-02 Stage 2: a prova vermelha do commit só-teste é de compilação (`Unresolved reference` em `Item.Delete`, `enqueueDelete`, `discardPending`, `enqueueTextItem`, `enqueueFileItem`, `PendingItem.Delete`, `remove`): os tipos novos não existem, então não há como o teste compilar e falhar por comportamento sem pôr código de produção no commit de teste. Verde: `protocol-client` 72 testes, 0 falhas (ProtocolClientTest 54, PendingQueueStoreTest 5, PairingInfoTest 13), 9 deles novos; `gate.ps1` completo passou (fmt, clippy, cargo test, tsc, node --test, gradle check).
 - 2026-10-02 Stage 2: `enqueueDelete` enfileira a exclusão antes de tirar os Pendentes listados. Um crash no meio deixa Pendentes que o PC apaga logo em seguida, nunca uma exclusão perdida.
+- 2026-10-02 Stage 3: corrigido somente o comentário de `parseFlatJsonObject`, que ainda descrevia o `/listen` sem listas; a escuta usa agora `parseListenObject`. Nenhum comportamento ou teste alterado. Prova vermelha repetida na worktree isolada do commit `29e76b5`: `gate.ps1 -TestsOnly` falhou em `:protocol-client:compileTestKotlin` pelas APIs ausentes, incluindo `Delete`, `enqueueDelete`, `discardPending`, `enqueueTextItem`, `enqueueFileItem`, `acknowledgeDelete` e `remove`.
