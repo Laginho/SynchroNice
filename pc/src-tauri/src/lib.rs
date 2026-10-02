@@ -463,6 +463,34 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn previa_de_caminho_le_tamanho_e_limita_bytes_a_imagens_pequenas() {
+        let dir = tempfile::tempdir().unwrap();
+        let documento = dir.path().join("documento.txt");
+        let imagem = dir.path().join("foto.PNG");
+        let grande = dir.path().join("grande.png");
+        std::fs::write(&documento, b"texto").unwrap();
+        std::fs::write(&imagem, b"imagem").unwrap();
+        let arquivo = std::fs::File::create(&grande).unwrap();
+        arquivo.set_len(10 * 1024 * 1024 + 1).unwrap();
+
+        let previa = super::previa_de_caminho(documento.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 5);
+        assert_eq!(previa.bytes, None);
+        let previa = super::previa_de_caminho(imagem.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 6);
+        assert_eq!(previa.bytes.as_deref(), Some(b"imagem".as_slice()));
+        let previa = super::previa_de_caminho(grande.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 10 * 1024 * 1024 + 1);
+        assert_eq!(previa.bytes, None);
+        assert!(super::previa_de_caminho(
+            dir.path().join("sumiu.png").to_string_lossy().into_owned()
+        )
+        .is_err());
+        assert!(super::previa_de_caminho(dir.path().to_string_lossy().into_owned()).is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+
     use super::executavel;
     use std::path::Path;
 

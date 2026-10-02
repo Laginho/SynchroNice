@@ -1,5 +1,5 @@
 # SYN-020: Bandeja de envio no PC antes de mandar
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: agent
@@ -109,6 +109,16 @@ alcançável, ele fica 👤.
   comando direto, sem `State`. Vermelho porque `previa_de_caminho` não existe.
 
 ## Comments
+
+- Stage 2 (2026-10-02): chamadores conferidos: composer, drop nativo e
+  colagem; `send_files` é usado uma entrada por vez, sem mudar os comandos
+  existentes. O módulo puro terá ids por entrada para duplicatas e para
+  não confundir resultados atrasados com novas entradas. Casos de fronteira:
+  bandeja vazia, texto só com espaços, remoção repetida, limpar e adicionar
+  durante um envio, origem apagada e imagem acima do limite de prévia.
+  Primeiro vermelho pelo runner `gate.ps1 -TestsOnly`: PC 57/57, UI antiga
+  47/47, kit 14/14 e Android verdes; novo teste falha com
+  `ERR_MODULE_NOT_FOUND`, porque `bandeja.ts` não existe.
 
 - Stage 1 (2026-10-01), grilling com o dono e o `proxy`. O dono decidiu que o
   drop também passa pela bandeja, e o `proxy` decidiu o resto. O lado Android
