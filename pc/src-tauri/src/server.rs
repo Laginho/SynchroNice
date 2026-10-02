@@ -205,7 +205,13 @@ struct AppState {
     leases: Arc<Mutex<HashSet<PathBuf>>>,
     /// Caminho de cada arquivo recebido que terminou de gravar, indexado pelo
     /// id do Item para que Itens antigos continuem apontando à Pasta original.
+    /// Folha na ordem de locks: segurado só por get/insert/remove/clone, nunca
+    /// enquanto se pede outro lock — observadores de `Items` rodam sob o lock
+    /// da lista e consultam o caminho por aqui.
     received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
+    /// Serializa exclusão e conclusão de upload (rename + registro + descarte).
+    /// Ordem: `file_ops` → `accepted_item_ids` → `Items`. Nenhum observador o toma.
+    file_ops: Arc<Mutex<()>>,
     /// Ids que este processo já aceitou do remetente. A Sessão é em memória,
     /// portanto a deduplicação tem o mesmo ciclo de vida dos Itens visíveis.
     accepted_item_ids: Arc<Mutex<HashSet<String>>>,
@@ -373,12 +379,7 @@ impl Running {
     /// Caminho do arquivo recebido que pertence ao Item `id`, se ele chegou
     /// a terminar de gravar. O caminho não depende da Pasta atualmente ativa.
     pub fn caminho_do_arquivo(&self, id: u64) -> Option<PathBuf> {
-        self.state
-            .received_files
-            .lock()
-            .expect("arquivos recebidos sem panic")
-            .get(&id)
-            .cloned()
+        received_files(&self.state).get(&id).cloned()
     }
 
     /// Apagar tudo após o Desfazer: chaves locais dos recebidos e enviados,
@@ -479,6 +480,7 @@ fn spawn_inner(
         pasta: Arc::new(Mutex::new(pasta)),
         leases: Arc::new(Mutex::new(HashSet::new())),
         received_files: Arc::new(Mutex::new(HashMap::new())),
+        file_ops: Arc::new(Mutex::new(())),
         accepted_item_ids: Arc::new(Mutex::new(accepted_item_ids)),
         accepted_file_log,
         file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -634,10 +636,7 @@ fn apply_delete(
 ) -> io::Result<()> {
     // O mesmo lock protege o registro do caminho e a conclusão do upload:
     // a exclusão vê o arquivo completo ou fica marcada para o seu término.
-    let mut files = state
-        .received_files
-        .lock()
-        .expect("arquivos recebidos sem panic");
+    let ops = state.file_ops.lock().expect("operações de arquivo sem panic");
     let mut accepted = state
         .accepted_item_ids
         .lock()
@@ -663,18 +662,29 @@ fn apply_delete(
         }
     }
     drop(accepted);
+    // Sob `file_ops` só esta função e a conclusão de upload mexem no mapa, então
+    // a cópia fica fiel sem segurar o mapa enquanto o Items é consultado.
+    let mut files = received_files(state).clone();
     for item in &received {
         recycle_received_file(state, &files, item);
         files.remove(&item.id);
+        received_files(state).remove(&item.id);
     }
     state.items.forget(
         &received.iter().map(|item| item.id).collect::<Vec<_>>(),
         sent,
         !to_peer,
     );
-    drop(files);
+    drop(ops);
     state.items.notify_deleted();
     Ok(())
+}
+
+fn received_files(state: &AppState) -> std::sync::MutexGuard<'_, HashMap<u64, PathBuf>> {
+    state
+        .received_files
+        .lock()
+        .expect("arquivos recebidos sem panic")
 }
 
 fn recycle_received_file(state: &AppState, files: &HashMap<u64, PathBuf>, item: &Item) {
@@ -719,10 +729,7 @@ fn recycle_received_file(state: &AppState, files: &HashMap<u64, PathBuf>, item: 
 /// Rename e registro pertencem à mesma operação protegida da exclusão.
 /// Roda numa thread de bloqueio: não segura um Mutex de std através de await.
 fn finish_received_file(state: &AppState, item: &Item, temp: &Path, path: &Path) -> bool {
-    let mut files = state
-        .received_files
-        .lock()
-        .expect("arquivos recebidos sem panic");
+    let _ops = state.file_ops.lock().expect("operações de arquivo sem panic");
     if let Err(error) = std::fs::rename(temp, path) {
         eprintln!("falha ao renomear {temp:?} para {path:?}: {error}");
         return false;
@@ -740,12 +747,13 @@ fn finish_received_file(state: &AppState, item: &Item, temp: &Path, path: &Path)
             pause.wait();
         }
     }
-    files.insert(item.id, path.to_path_buf());
+    received_files(state).insert(item.id, path.to_path_buf());
     if state.items.delete_requested(item.id) {
         if let Some(completed) = state.items.snapshot().iter().find(|i| i.id == item.id) {
+            let files = received_files(state).clone();
             recycle_received_file(state, &files, completed);
         }
-        files.remove(&item.id);
+        received_files(state).remove(&item.id);
     }
     true
 }
@@ -1255,6 +1263,7 @@ mod tests {
                 pasta: Arc::new(Mutex::new(Some(pasta.clone()))),
                 leases: Arc::new(Mutex::new(HashSet::new())),
                 received_files: Arc::new(Mutex::new(HashMap::new())),
+                file_ops: Arc::new(Mutex::new(())),
                 accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
                 accepted_file_log: None,
                 file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
