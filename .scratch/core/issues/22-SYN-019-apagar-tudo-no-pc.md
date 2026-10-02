@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -160,3 +160,114 @@ está na Lixeira do Windows.
 - 2026-10-02 Attempt 3 failed: exit 0; blocked after two attempts. Log tail: ...stsOnly` was refused for approval, and I haven't changed any code or committed anything. /  / The attempts were the nested `powershell`, the bare `.\gate.ps1`, `powershell.exe` under Bash, and redirects or pipes around them. The earlier `powershell` call under Bash returned exit 127 (command not found). The loop's rule is red before green, so I won't write the fix without this run. /  / Either approve one of these, or run it yourself and tell me the result: /  / ``` / powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly / ``` /  / I need that run to show `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente` failing, with the other tests green. /  / Once it's red, the code-only commit is: / - **New Outbox operation:** it checks the sent originals and recycles the file while holding the outbox lock. / - **Origin registration:** `enqueue_file_with_origin` checks that the path exists and registers it under that same lock. It returns `NotFound` if the delete already won. / - **Callers:** `apply_delete` and `finish_received_file` both use the new operation, which also removes the duplicated `original_paths()` capture. /  / After that comes the full gate in the foreground, then `to-review`.
 
 - 2026-10-02 Proxy decided: reabrir para o stage 2 com o mesmo plano (retomar da branch `syn-019` em `f2b2530`, começando pelo vermelho de `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente`) — a terceira tentativa não chegou ao ticket: o driver só liberava `Bash(powershell:*)` e cada `gate.ps1 -TestsOnly` pela ferramenta PowerShell foi negado; defeito de infraestrutura, já corrigido (Agent-Skills `7972d73`, regras `PowerShell(...)` espelhadas), e a decisão anterior continua de pé no mérito.
+#### Review (2026-10-02)
+
+Verdict: Reopen — regressões de preservação de originais e de callback, mais janelas concorrentes de exclusão sem proteção.
+
+Revisão completa de `git diff d953e55...4c7dab3`, com os eixos Standards e
+Spec em subagentes independentes. Todos os achados desta primeira passagem
+estão abaixo. A retomada do stage 2 deve resolver os ❌ em commits de teste
+próprios, vermelhos antes do código; nenhum teste ou código foi alterado
+pelo stage 3. Os casos de segurança são S2-implícito (regressões de envio e
+arquivo sob os critérios 7/8), não requisitos novos acrescentados ao contrato.
+
+##### Standards
+
+- ❌ **P2, regressão de API pública / S2-implícito:**
+  `server.rs:862-876` chama `Items::file_done` segurando `received_files`;
+  o `on_new` é síncrono (`items.rs:204`). Um observador de `Done` que resolve
+  o arquivo por `Running::caminho_do_arquivo` (`server.rs:329-334`) tenta
+  adquirir esse mesmo mutex e trava a conclusão do upload. Antes do diff,
+  o lock era solto antes do callback. Viola preservar comportamento
+  existente (Engineering Workflow, quality gate 1). O ouvinte atual de
+  `lib.rs` só emite eventos; o achado é a regressão na costura pública,
+  verificada pelo fluxo de locks, sem probe de execução nesta revisão.
+  **Falta:** teste HTTP com observador que consulta o caminho em `Done`, e
+  conclusão/notificação que preserve essa consulta sem deadlock.
+- ❌ **P1, proteção concorrente de original / S2-implícito:**
+  `server.rs:609-625` e `866-872` capturam `session_items` e soltam o lock
+  da Outbox antes de reciclar o arquivo. Um `enqueue_file_from_path`
+  concorrente entre a captura e a exclusão pode registrar um envio novo
+  cujo original não está em `sent_paths` e será reciclado. Viola preservar
+  o comportamento de arquivos/envios e considerar impacto operacional
+  (Engineering Workflow, quality gates 1/3; política de original no
+  `CONTEXT.md`). Achado estático, sem reprodução por estes probes.
+  **Falta:** teste de interleaving pela costura aprovada, e proteção válida
+  até a ação no arquivo, incluindo o caminho da conclusão de upload.
+- **Heurística, sem veto próprio — possível Duplicated Code:** a captura
+  `session_items().into_iter().filter_map(|sent| sent.path).collect()` aparece
+  nos dois lugares acima. Uma operação coesa de proteção da Outbox pode
+  eliminar a duplicação ao corrigir a sincronização; não há pedido de
+  refatoração fora de Primary files.
+
+##### Spec
+
+- ❌ **P1, arquivo mais novo fora da seleção / S2-implícito**
+  (critério 7, “Um Item fora da lista continua”; decisão de segurança,
+  “nenhum Item mais novo da Sessão usa o mesmo caminho”):
+  `server.rs:854` faz rename antes de registrar o caminho em `862-863`.
+  Se o arquivo de um recebido antigo foi removido e um upload novo reutiliza
+  esse caminho com tamanho igual, excluir o antigo entre rename e registro
+  recicla o arquivo do upload novo: `recycle_received_file` só vê o mapa
+  de caminhos já registrados (`652-654`). O novo upload pode então terminar
+  com 201/Done e caminho sem arquivo, quebrando o recebimento existente.
+  Achado estático; não foi reproduzido no kit. **Falta:** teste controlando
+  a conclusão nesse intervalo e proteção que inclua rename/registro. O
+  `after_file_rename` de testes já existente mostra essa janela.
+- ❌ **P1, original perde proteção na mesma Sessão / S2-implícito**
+  (segurança dos critérios 7/8; decisão, “O original de quem enviou nunca é
+  tocado”; `CONTEXT.md`, “O original de um Item enviado nunca é apagado”):
+  receber R, reenviar seu arquivo como S, excluir só S e depois excluir R
+  apaga o original. O primeiro pedido tira S da lista (`outbox.rs:426-428`);
+  o segundo conserva só os caminhos de enviados ainda presentes
+  (`server.rs:609-614`). Tirar S não encerra a Sessão. **Reproduzido no kit**:
+  ambos os pedidos 204, R e arquivo presentes após excluir S, arquivo
+  ausente e na Lixeira após excluir R. O teste de `082a39e` cobre exclusão
+  simultânea, não essa sequência. **Falta:** teste das exclusões separadas
+  e preservação do original pelo ciclo de vida da Sessão, sem persistência
+  nova de id → arquivo.
+- ❌ **P1, alias Windows apaga original de outro enviado / S2-implícito**
+  (critério 7, Item fora da lista; critério 8, descarte da cópia interna;
+  mesma política de original): `outbox.rs:416-420` compara `PathBuf`
+  literalmente. Criar cópia interna P, reenviá-la como S por outra
+  capitalização do mesmo caminho e excluir só P apaga o original de S.
+  **Reproduzido no kit**: P=2, S=3; pedido só com `do_pc:[2]` respondeu
+  204; S continuou em `list_sent_items`, mas original e alias sumiram.
+  A leitura/drag desse Item passa a apontar a arquivo ausente. **Falta:**
+  teste de reuso por alias e checagem de identidade do caminho, mantendo
+  os Itens não selecionados funcionais.
+- A regressão de callback do eixo Standards também impede a confirmação
+  HTTP do upload nesse uso existente. Não há requisito básico ausente nem
+  escopo adicional: a rota, controle persistido/ACK, remoção selecionada,
+  Lixeira e ouvinte estão implementados, com lacunas de segurança acima.
+
+**Validação:** gate completo em primeiro plano, exit 0, `gate: passou`.
+Rust: 56 HTTP + 4 unitários + 7 config + 5 outbox; UI: 47/47; QA: 14/14.
+Formatação, Clippy e TypeScript verdes. Android `check` verde; testes
+`UP-TO-DATE`, XML com 71 do app e 62 do cliente, sem falhas/erros/pulos.
+Essa suíte verde não cobre os interleavings e reusos identificados.
+Provas red-green da implementação conferidas nos commits e no registro
+acima: `e4f7a89` → `d3cc51b` (41 → 43 HTTP),
+`48a202e`/`ab46d53` → `77ebaf2` (43 → 51),
+`f84bf1d` → `5d61d52` (APIs ausentes → 55),
+`082a39e` → `940a692` (55 verdes/1 vermelho → 56 verdes).
+Não houve violação de Primary files ou da separação teste/código; o lock
+gerado pela dependência `trash` aprovada é a atualização necessária.
+
+**QA:** [relatório do emulador](../../qa-runs/2026-10-02-syn-019-review.md).
+Critério 2 ✅: destino na Lixeira do Windows confirmado com SHA-256 idêntico;
+dois casos de segurança ❌ reproduzidos. `clean` e `down` concluídos, sem
+arquivos prévios afetados. A branch continua `syn-019`, sem merge; não havia
+linha SYN-019 no ledger a retirar.
+
+**Decisão do proxy revisada:** a linha `2026-10-01 Proxy decided` deste
+ticket fixou o fatiamento: protocolo/backend/Lixeira/docs aqui, janela no
+SYN-028; critério 7 seleciona só a lista, 8 inclui enviados/print e 10 é o
+ouvinte; BUG-003 continua como dependência e `Review: human` se mantém.
+O diff respeita esse recorte; esta revisão não mudou decisões ou critérios.
+
+Resumo por eixo: Standards, 2 regressões/riscos que exigem teste + 1
+heurística sem veto (pior: original de envio concorrente pode ser reciclado);
+Spec, 3 falhas de preservação de arquivo, duas reproduzidas (pior: arquivo
+fora da seleção/original é apagado). O callback foi citado nos dois eixos
+como o mesmo achado, não como outro defeito.
