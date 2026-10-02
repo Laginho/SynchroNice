@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: implementing
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -275,3 +275,10 @@ heurística sem veto (pior: original de envio concorrente pode ser reciclado);
 Spec, 3 falhas de preservação de arquivo, duas reproduzidas (pior: arquivo
 fora da seleção/original é apagado). O callback foi citado nos dois eixos
 como o mesmo achado, não como outro defeito.
+
+- 2026-10-02 Proxy decided: retomar da branch `syn-019` em `f2b2530`, sem recomeçar nem fatiar, no próximo run com o hard do lineup (sonnet-5.5 xhigh) e `-ImplementMinutes 75` — dos cinco ❌ da revisão, quatro já estão vermelho→verde na branch e o último tem o teste vermelho committed; fatiar para destravar SYN-028/027 tiraria daqui a guarda de "o original de quem enviou nunca é tocado" e o teste da branch para ganhar menos de um ciclo (a rodada 2 fechou um a cada ~8 min).
+  - **Para o stage 2 (retomada):**
+    - Trabalhe na branch `syn-019` como está; não recrie a branch nem refaça os testes já committed. Prova da rodada 2, conferida pelo proxy nos logs locais de `.scratch/qa-runs/2026-10-02-syn-019-reopen/` (`gate.ps1 -TestsOnly`): `6078c66` → `817dfe8` (56 HTTP + 1 vermelho → 57), `7d8ae2e` → `475bcdf` (57 + 1 → 58), `27b3cfb` → `3adbe4a` (58 + 1 → 59), `db2bb99` → `16da8d5` (59 + 1 → 60); 4 unitários, 7 config e 5 outbox verdes em todas.
+    - Comece pelo teste de `f2b2530`, `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente` (o ❌ "proteção concorrente de original" da revisão): rode `gate.ps1 -TestsOnly` em primeiro plano e registre o vermelho. Essa prova ainda não existe: o timeout matou a rodada na compilação (`send-race-red.log`). Se falhar só pelo harness, conserte em commit de teste.
+    - Depois, a correção em commit só de código. A revisão aponta o formato: uma operação da Outbox que confere os originais e faz a ação no arquivo sob a mesma trava em que `enqueue_file_from_path` confere a origem e registra o caminho, usada pelos dois chamadores (`apply_delete` e `finish_received_file`); isso também tira a captura duplicada.
+    - É o último ❌. Não abra ciclos novos para outros intervalos: um risco novo vai como nota aqui, para o stage 3. Verde → gate completo em primeiro plano → `to-review`.
