@@ -293,6 +293,47 @@ fn read_clipboard_file_list() -> Result<Vec<String>, String> {
     clipboard_win::get_clipboard(clipboard_win::formats::FileList).map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct PreviaDeCaminho {
+    tamanho: u64,
+    bytes: Option<Vec<u8>>,
+}
+
+/// Prévia somente leitura: nunca usa a fila nem cria cópias de entrega.
+#[tauri::command]
+fn previa_de_caminho(caminho: String) -> Result<PreviaDeCaminho, String> {
+    use std::io::Read;
+    const LIMITE: u64 = 10 * 1024 * 1024;
+    let caminho = Path::new(&caminho);
+    let arquivo = std::fs::File::open(caminho).map_err(|e| e.to_string())?;
+    let metadata = arquivo.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("a origem não é um arquivo".to_string());
+    }
+    let imagem = caminho
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
+                .contains(&ext.to_ascii_lowercase().as_str())
+        });
+    let bytes = if imagem && metadata.len() <= LIMITE {
+        let mut bytes = Vec::new();
+        // Também limita o caso em que o arquivo cresce depois do metadata.
+        arquivo
+            .take(LIMITE + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        (bytes.len() as u64 <= LIMITE).then_some(bytes)
+    } else {
+        None
+    };
+    Ok(PreviaDeCaminho {
+        tamanho: metadata.len(),
+        bytes,
+    })
+}
+
 /// Sobe o servidor HTTP com o token do Par, anuncia o serviço por mDNS, liga
 /// a lista de Itens e a fila de saída à janela, e disponibiliza a fila para
 /// os comandos de envio.
@@ -433,6 +474,7 @@ pub fn run() {
             send_files,
             send_bytes,
             read_clipboard_file_list,
+            previa_de_caminho,
             caminho_para_arrastar,
             caminho_enviado_para_arrastar,
             abrir_arquivo,
@@ -463,6 +505,40 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn previa_de_caminho_le_tamanho_e_limita_bytes_a_imagens_pequenas() {
+        let dir = tempfile::tempdir().unwrap();
+        let documento = dir.path().join("documento.txt");
+        let imagem = dir.path().join("foto.PNG");
+        let grande = dir.path().join("grande.png");
+        std::fs::write(&documento, b"texto").unwrap();
+        std::fs::write(&imagem, b"imagem").unwrap();
+        let arquivo = std::fs::File::create(&grande).unwrap();
+        arquivo.set_len(10 * 1024 * 1024 + 1).unwrap();
+
+        let previa = super::previa_de_caminho(documento.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 5);
+        assert_eq!(previa.bytes, None);
+        let previa = super::previa_de_caminho(imagem.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 6);
+        assert_eq!(previa.bytes.as_deref(), Some(b"imagem".as_slice()));
+        std::fs::File::create(&imagem)
+            .unwrap()
+            .set_len(10 * 1024 * 1024)
+            .unwrap();
+        let previa = super::previa_de_caminho(imagem.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.bytes.unwrap().len(), 10 * 1024 * 1024);
+        let previa = super::previa_de_caminho(grande.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 10 * 1024 * 1024 + 1);
+        assert_eq!(previa.bytes, None);
+        assert!(super::previa_de_caminho(
+            dir.path().join("sumiu.png").to_string_lossy().into_owned()
+        )
+        .is_err());
+        assert!(super::previa_de_caminho(dir.path().to_string_lossy().into_owned()).is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+
     use super::executavel;
     use std::path::Path;
 

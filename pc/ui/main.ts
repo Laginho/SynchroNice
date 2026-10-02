@@ -1,11 +1,12 @@
 // A janela do chat. Desenha cada Item recebido como bolha à esquerda ("o
 // outro") e cada Item enviado como bolha à direita ("eu"), e enfileira o que
-// o composer, o drop e o Ctrl+V mandam para o celular (SYN-004).
+// o composer manda para o celular. Drop e Ctrl+V preparam a bandeja (SYN-020).
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { segmentarTexto } from "./copiaveis.ts";
+import { Bandeja, temPrevia } from "./bandeja.ts";
 
 interface TextItem {
   id: number;
@@ -69,6 +70,108 @@ const recebidas = new Map<number, HTMLElement>();
 /** Bolha enviada já desenhada por id — ids do PC, num espaço à parte dos ids
  * de Item recebido, então as duas listas precisam de mapas separados. */
 const enviadas = new Map<number, HTMLElement>();
+
+type OrigemDaBandeja =
+  | { tipo: "caminho"; caminho: string }
+  | { tipo: "imagem"; arquivo: File; nome: string };
+
+interface DadosDoChip {
+  nome: string;
+  tamanho: number | null;
+  previa: string | null;
+}
+
+const bandeja = new Bandeja<OrigemDaBandeja>();
+const chips = new Map<number, DadosDoChip>();
+let adicoesPendentes = Promise.resolve();
+let geracaoDaBandeja = 0;
+
+function renderBandeja(): void {
+  const entradas = bandeja.entradas();
+  const ids = new Set(entradas.map((entrada) => entrada.id));
+  for (const [id, chip] of chips) {
+    if (ids.has(id)) continue;
+    if (chip.previa) URL.revokeObjectURL(chip.previa);
+    chips.delete(id);
+  }
+  const painel = document.querySelector<HTMLElement>("#bandeja")!;
+  painel.hidden = entradas.length === 0;
+  painel.replaceChildren();
+  for (const entrada of entradas) {
+    const dados = chips.get(entrada.id)!;
+    const chip = document.createElement("li");
+    chip.className = "bandeja-chip";
+    chip.classList.toggle("falhou", entrada.falhou);
+    chip.dataset.id = String(entrada.id);
+    if (dados.previa) {
+      const img = document.createElement("img");
+      img.src = dados.previa;
+      img.alt = dados.nome;
+      chip.append(img);
+    }
+    const info = document.createElement("div");
+    info.className = "bandeja-info";
+    const nome = document.createElement("span");
+    nome.className = "bandeja-nome";
+    nome.textContent = dados.nome;
+    nome.title = dados.nome;
+    const meta = document.createElement("span");
+    meta.className = "bandeja-meta";
+    meta.textContent = entrada.falhou
+      ? entrada.origem.tipo === "caminho"
+        ? "origem não encontrada ou indisponível"
+        : "não foi possível enviar"
+      : dados.tamanho === null ? "" : tamanhoLegivel(dados.tamanho);
+    info.append(nome, meta);
+    const remover = document.createElement("button");
+    remover.type = "button";
+    remover.textContent = "✕";
+    remover.setAttribute("aria-label", `Remover ${dados.nome}`);
+    remover.addEventListener("click", () => {
+      bandeja.remover(entrada.id);
+      renderBandeja();
+      document.querySelector<HTMLInputElement>("#composer-input")!.focus();
+    });
+    chip.append(info, remover);
+    painel.append(chip);
+  }
+}
+
+function adicionarCaminhos(caminhos: string[]): void {
+  if (arrastandoDaBolha) return;
+  for (const caminho of caminhos) {
+    const entrada = bandeja.adicionar({ tipo: "caminho", caminho });
+    const dados: DadosDoChip = {
+      nome: caminho.split(/[\\/]/).pop() || caminho,
+      tamanho: null,
+      previa: null,
+    };
+    chips.set(entrada.id, dados);
+    void invoke<{ tamanho: number; bytes: number[] | null }>("previa_de_caminho", { caminho })
+      .then((previa) => {
+        // Remover/limpar/enviar pode ter acontecido enquanto o disco era lido.
+        if (!chips.has(entrada.id)) return;
+        dados.tamanho = previa.tamanho;
+        if (previa.bytes) {
+          dados.previa = URL.createObjectURL(new Blob([new Uint8Array(previa.bytes)]));
+        }
+        renderBandeja();
+      })
+      // Origem ausente na prévia não impede adicioná-la nem tentar enviar.
+      .catch(() => {});
+  }
+  renderBandeja();
+}
+
+function adicionarImagem(arquivo: File, nome: string): void {
+  if (arrastandoDaBolha) return;
+  const entrada = bandeja.adicionar({ tipo: "imagem", arquivo, nome });
+  chips.set(entrada.id, {
+    nome, tamanho: arquivo.size,
+    previa: temPrevia(arquivo.size) ? URL.createObjectURL(arquivo) : null,
+  });
+  renderBandeja();
+}
 
 function hora(atMs: number): string {
   return new Date(atMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -581,12 +684,6 @@ function ligarConfiguracoes(): void {
     }
   });
 
-  window.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || panel.hidden) return;
-    fechar();
-    toggle.focus();
-  });
-
   mudarPasta.addEventListener("click", async () => {
     mudarPasta.disabled = true;
     try {
@@ -612,26 +709,78 @@ function ligarConfiguracoes(): void {
   });
 }
 
-/** Enter no composer, ou o botão de enviar: enfileira o texto e limpa o campo. */
+/** Enter e ➤: cada entrada vira um Item, com o texto por último. */
 function ligarComposer(): void {
   const input = document.querySelector<HTMLInputElement>("#composer-input")!;
   const botao = document.querySelector<HTMLButtonElement>(".composer .send")!;
+  let enviando = false;
 
   async function enviar(): Promise<void> {
-    const texto = input.value.trim();
-    if (!texto) return;
-    input.value = "";
+    if (enviando) return;
+    enviando = true;
+    botao.disabled = true;
     try {
-      await invoke("send_text", { text: texto });
-    } catch (e) {
-      console.error(`não foi possível enfileirar o texto: ${e}`);
+      // Uma colagem ainda lendo CF_HDROP entra antes do Enter que veio depois.
+      await adicoesPendentes;
+      const textoOriginal = input.value;
+      const sequencia = bandeja.sequencia(textoOriginal);
+      if (sequencia.some((envio) => envio.tipo === "texto")) input.value = "";
+      for (const envio of sequencia) {
+        if (envio.tipo === "texto") {
+          try {
+            await invoke("send_text", { text: envio.texto });
+          } catch (e) {
+            if (!input.value) input.value = textoOriginal;
+            console.error(`não foi possível enfileirar o texto: ${e}`);
+          }
+          continue;
+        }
+        const { id, origem } = envio.entrada;
+        // Remover ou Esc durante o envio cancela as entradas ainda não enviadas.
+        if (!bandeja.entradas().some((entrada) => entrada.id === id)) continue;
+        try {
+          if (origem.tipo === "caminho") {
+            await invoke("send_files", { paths: [origem.caminho] });
+          } else {
+            const bytes = Array.from(new Uint8Array(await origem.arquivo.arrayBuffer()));
+            await invoke("send_bytes", { name: origem.nome, bytes });
+          }
+          bandeja.concluir(id, true);
+        } catch {
+          bandeja.concluir(id, false);
+        }
+        renderBandeja();
+      }
+    } finally {
+      enviando = false;
+      botao.disabled = false;
     }
   }
 
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") void enviar();
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      void enviar();
+    }
   });
   botao.addEventListener("click", () => void enviar());
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.repeat) return;
+    event.preventDefault();
+    const panel = document.querySelector<HTMLElement>("#settings-panel")!;
+    if (!panel.hidden) {
+      panel.hidden = true;
+      const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.focus();
+      return;
+    }
+    // Invalida também colagens capturadas que ainda aguardam a lista nativa.
+    geracaoDaBandeja++;
+    bandeja.limpar();
+    renderBandeja();
+  });
 }
 
 /** Arrastar um arquivo do Explorer para a janela: um Item por caminho,
@@ -643,8 +792,10 @@ function ligarDrop(): void {
     // Arquivo que saiu de uma bolha e foi solto de volta na janela: quem
     // desistiu do drag não pediu para reenviar ao celular (SYN-006).
     if (arrastandoDaBolha) return;
-    invoke("send_files", { paths: event.payload.paths }).catch((e) => {
-      console.error(`não foi possível enfileirar os arquivos soltos: ${e}`);
+    const caminhos = event.payload.paths;
+    const geracao = geracaoDaBandeja;
+    adicoesPendentes = adicoesPendentes.then(() => {
+      if (geracao === geracaoDaBandeja) adicionarCaminhos(caminhos);
     });
   });
 }
@@ -677,34 +828,30 @@ function imagemDaColagem(event: ClipboardEvent): { arquivo: File; ext: string } 
  * sobra é um print, e ele sai do próprio evento de colagem. */
 function ligarColar(): void {
   window.addEventListener("paste", (event) => {
-    void tratarColagem(event);
+    tratarColagem(event);
   });
 }
 
-async function tratarColagem(event: ClipboardEvent): Promise<void> {
+function tratarColagem(event: ClipboardEvent): void {
+  if (arrastandoDaBolha) return;
   const imagem = imagemDaColagem(event);
   // Colagem de texto puro não tem nem imagem nem arquivo: sai antes de
   // incomodar o lado Rust, e o texto cai no composer como sempre.
   const temArquivos = event.clipboardData?.types.includes("Files") ?? false;
   if (!imagem && !temArquivos) return;
-
-  try {
-    const caminhos = await invoke<string[]>("read_clipboard_file_list");
-    if (caminhos.length > 0) {
-      await invoke("send_files", { paths: caminhos });
-      return;
-    }
-  } catch (e) {
+  event.preventDefault();
+  const geracao = geracaoDaBandeja;
+  // Captura já; processa junto dos drops na ordem em que os eventos chegaram.
+  const leitura = invoke<string[]>("read_clipboard_file_list").catch((e): string[] => {
     console.error(`clipboard sem lista de arquivos, tentando a imagem: ${e}`);
-  }
-
-  if (!imagem) return;
-  try {
-    const bytes = Array.from(new Uint8Array(await imagem.arquivo.arrayBuffer()));
-    await invoke("send_bytes", { name: `imagem-${Date.now()}.${imagem.ext}`, bytes });
-  } catch (e) {
-    console.error(`não foi possível enfileirar a imagem colada: ${e}`);
-  }
+    return [];
+  });
+  adicoesPendentes = adicoesPendentes.then(async () => {
+    const caminhos = await leitura;
+    if (geracao !== geracaoDaBandeja) return;
+    if (caminhos.length > 0) adicionarCaminhos(caminhos);
+    else if (imagem) adicionarImagem(imagem.arquivo, `imagem-${Date.now()}.${imagem.ext}`);
+  });
 }
 
 async function main(): Promise<void> {
