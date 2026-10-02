@@ -2,6 +2,7 @@ package synchronice.android
 
 import android.Manifest
 import android.app.Application
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -184,6 +185,19 @@ internal class AppState(
     val composer = TextFieldState()
     var sendingComposer by mutableStateOf(false)
         private set
+
+    /** Devolve false quando o campo ainda precisa receber o texto do mesmo item. */
+    fun pasteItem(item: ClipData.Item): Boolean {
+        val uri = item.uri ?: return false
+        if (sendingComposer) return false
+        try {
+            pasteUri(uri)
+        } catch (_: Exception) {
+            Toast.makeText(appContext, "Não foi possível colar este arquivo.", Toast.LENGTH_LONG).show()
+        }
+        // Nunca converte uma URI recusada em texto, mas preserva uma legenda explícita.
+        return item.text == null
+    }
 
     /** Copia antes de devolver o callback: a permissão do teclado é temporária. */
     fun pasteUri(uri: Uri): Boolean {
@@ -916,19 +930,7 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
                 state = draft,
                 readOnly = state.sendingComposer,
                 modifier = Modifier.weight(1f).testTag("composer").contentReceiver { content ->
-                    content.consume { item ->
-                        val uri = item.uri
-                        if (uri == null || state.sendingComposer) false
-                        else {
-                            try {
-                                state.pasteUri(uri)
-                            } catch (_: Exception) {
-                                Toast.makeText(context, "Não foi possível colar este arquivo.", Toast.LENGTH_LONG).show()
-                            }
-                            // URIs recusadas também não devem virar texto no composer.
-                            true
-                        }
-                    }
+                    content.consume(state::pasteItem)
                 },
                 placeholder = { Text("Mensagem") },
                 lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
