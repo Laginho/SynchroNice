@@ -734,8 +734,16 @@ async function main(): Promise<void> {
   // Os dois lados da Sessão vivem no backend até o processo terminar.
   // Pendentes herdados continuam na fila de entrega, fora desta lista.
   const [recebidos, enviados] = await Promise.all([
-    invoke<Item[]>("list_items"),
-    invoke<Enviado[]>("list_sent_items"),
+    invoke<Item[]>("list_items").catch((e): Item[] => {
+      console.error(`não foi possível listar os recebidos: ${e}`);
+      return [];
+    }),
+    // A fila pode falhar antes de ser registrada no backend. Os recebidos
+    // e os controles independentes dela continuam utilizáveis nesse caso.
+    invoke<Enviado[]>("list_sent_items").catch((e): Enviado[] => {
+      console.error(`não foi possível listar os enviados: ${e}`);
+      return [];
+    }),
   ]);
   for (const item of recebidos) renderRecebido(item);
   for (const item of enviados) renderEnviado(item);

@@ -9,6 +9,7 @@
 //! reinício sem colidir com um id já visto pelo celular.
 
 use serde::{Deserialize, Serialize};
+use std::fs::{File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -52,6 +53,79 @@ fn now_ms() -> u64 {
 const MANIFEST_FILE: &str = "manifest.json";
 const SESSION_FILES: &str = "session-files";
 
+/// Cada fila tem suas próprias cópias. O lock da dona dura até o último
+/// clone ou a morte do processo; a varredura só remove diretórios sem dona.
+struct SessionFiles {
+    path: PathBuf,
+    lease: Option<File>,
+    registry: File,
+}
+
+fn open_lock(path: &Path) -> io::Result<File> {
+    File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
+impl SessionFiles {
+    fn new(root: &Path) -> io::Result<Self> {
+        std::fs::create_dir_all(root)?;
+        let registry = open_lock(&root.join(".lock"))?;
+        // Serializa criação, varredura e descarte. Nenhum diretório novo
+        // pode ser confundido com abandonado antes de adquirir seu lock.
+        registry.lock()?;
+        for entry in std::fs::read_dir(root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let lease = open_lock(&entry.path().join(".lock"))?;
+            match lease.try_lock() {
+                Ok(()) => {
+                    drop(lease);
+                    std::fs::remove_dir_all(entry.path())?;
+                }
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Error(error)) => return Err(error),
+            }
+        }
+
+        let path = loop {
+            let mut bytes = [0u8; 16];
+            getrandom::fill(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
+            let name: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            let path = root.join(name);
+            match std::fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        };
+        let lease = open_lock(&path.join(".lock"))?;
+        lease.lock()?;
+        registry.unlock()?;
+        Ok(Self {
+            path,
+            lease: Some(lease),
+            registry,
+        })
+    }
+}
+
+impl Drop for SessionFiles {
+    fn drop(&mut self) {
+        if self.registry.lock().is_ok() {
+            // Fecha o arquivo de lock antes de remover a pasta no Windows.
+            drop(self.lease.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+        // A alça registry é fechada ao sair, liberando a varredura seguinte.
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct Manifest {
     next_id: u64,
@@ -88,20 +162,13 @@ type ChangeListener = Box<dyn Fn(&OutItem, bool) + Send + Sync>;
 struct Inner {
     manifest: Manifest,
     sent: Vec<SentItem>,
-    session_dir: PathBuf,
+    session_files: SessionFiles,
     /// Um remetente por conexão `/listen` viva, para anunciar um Item novo
     /// assim que ele é enfileirado. Descartados sob demanda: um `send` que
     /// falha (celular desconectou) tira o remetente da lista na próxima
     /// notificação, em vez de vazar para sempre.
     listeners: Vec<UnboundedSender<OutItem>>,
     changed: Vec<ChangeListener>,
-}
-
-impl Drop for Inner {
-    fn drop(&mut self) {
-        // Última alça: elimina só as cópias da Sessão, nunca os Pendentes.
-        let _ = std::fs::remove_dir_all(&self.session_dir);
-    }
 }
 
 fn notify(listeners: &mut Vec<UnboundedSender<OutItem>>, item: &OutItem) {
@@ -125,22 +192,18 @@ pub struct Outbox {
 impl Outbox {
     /// Carrega a fila persistida em `dir`, ou começa vazia se não houver
     /// manifesto. A Sessão sempre começa vazia, e cópias de prints da vida
-    /// anterior são varridas sem apagar os payloads de entrega dos Pendentes.
+    /// anterior são varridas sem apagar cópias de outras filas vivas nem os
+    /// payloads de entrega dos Pendentes.
     pub fn new(dir: PathBuf) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
-        let session_dir = dir.join(SESSION_FILES);
-        match std::fs::remove_dir_all(&session_dir) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+        let session_files = SessionFiles::new(&dir.join(SESSION_FILES))?;
         let manifest = load_manifest(&dir);
         Ok(Self {
             dir,
             inner: Arc::new(Mutex::new(Inner {
                 manifest,
                 sent: Vec::new(),
-                session_dir,
+                session_files,
                 listeners: Vec::new(),
                 changed: Vec::new(),
             })),
@@ -211,7 +274,7 @@ impl Outbox {
             Some(path) => path,
             None => {
                 // Um diretório por Item evita sobrescrever prints homônimos.
-                let dir = inner.session_dir.join(id.to_string());
+                let dir = inner.session_files.path.join(id.to_string());
                 std::fs::create_dir_all(&dir)?;
                 let path = dir.join(&name);
                 std::fs::write(&path, bytes)?;

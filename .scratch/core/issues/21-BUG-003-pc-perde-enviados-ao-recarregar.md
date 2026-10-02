@@ -1,5 +1,5 @@
 # BUG-003: O PC perde os enviados ao recarregar, e a bolha enviada não abre nem arrasta
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -213,3 +213,42 @@ os dois achados no código da branch. Base `sweatshop/2026-10-01-2019`
 - Retomar o stage 2 na branch `bug-003` pelos dois ❌, com testes novos em
   commit próprio antes do código (ver "Tests stage 2 writes", reabertura).
   Sem merge nem linha de ledger.
+
+#### Stage 2 — reabertura concluída (2026-10-02)
+
+- Testes primeiro em `7759b1f`: a segunda fila apagava o print confirmado
+  da primeira (`NotFound`, `outbox` 4/5). `gate.ps1 -TestsOnly` saiu 1
+  por esse teste; UI 47/47, kit 14/14 e Android verdes. O Cargo interrompeu
+  antes dos testes de servidor nessa rodada vermelha.
+- Correção dentro dos Primary files: cada fila ganha seu diretório em
+  `outbox/session-files/<sessão>/<id>/<nome>`. Um lock de arquivo por fila
+  identifica a dona viva, inclusive entre processos; um lock da pasta
+  serializa criação, varredura e descarte, impedindo varrer uma pasta ainda
+  em criação. O último clone remove só as próprias cópias. Morte sem
+  destrutores libera o lock, e a próxima fila remove as cópias abandonadas.
+  Manifesto e payloads de entrega continuam com o ciclo de vida anterior.
+- A carga inicial trata a falha de cada lista separadamente, preservando
+  a outra lista e a ligação do composer, drop, colagem e configurações.
+  Sem teste de unidade, conforme a decisão registrada na reabertura.
+- Verde: gate completo saiu 0, fmt/Clippy/typecheck verdes, **PC 57/57**
+  (4 unitários, 7 configuração, 5 outbox, 41 servidor), **UI 47/47**,
+  **kit 14/14**, `gradle check` verde (133 testes nos relatórios existentes,
+  sem falhas, tarefas de teste `UP-TO-DATE`). Build debug sem bundle também
+  passou. Produção não altera testes.
+- Smoke no executável novo, PC isolado pelo kit/CDP:
+  - `data/outbox` como arquivo: `list_items` retorna `[]`,
+    `list_sent_items` rejeita, mas a engrenagem abre/fecha e volta a abrir
+    após reload. Screenshot local `broken.png`.
+  - Print PNG de 68 bytes enfileirado por `send_bytes` e confirmado pelo
+    endpoint HTTP real: duas instâncias vivas, mesma pasta de dados,
+    perfis WebView/CDP distintos. Na primeira, `read_sent_file_bytes`
+    conserva os 68 bytes, o caminho de drag mantém `qa-overlap.png`,
+    e a miniatura volta após reload (`naturalWidth=1`). Repetido com
+    sucesso após encerrar a segunda instância. Screenshot `overlap.png`.
+  - Evidências/scripts/logs locais ignorados em
+    `.scratch/qa-runs/2026-10-02-bug-003-reopen/`; Pasta isolada vazia,
+    `clean` retorna `[]`, processos de QA encerrados. Nenhum arquivo,
+    Par ou Sessão reais alterados.
+- Próximo passo: stage 3 independente, incluindo QA no emulador e os passos
+  de Verification. O smoke não verifica Android nem gesto de drag externo.
+  Sem merge, push ou ledger nesta etapa.
