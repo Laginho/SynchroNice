@@ -1,6 +1,7 @@
 # QA e revisão — 2026-10-02 — BUG-003
 
-Status: checkpoint; achados reproduzidos, segunda rodada do gate pendente.
+Status: final; achados reproduzidos. Segunda rodada do gate verde (PC 56/56,
+UI 47/47, kit 14/14, Android), lida do log da sessão; veredito no ticket.
 Veredito previsto: Reopen — critérios 3/7 e regressão de inicialização.
 
 Branch `bug-003`, implementação em `6cb56d9`, HEAD inicial `4f24026`.

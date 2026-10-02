@@ -1,5 +1,5 @@
 # BUG-003: O PC perde os enviados ao recarregar, e a bolha enviada não abre nem arrasta
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -75,11 +75,31 @@ Decisões do stage 1 (2026-10-01):
 QA no stage 3: kit no emulador, critérios 6 a 8 (o recarregar e o DOM pelo
 CDP). Arrastar para fora da janela continua 👤.
 
+Depois da reabertura de 2026-10-02, o QA do stage 3 repete os dois cenários
+que falharam (relatório `.scratch/qa-runs/2026-10-02-bug-003-final-review.md`):
+duas instâncias com a mesma pasta de dados, e a abertura com a fila quebrada
+(`data/outbox` como arquivo), em que a engrenagem precisa responder.
+
 ## Tests stage 2 writes (own commit, red)
 
 - `pc/src-tauri/tests/outbox.rs` (novo), na API pública de `pc_lib::outbox`,
   critérios 1 a 5. Vermelho porque a fila não guarda a origem, não lista os
   confirmados, e `confirm` apaga a única cópia.
+- Reabertura (2026-10-02), no mesmo `pc/src-tauri/tests/outbox.rs`: duas
+  filas vivas na mesma pasta. Criar a segunda não apaga a cópia de print da
+  primeira, que segue legível depois do ack; descartar uma apaga só as
+  cópias dela. Vermelho porque `Outbox::new` e o `Drop` apagam a pasta
+  `session-files` inteira. O teste atual do critério 4 simula a morte com
+  `std::mem::forget`, que no mesmo processo não se distingue de uma
+  instância viva: troque a simulação por um processo que morre de fato (por
+  exemplo, o próprio binário de teste reexecutado, saindo com
+  `std::process::exit` depois de colar o print). É correção de harness, em
+  commit só de teste.
+- A regressão da carga inicial em `pc/ui/main.ts` não tem seam de teste:
+  `main()` roda no import e o gate só executa `copiaveis.test.ts`. Corrige-se
+  sem teste de unidade, como a correção 2 da revisão de SYN-005
+  (`estado_par_inicial` com `catch`); a prova é o cenário de QA da fila
+  quebrada em Verification.
 
 ## Comments
 
@@ -117,3 +137,69 @@ CDP). Arrastar para fora da janela continua 👤.
 - 2026-10-02 Review ended at to-review (timeout); branch bug-003 holds the review; left for a human
 
 - 2026-10-02 Foreman: o review (gpt-6.1-sol max, 23:42) estourou os 40 min compilando o PC e montando o QA (pareamento do emulador falhou; abrir o Explorer pelo Computer Use estourou o tempo) e não registrou nada. Suspeitas que ele anotou antes de parar: a limpeza de prints entre instâncias e os controles da bolha interrompidos quando a fila falha. Log: `.scratch/run-log/BUG-003-review-20261001-234229.txt`. Stage de volta a `to-review` para nova tentativa.
+
+- 2026-10-02 Review ended at to-review (timeout); branch bug-003 holds the review; left for a human
+
+- 2026-10-02 Proxy decided: reabrir pelo veredito da segunda revisão, sem terceira tentativa — os dois achados estão reproduzidos no relatório de `1e8b32b` e conferem com o código da branch; outra revisão gastaria de novo os 40 min compilando o PC e montando o QA para chegar ao mesmo ponto.
+
+- 2026-10-02 Proxy decided: a carga inicial se corrige sem teste de unidade, e a morte de processo no teste do critério 4 passa a ser um processo de verdade — `main.ts` não tem seam testável (precedente: SYN-005, correção 2) e `mem::forget` no mesmo processo não separa morte de instância viva (ver "Tests stage 2 writes").
+
+#### Review stage 3 (2026-10-02)
+
+Verdict: Reopen — critérios 3 e 7: outra instância apaga a cópia de print de uma Sessão viva; regressão: falha de `list_sent_items` deixa a janela sem controles.
+
+Revisão gpt-6.1-sol max (`.scratch/run-log/BUG-003-review-20261002-035109.txt`).
+A sessão chegou ao veredito e estourou os 40 min antes de escrevê-lo aqui; o
+`proxy` transcreveu este bloco do relatório
+`.scratch/qa-runs/2026-10-02-bug-003-final-review.md` (`1e8b32b`) e conferiu
+os dois achados no código da branch. Base `sweatshop/2026-10-01-2019`
+(merge-base `608165d`), implementação revisada até `6cb56d9`.
+
+##### Standards
+
+- Primary files respeitados. Commits de teste (`a53a09a`, `01ffd9e`,
+  `d9972e8`) antes dos de produção (`59b6ead`, `f2d5e88`, `6cb56d9`), que
+  não tocam testes.
+- Sugestão, sem reprovação: a direção da bolha é lida várias vezes de
+  `classList.contains("mine")` em `main.ts`. Não é critério nem regressão.
+
+##### Spec
+
+- ❌ **Critérios 3 e 7, cópia de print apagada por outra instância (P2)** —
+  `outbox.rs`: `Outbox::new` e `Inner::drop` apagam a pasta compartilhada
+  `session-files` inteira, e o PC não tem instância única (abrir o atalho com
+  o app na bandeja abre uma segunda, como anotado em SYN-005 e em
+  `.scratch/qa/spec.md`). Reproduzido: print id 3 colado e confirmado pelo
+  `/outbox/3/ack` real na instância 1; abrir a instância 2 com a mesma pasta
+  de dados apagou a cópia, `read_sent_file_bytes(3)` passou a falhar e o
+  clique marcou a bolha como sumida, com as duas vivas. "A cópia vive até a
+  Sessão acabar" vale por instância: a varredura do critério 4 e o destrutor
+  só podem apagar cópias de processo morto ou as próprias.
+- ❌ **Regressão na carga inicial (P2)** — `main.ts`: o `Promise.all` de
+  `list_items` e `list_sent_items` rejeita quando a fila não foi criada
+  (`lib.rs` retorna antes de `app.manage(outbox)` se `Outbox::new` falha, com
+  `Items` e `Par` já gerenciados). `main()` aborta antes de desenhar os
+  recebidos e de `ligarComposer`, `ligarDrop`, `ligarColar` e
+  `ligarConfiguracoes`, que antes do BUG-003 eram ligados. Reproduzido com
+  `data/outbox` como arquivo (`os error 183`): engrenagem sem resposta. É o
+  modo de falha da correção 2 da revisão de SYN-005.
+- Critérios 1, 2, 4, 5, 6 e 8 ✅ (testes de `outbox`; QA pelo kit, DOM e
+  recarregar pelo CDP). Critério 7 ✅ num processo só (miniatura, abrir,
+  resolução do drag); arrastar para fora da janela 👤 (captura do Computer
+  Use estourou o tempo).
+- Linhas `Proxy decided:` anteriores a esta revisão: nenhuma.
+
+##### Validação e próximo passo
+
+- Gate completo, segunda rodada: PC 56/56, UI 47/47, kit 14/14, fmt, Clippy,
+  typecheck e `gradle check` verdes. A primeira rodada falhou só em
+  `envios_concorrentes_do_mesmo_id_criam_um_item_e_um_arquivo`
+  (`tests/server.rs:819`, Windows 10053 `ConnectionAborted` no
+  `read_to_string`), teste e código que o BUG-003 não toca: instabilidade
+  fora do ticket, para triagem.
+- QA: o emulador abortou por infraestrutura (presença não ficou 200 em 30 s,
+  não reprova); o PC rodou isolado pelo kit. Evidências e limpeza no
+  relatório acima.
+- Retomar o stage 2 na branch `bug-003` pelos dois ❌, com testes novos em
+  commit próprio antes do código (ver "Tests stage 2 writes", reabertura).
+  Sem merge nem linha de ledger.
