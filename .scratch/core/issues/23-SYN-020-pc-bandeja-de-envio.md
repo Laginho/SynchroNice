@@ -1,5 +1,5 @@
 # SYN-020: Bandeja de envio no PC antes de mandar
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: agent
@@ -256,3 +256,11 @@ Verdict: Reopen — critério 11: imagem colada acima de 10 MiB ainda recebe min
   confirmação da Lixeira do kit foi registrada somente em Comments do
   CLEAN-019, que já trata dela. PC isolado e emulador encerrados. Revisão
   final sem mudança de produção/testes, segredos ou artefatos gerados.
+
+- Stage 2 (2026-10-02, reabertura do critério 11): teste em `113f18e`
+  (vermelho: `temPrevia` não existia), correção em `ef84226`
+  (`temPrevia(arquivo.size)` em `adicionarImagem`; o `File` original segue
+  para o envio). Gate verde: Rust 41+7+5+5, UI 55, kit 14, `gradle check`.
+  Na primeira execução `ProtocolClientTest` "arquivo grande aceito sem
+  resposta" (Android, fora dos Primary files, sem diff em `android/`)
+  falhou; passou na repetição completa.
