@@ -31,6 +31,17 @@ pub struct OutItem {
     pub body: OutBody,
 }
 
+/// Uma enviada desta vida do processo. Separada da fila persistida: ACK
+/// remove a Pendente, mas conserva a bolha e a origem até o fim da Sessão.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SentItem {
+    #[serde(flatten)]
+    pub item: OutItem,
+    pub entregue: bool,
+    #[serde(skip)]
+    pub path: Option<PathBuf>,
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -75,6 +86,7 @@ type ChangeListener = Box<dyn Fn(&OutItem, bool) + Send + Sync>;
 
 struct Inner {
     manifest: Manifest,
+    sent: Vec<SentItem>,
     /// Um remetente por conexão `/listen` viva, para anunciar um Item novo
     /// assim que ele é enfileirado. Descartados sob demanda: um `send` que
     /// falha (celular desconectou) tira o remetente da lista na próxima
@@ -112,6 +124,7 @@ impl Outbox {
             dir,
             inner: Arc::new(Mutex::new(Inner {
                 manifest,
+                sent: Vec::new(),
                 listeners: Vec::new(),
                 changed: Vec::new(),
             })),
@@ -147,6 +160,26 @@ impl Outbox {
     /// PNG temporário do clipboard, caminho de um drop — pode sumir antes da
     /// entrega) e enfileira o Item de arquivo.
     pub fn enqueue_file(&self, name: String, bytes: &[u8]) -> io::Result<OutItem> {
+        self.enqueue_file_with_origin(name, bytes, None)
+    }
+
+    /// Drop/Explorer: a entrega usa uma cópia, a bolha usa o original.
+    pub fn enqueue_file_from_path(&self, path: &Path) -> io::Result<OutItem> {
+        let bytes = std::fs::read(path)?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "nome inválido"))?
+            .to_string();
+        self.enqueue_file_with_origin(name, &bytes, Some(path.to_path_buf()))
+    }
+
+    fn enqueue_file_with_origin(
+        &self,
+        name: String,
+        bytes: &[u8],
+        path: Option<PathBuf>,
+    ) -> io::Result<OutItem> {
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
         let id = inner.manifest.next_id;
         std::fs::write(self.file_path(id), bytes)?;
@@ -161,6 +194,13 @@ impl Outbox {
         inner.manifest.next_id += 1;
         inner.manifest.items.push(item.clone());
         save_manifest(&self.dir, &inner.manifest)?;
+        if path.is_some() {
+            inner.sent.push(SentItem {
+                item: item.clone(),
+                entregue: false,
+                path,
+            });
+        }
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
         Ok(item)
@@ -183,6 +223,23 @@ impl Outbox {
             .manifest
             .items
             .clone()
+    }
+
+    /// Enviadas da Sessão, em ordem de inserção, incluindo as confirmadas.
+    pub fn session_items(&self) -> Vec<SentItem> {
+        self.inner.lock().expect("fila de saída sem panic").sent.clone()
+    }
+
+    /// Consulta a origem de novo a cada tentativa; a ausência no disco não
+    /// remove o caminho, pois o arquivo pode voltar ao mesmo lugar.
+    pub fn session_file_path(&self, id: u64) -> Option<PathBuf> {
+        self.inner
+            .lock()
+            .expect("fila de saída sem panic")
+            .sent
+            .iter()
+            .find(|sent| sent.item.id == id)
+            .and_then(|sent| sent.path.clone())
     }
 
     /// Descarta o destino antigo sem reutilizar ids. Só publica o estado
@@ -222,6 +279,9 @@ impl Outbox {
             return;
         };
         let item = inner.manifest.items.remove(pos);
+        if let Some(sent) = inner.sent.iter_mut().find(|sent| sent.item.id == id) {
+            sent.entregue = true;
+        }
         let _ = std::fs::remove_file(self.file_path(id));
         let _ = save_manifest(&self.dir, &inner.manifest);
         notify_change(&inner, &item, true);
