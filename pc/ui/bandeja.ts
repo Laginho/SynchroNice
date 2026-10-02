@@ -31,6 +31,13 @@ export class Bandeja<T> {
     this.itens = [];
   }
 
+  concluir(id: number, enviou: boolean): void {
+    if (enviou) this.remover(id);
+    else this.itens = this.itens.map((entrada) =>
+      entrada.id === id ? { ...entrada, falhou: true } : entrada,
+    );
+  }
+
   sequencia(texto: string): Envio<T>[] {
     const envios: Envio<T>[] = this.itens.map((entrada) => ({ tipo: "entrada", entrada }));
     const legenda = texto.trim();
