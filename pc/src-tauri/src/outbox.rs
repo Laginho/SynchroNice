@@ -9,6 +9,7 @@
 //! reinício sem colidir com um id já visto pelo celular.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -19,8 +20,19 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OutBody {
-    Text { text: String },
-    File { name: String, size: u64 },
+    Text {
+        text: String,
+    },
+    File {
+        name: String,
+        size: u64,
+    },
+    /// Controle persistido na fila; nunca integra a lista de enviados.
+    #[serde(rename = "delete")]
+    Apagar {
+        do_pc: Vec<u64>,
+        do_celular: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,6 +53,8 @@ pub struct SentItem {
     pub entregue: bool,
     #[serde(skip)]
     pub path: Option<PathBuf>,
+    #[serde(skip)]
+    session_copy: bool,
 }
 
 fn now_ms() -> u64 {
@@ -162,6 +176,8 @@ type ChangeListener = Box<dyn Fn(&OutItem, bool) + Send + Sync>;
 struct Inner {
     manifest: Manifest,
     sent: Vec<SentItem>,
+    /// Originais desta Sessão, inclusive de bolhas já excluídas. Nunca persistidos.
+    original_paths: HashSet<PathBuf>,
     session_files: SessionFiles,
     /// Um remetente por conexão `/listen` viva, para anunciar um Item novo
     /// assim que ele é enfileirado. Descartados sob demanda: um `send` que
@@ -169,6 +185,21 @@ struct Inner {
     /// notificação, em vez de vazar para sempre.
     listeners: Vec<UnboundedSender<OutItem>>,
     changed: Vec<ChangeListener>,
+}
+
+impl Inner {
+    fn is_original_file(&self, path: &Path) -> bool {
+        let Ok(canonical) = path.canonicalize() else {
+            return true; // Na dúvida, conserva o arquivo.
+        };
+        self.original_paths.iter().any(|original| {
+            original == &canonical
+                || match original.canonicalize() {
+                    Ok(path) => path == canonical,
+                    Err(error) => error.kind() != io::ErrorKind::NotFound,
+                }
+        })
+    }
 }
 
 fn notify(listeners: &mut Vec<UnboundedSender<OutItem>>, item: &OutItem) {
@@ -203,6 +234,7 @@ impl Outbox {
             inner: Arc::new(Mutex::new(Inner {
                 manifest,
                 sent: Vec::new(),
+                original_paths: HashSet::new(),
                 session_files,
                 listeners: Vec::new(),
                 changed: Vec::new(),
@@ -228,6 +260,7 @@ impl Outbox {
             item: item.clone(),
             entregue: false,
             path: None,
+            session_copy: false,
         });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
@@ -269,7 +302,15 @@ impl Outbox {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "nome inválido"));
         }
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
+        if let Some(path) = &path {
+            // Uma exclusão pode ter reciclado o original depois da leitura.
+            std::fs::metadata(path)?;
+        }
         let id = inner.manifest.next_id;
+        let session_copy = path.is_none();
+        let original = path
+            .as_ref()
+            .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()));
         let path = match path {
             Some(path) => path,
             None => {
@@ -293,10 +334,14 @@ impl Outbox {
         inner.manifest.next_id += 1;
         inner.manifest.items.push(item.clone());
         save_manifest(&self.dir, &inner.manifest)?;
+        if let Some(original) = original {
+            inner.original_paths.insert(original);
+        }
         inner.sent.push(SentItem {
             item: item.clone(),
             entregue: false,
             path: Some(path),
+            session_copy,
         });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
@@ -342,6 +387,85 @@ impl Outbox {
             .iter()
             .find(|sent| sent.item.id == id)
             .and_then(|sent| sent.path.clone())
+    }
+
+    /// Roda `act` sob a mesma trava em que um envio registra a origem, a menos
+    /// que `path` seja o original de um envio desta Sessão. Devolve se rodou.
+    pub(crate) fn unless_original(&self, path: &Path, act: impl FnOnce()) -> bool {
+        let inner = self.inner.lock().expect("fila de saída sem panic");
+        let free = !inner.is_original_file(path);
+        if free {
+            act();
+        }
+        free
+    }
+
+    /// Esquece enviadas desta Sessão. Some enfileira também o controle para
+    /// o celular, na mesma escrita do descarte dos Pendentes. Nunca apaga o
+    /// original de um drop nem emite on_change por controles.
+    pub(crate) fn delete_items(
+        &self,
+        ids: &[u64],
+        do_celular: Option<Vec<String>>,
+    ) -> io::Result<Vec<u64>> {
+        let mut inner = self.inner.lock().expect("fila de saída sem panic");
+        let requested: HashSet<u64> = ids.iter().copied().collect();
+        let removed: Vec<SentItem> = inner
+            .sent
+            .iter()
+            .filter(|sent| requested.contains(&sent.item.id))
+            .cloned()
+            .collect();
+        let removed_ids: HashSet<u64> = removed.iter().map(|sent| sent.item.id).collect();
+        if removed_ids.is_empty() && do_celular.as_ref().is_none_or(Vec::is_empty) {
+            return Ok(Vec::new());
+        }
+        let mut manifest = Manifest {
+            next_id: inner.manifest.next_id,
+            items: inner
+                .manifest
+                .items
+                .iter()
+                .filter(|item| !removed_ids.contains(&item.id))
+                .cloned()
+                .collect(),
+        };
+        let control = do_celular.map(|do_celular| {
+            let item = OutItem {
+                id: manifest.next_id,
+                at_ms: now_ms(),
+                body: OutBody::Apagar {
+                    do_pc: removed.iter().map(|sent| sent.item.id).collect(),
+                    do_celular,
+                },
+            };
+            manifest.next_id += 1;
+            manifest.items.push(item.clone());
+            item
+        });
+        save_manifest(&self.dir, &manifest)?;
+        inner.manifest = manifest;
+        for sent in &removed {
+            if let OutBody::File { size, .. } = sent.item.body {
+                let _ = std::fs::remove_file(self.file_path(sent.item.id));
+                if sent.session_copy {
+                    if let Some(path) = &sent.path {
+                        let same_size = std::fs::symlink_metadata(path)
+                            .is_ok_and(|m| m.is_file() && m.len() == size);
+                        if same_size && !inner.is_original_file(path) {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    }
+                }
+            }
+        }
+        inner
+            .sent
+            .retain(|sent| !removed_ids.contains(&sent.item.id));
+        if let Some(control) = control {
+            notify(&mut inner.listeners, &control);
+        }
+        Ok(removed.iter().map(|sent| sent.item.id).collect())
     }
 
     /// Descarta o destino antigo sem reutilizar ids. Só publica o estado

@@ -59,6 +59,21 @@
 //!                                 para reenvio da confirmação ser inofensivo).
 //!   Authorization: Bearer <token>
 //!
+//! Apagar tudo (SYN-019), depois dos 5 s de Desfazer da janela (SYN-028):
+//!   POST /items/delete       JSON {"do_pc":[<id u64>...],
+//!                                 "do_celular":["<X-Item-Id>"...]}
+//!   Authorization: Bearer <token>
+//!   204 sem corpo; ids desconhecidos/repetidos são ignorados. 400 se o
+//!   JSON não contiver as duas listas com os tipos acima. Não há eco nem
+//!   id/dedup próprio. O vínculo id → arquivo só existe nesta Sessão.
+//!   Upload em curso termina ou falha antes de sair da lista.
+//!
+//!   PC -> celular: controle na fila de Pendentes, anunciado pelo /listen:
+//!   {"id":N,"at_ms":...,"kind":"delete","do_pc":[...],"do_celular":[...]}
+//!   POST /outbox/N/ack o remove normalmente; nunca vira bolha/enviado.
+//!   Android anterior ao SYN-027 rejeita kind desconhecido; entre SYN-027
+//!   e SYN-029 o app ignora sem ACK. A janela só oferece a ação no SYN-028.
+//!
 //! Pareamento e descoberta (SYN-005). O celular não compila do mesmo fonte,
 //! então os dois formatos abaixo são contrato (ADR-0001):
 //!
@@ -79,7 +94,7 @@
 //! Parear de novo troca só o token; o nome de instância é estável por
 //! instalação.
 
-use crate::items::Items;
+use crate::items::{Item, ItemBody, Items};
 use crate::outbox::{OutItem, Outbox};
 use axum::extract::{Path as AxPath, Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -190,7 +205,13 @@ struct AppState {
     leases: Arc<Mutex<HashSet<PathBuf>>>,
     /// Caminho de cada arquivo recebido que terminou de gravar, indexado pelo
     /// id do Item para que Itens antigos continuem apontando à Pasta original.
+    /// Folha na ordem de locks: segurado só por get/insert/remove/clone, nunca
+    /// enquanto se pede outro lock — observadores de `Items` rodam sob o lock
+    /// da lista e consultam o caminho por aqui.
     received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
+    /// Serializa exclusão e conclusão de upload (rename + registro + descarte).
+    /// Ordem: `file_ops` → `accepted_item_ids` → `Items`. Nenhum observador o toma.
+    file_ops: Arc<Mutex<()>>,
     /// Ids que este processo já aceitou do remetente. A Sessão é em memória,
     /// portanto a deduplicação tem o mesmo ciclo de vida dos Itens visíveis.
     accepted_item_ids: Arc<Mutex<HashSet<String>>>,
@@ -206,6 +227,40 @@ struct AppState {
     before_file_item_id_lock: Arc<Mutex<Option<TestPause>>>,
     #[cfg(test)]
     after_file_rename: Arc<Mutex<Option<TestPause>>>,
+    #[cfg(debug_assertions)]
+    after_file_rename_for_tests: Arc<Mutex<Option<FileTestPause>>>,
+    #[cfg(debug_assertions)]
+    before_file_recycle_for_tests: Arc<Mutex<Option<FileTestPause>>>,
+}
+
+// Controles de agendamento para a costura HTTP de integração. Não existem
+// no release e não alteram a execução quando nenhum teste instala uma pausa.
+#[cfg(debug_assertions)]
+struct FileTestPause {
+    reached: mpsc::Sender<()>,
+    resume: mpsc::Receiver<()>,
+}
+
+#[cfg(debug_assertions)]
+impl FileTestPause {
+    fn wait(self) {
+        let _ = self.reached.send(());
+        // Descartar o remetente também libera a operação se o teste falhar.
+        let _ = self.resume.recv();
+    }
+}
+
+#[cfg(debug_assertions)]
+fn prepare_file_test_pause(
+    slot: &Mutex<Option<FileTestPause>>,
+) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+    let (reached_tx, reached_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
+    *slot.lock().expect("pausa de teste sem panic") = Some(FileTestPause {
+        reached: reached_tx,
+        resume: resume_rx,
+    });
+    (reached_rx, resume_tx)
 }
 
 #[cfg(test)]
@@ -298,26 +353,41 @@ pub struct Running {
     /// Alça para o sinal de presença — quem sobe o servidor usa
     /// `on_change` para avisar a janela quando o celular conecta ou some.
     pub presence: Presence,
-    pasta: Arc<Mutex<Option<PathBuf>>>,
-    received_files: Arc<Mutex<HashMap<u64, PathBuf>>>,
+    state: AppState,
 }
 
 impl Running {
+    #[doc(hidden)]
+    #[cfg(debug_assertions)]
+    pub fn pause_after_file_rename_for_tests(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        prepare_file_test_pause(&self.state.after_file_rename_for_tests)
+    }
+
+    #[doc(hidden)]
+    #[cfg(debug_assertions)]
+    pub fn pause_before_file_recycle_for_tests(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        prepare_file_test_pause(&self.state.before_file_recycle_for_tests)
+    }
+
     /// Persiste a escolha e a aplica ao servidor que já está escutando.
     pub fn escolher_pasta(&self, config_dir: &Path, pasta: &Path) -> io::Result<()> {
         crate::config::save_pasta(config_dir, pasta)?;
-        *self.pasta.lock().expect("Pasta sem panic") = Some(pasta.to_path_buf());
+        *self.state.pasta.lock().expect("Pasta sem panic") = Some(pasta.to_path_buf());
         Ok(())
     }
 
     /// Caminho do arquivo recebido que pertence ao Item `id`, se ele chegou
     /// a terminar de gravar. O caminho não depende da Pasta atualmente ativa.
     pub fn caminho_do_arquivo(&self, id: u64) -> Option<PathBuf> {
-        self.received_files
-            .lock()
-            .expect("arquivos recebidos sem panic")
-            .get(&id)
-            .cloned()
+        received_files(&self.state).get(&id).cloned()
+    }
+
+    /// Apagar tudo após o Desfazer: chaves locais dos recebidos e enviados,
+    /// em listas separadas. Só os Itens selecionados desta Sessão saem; a
+    /// exclusão para o celular persiste junto do descarte dos Pendentes.
+    pub fn apagar_tudo(&self, received: &[u64], sent: &[u64]) -> io::Result<()> {
+        let requested: HashSet<u64> = received.iter().copied().collect();
+        apply_delete(&self.state, |item| requested.contains(&item.id), sent, true)
     }
 }
 
@@ -402,11 +472,29 @@ fn spawn_inner(
     let token = token.into();
     let (tx, rx) = mpsc::channel::<io::Result<SocketAddr>>();
     let presence = Presence::default();
-    let presence_da_thread = presence.clone();
-    let pasta = Arc::new(Mutex::new(pasta));
-    let pasta_da_thread = pasta.clone();
-    let received_files = Arc::new(Mutex::new(HashMap::new()));
-    let received_files_da_thread = received_files.clone();
+    let state = AppState {
+        token,
+        items,
+        outbox,
+        presence: presence.clone(),
+        pasta: Arc::new(Mutex::new(pasta)),
+        leases: Arc::new(Mutex::new(HashSet::new())),
+        received_files: Arc::new(Mutex::new(HashMap::new())),
+        file_ops: Arc::new(Mutex::new(())),
+        accepted_item_ids: Arc::new(Mutex::new(accepted_item_ids)),
+        accepted_file_log,
+        file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
+        upload_inactivity_timeout,
+        #[cfg(test)]
+        before_file_item_id_lock: Arc::new(Mutex::new(None)),
+        #[cfg(test)]
+        after_file_rename: Arc::new(Mutex::new(None)),
+        #[cfg(debug_assertions)]
+        after_file_rename_for_tests: Arc::new(Mutex::new(None)),
+        #[cfg(debug_assertions)]
+        before_file_recycle_for_tests: Arc::new(Mutex::new(None)),
+    };
+    let state_da_thread = state.clone();
 
     std::thread::Builder::new()
         .name("synchronice-http".into())
@@ -431,23 +519,7 @@ fn spawn_inner(
                 };
                 let local = listener.local_addr();
                 let _ = tx.send(local);
-                let app = router(AppState {
-                    token,
-                    items,
-                    outbox,
-                    presence: presence_da_thread,
-                    pasta: pasta_da_thread,
-                    leases: Arc::new(Mutex::new(HashSet::new())),
-                    received_files: received_files_da_thread,
-                    accepted_item_ids: Arc::new(Mutex::new(accepted_item_ids)),
-                    accepted_file_log,
-                    file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
-                    upload_inactivity_timeout,
-                    #[cfg(test)]
-                    before_file_item_id_lock: Arc::new(Mutex::new(None)),
-                    #[cfg(test)]
-                    after_file_rename: Arc::new(Mutex::new(None)),
-                });
+                let app = router(state_da_thread);
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("servidor HTTP caiu: {e}");
                 }
@@ -460,8 +532,7 @@ fn spawn_inner(
     Ok(Running {
         addr,
         presence,
-        pasta,
-        received_files,
+        state,
     })
 }
 
@@ -469,6 +540,7 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/items/text", post(post_text))
         .route("/items/file", post(post_file))
+        .route("/items/delete", post(post_delete))
         .route("/listen", get(get_listen).head(head_listen))
         .route("/outbox/{id}/file", get(get_outbox_file))
         .route("/outbox/{id}/ack", post(post_outbox_ack))
@@ -509,11 +581,187 @@ async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: Stri
     if item_id.as_ref().is_some_and(|id| accepted.contains(id)) {
         return StatusCode::CREATED;
     }
-    state.items.push_text(body);
+    state.items.push_text_with_sender_id(body, item_id.clone());
     if let Some(id) = item_id {
         accepted.insert(id);
     }
     StatusCode::CREATED
+}
+
+#[derive(serde::Deserialize)]
+struct DeleteRequest {
+    do_pc: Vec<u64>,
+    do_celular: Vec<String>,
+}
+
+async fn post_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> StatusCode {
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    let Ok(request) = serde_json::from_str::<DeleteRequest>(&body) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    match tokio::task::spawn_blocking(move || {
+        let requested: HashSet<String> = request.do_celular.into_iter().collect();
+        apply_delete(
+            &state,
+            |item| {
+                item.sender_id
+                    .as_ref()
+                    .is_some_and(|id| requested.contains(id))
+            },
+            &request.do_pc,
+            false,
+        )
+    })
+    .await
+    {
+        Ok(Ok(())) => StatusCode::NO_CONTENT,
+        result => {
+            eprintln!("não foi possível aplicar a exclusão: {result:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+fn apply_delete(
+    state: &AppState,
+    selected: impl Fn(&Item) -> bool,
+    sent_ids: &[u64],
+    to_peer: bool,
+) -> io::Result<()> {
+    // O mesmo lock protege o registro do caminho e a conclusão do upload:
+    // a exclusão vê o arquivo completo ou fica marcada para o seu término.
+    let ops = state
+        .file_ops
+        .lock()
+        .expect("operações de arquivo sem panic");
+    let mut accepted = state
+        .accepted_item_ids
+        .lock()
+        .expect("ids aceitos sem panic");
+    let received: Vec<Item> = state
+        .items
+        .snapshot()
+        .into_iter()
+        .filter(|item| selected(item) && !state.items.delete_requested(item.id))
+        .collect();
+    let do_celular = to_peer.then(|| {
+        received
+            .iter()
+            .filter_map(|item| item.sender_id.clone())
+            .collect()
+    });
+    let sent = state.outbox.delete_items(sent_ids, do_celular)?;
+    for item in &received {
+        if let Some(id) = &item.sender_id {
+            // Mesmo um upload que falhe depois do pedido não pode ressuscitar
+            // por um retry. Só ids de Itens conhecidos entram aqui.
+            accepted.insert(id.clone());
+        }
+    }
+    drop(accepted);
+    // Sob `file_ops` só esta função e a conclusão de upload mexem no mapa, então
+    // a cópia fica fiel sem segurar o mapa enquanto o Items é consultado.
+    let mut files = received_files(state).clone();
+    for item in &received {
+        recycle_received_file(state, &files, item);
+        files.remove(&item.id);
+        received_files(state).remove(&item.id);
+    }
+    state.items.forget(
+        &received.iter().map(|item| item.id).collect::<Vec<_>>(),
+        sent,
+        !to_peer,
+    );
+    drop(ops);
+    state.items.notify_deleted();
+    Ok(())
+}
+
+fn received_files(state: &AppState) -> std::sync::MutexGuard<'_, HashMap<u64, PathBuf>> {
+    state
+        .received_files
+        .lock()
+        .expect("arquivos recebidos sem panic")
+}
+
+fn recycle_received_file(state: &AppState, files: &HashMap<u64, PathBuf>, item: &Item) {
+    let (Some(path), ItemBody::File { received, .. }) = (files.get(&item.id), &item.body) else {
+        return;
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    if !metadata.is_file() || metadata.len() != *received {
+        return;
+    }
+    let Ok(canonical) = path.canonicalize() else {
+        return;
+    };
+    // canonicalize também compara grafias diferentes do mesmo caminho no Windows.
+    if files.iter().any(|(id, newer)| {
+        *id > item.id && newer.canonicalize().is_ok_and(|path| path == canonical)
+    }) {
+        return;
+    }
+    // O original de um envio protege o arquivo por toda a Sessão, mesmo com a
+    // bolha enviada já excluída; conferir e apagar sob a trava do envio.
+    state.outbox.unless_original(path, || {
+        #[cfg(debug_assertions)]
+        {
+            let pause = state
+                .before_file_recycle_for_tests
+                .lock()
+                .expect("pausa de teste sem panic")
+                .take();
+            if let Some(pause) = pause {
+                pause.wait();
+            }
+        }
+        if let Err(error) = trash::delete(path) {
+            eprintln!("não foi possível mover {path:?} para a Lixeira: {error}");
+        }
+    });
+}
+
+/// Rename e registro pertencem à mesma operação protegida da exclusão.
+/// Roda numa thread de bloqueio: não segura um Mutex de std através de await.
+fn finish_received_file(state: &AppState, item: &Item, temp: &Path, path: &Path) -> bool {
+    let _ops = state
+        .file_ops
+        .lock()
+        .expect("operações de arquivo sem panic");
+    if let Err(error) = std::fs::rename(temp, path) {
+        eprintln!("falha ao renomear {temp:?} para {path:?}: {error}");
+        return false;
+    }
+    #[cfg(test)]
+    tokio::runtime::Handle::current().block_on(pause_once(&state.after_file_rename));
+    #[cfg(debug_assertions)]
+    {
+        let pause = state
+            .after_file_rename_for_tests
+            .lock()
+            .expect("pausa de teste sem panic")
+            .take();
+        if let Some(pause) = pause {
+            pause.wait();
+        }
+    }
+    received_files(state).insert(item.id, path.to_path_buf());
+    if state.items.delete_requested(item.id) {
+        if let Some(completed) = state.items.snapshot().iter().find(|i| i.id == item.id) {
+            let files = received_files(state).clone();
+            recycle_received_file(state, &files, completed);
+        }
+        received_files(state).remove(&item.id);
+    }
+    true
 }
 
 async fn post_file(State(state): State<AppState>, request: Request) -> StatusCode {
@@ -599,7 +847,18 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     // compartilhamento de exclusão e de o sistema de arquivos aceitar apagar
     // um arquivo aberto — a Pasta é escolhida pelo usuário e pode estar em
     // exFAT ou num share de rede.
-    let item = state.items.start_file(final_name, size);
+    let item = {
+        let accepted = state
+            .accepted_item_ids
+            .lock()
+            .expect("ids aceitos sem panic");
+        if item_id.as_ref().is_some_and(|id| accepted.contains(id)) {
+            return StatusCode::CREATED;
+        }
+        state
+            .items
+            .start_file_with_sender_id(final_name, size, item_id.clone())
+    };
     let fail_guard = FailGuard {
         items: state.items.clone(),
         item_id: item.id,
@@ -664,7 +923,6 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     // não é abortada por isso — sem essa separação flush/rename/file_done
     // já podiam ter acontecido pela metade e o aviso de fim nunca sair.
     let items = state.items.clone();
-    let received_files = state.received_files.clone();
     let accepted_item_ids = state.accepted_item_ids.clone();
     let accepted_file_log = state.accepted_file_log.clone();
     let final_path_bg = final_path.clone();
@@ -691,36 +949,34 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
         }
         drop(file);
 
-        match tokio::fs::rename(&temp_path_bg, &final_path_bg).await {
-            Ok(()) => {
-                #[cfg(test)]
-                pause_once(&state.after_file_rename).await;
-                // Só agora o arquivo existe com o nome final: o sinal de fim
-                // não pode vir antes disso, ou a UI tentaria ler um caminho
-                // que ainda não existe.
-                received_files
-                    .lock()
-                    .expect("arquivos recebidos sem panic")
-                    .insert(item.id, final_path_bg.clone());
-                items.file_done(item.id);
-                if let Some(id) = item_id {
-                    // Depois do rename: um crash entre os dois duplica, nunca
-                    // dá 201 a um reenvio cujo arquivo não chegou à Pasta.
-                    if let Some(log) = &accepted_file_log {
-                        log.lock().expect("ids de arquivo sem panic").record(&id);
-                    }
-                    accepted_item_ids
-                        .lock()
-                        .expect("ids aceitos sem panic")
-                        .insert(id);
-                }
-                true
-            }
-            Err(e) => {
-                eprintln!("falha ao renomear {temp_path_bg:?} para {final_path_bg:?}: {e}");
-                false // _fail_guard limpa ao sair de escopo
-            }
+        let completion_item = item.clone();
+        let completed = tokio::task::spawn_blocking(move || {
+            finish_received_file(&state, &completion_item, &temp_path_bg, &final_path_bg)
+        })
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("falha ao finalizar arquivo recebido: {error}");
+            false
+        });
+        if !completed {
+            return false; // _fail_guard limpa ao sair de escopo.
         }
+        // O sinal de Done só sai depois do rename/registro, sem o lock que
+        // Running::caminho_do_arquivo também precisa para seus observadores.
+        items.file_done(item.id);
+        items.notify_deleted();
+        if let Some(id) = item_id {
+            // Depois do rename: um crash entre os dois duplica, nunca
+            // dá 201 a um reenvio cujo arquivo não chegou à Pasta.
+            if let Some(log) = &accepted_file_log {
+                log.lock().expect("ids de arquivo sem panic").record(&id);
+            }
+            accepted_item_ids
+                .lock()
+                .expect("ids aceitos sem panic")
+                .insert(id);
+        }
+        true
     })
     .await
     .unwrap_or_else(|e| {
@@ -949,6 +1205,7 @@ impl Drop for FailGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.temp_path);
         self.items.file_failed(self.item_id);
+        self.items.notify_deleted();
     }
 }
 
@@ -1012,12 +1269,17 @@ mod tests {
                 pasta: Arc::new(Mutex::new(Some(pasta.clone()))),
                 leases: Arc::new(Mutex::new(HashSet::new())),
                 received_files: Arc::new(Mutex::new(HashMap::new())),
+                file_ops: Arc::new(Mutex::new(())),
                 accepted_item_ids: Arc::new(Mutex::new(HashSet::new())),
                 accepted_file_log: None,
                 file_item_id_lock: Arc::new(tokio::sync::Mutex::new(())),
                 upload_inactivity_timeout: UPLOAD_INACTIVITY_TIMEOUT,
                 before_file_item_id_lock: Arc::new(Mutex::new(None)),
                 after_file_rename: Arc::new(Mutex::new(Some(finalization.clone()))),
+                #[cfg(debug_assertions)]
+                after_file_rename_for_tests: Arc::new(Mutex::new(None)),
+                #[cfg(debug_assertions)]
+                before_file_recycle_for_tests: Arc::new(Mutex::new(None)),
             };
 
             let first = tokio::spawn(post_file(

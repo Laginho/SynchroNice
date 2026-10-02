@@ -24,8 +24,11 @@ Item fica no aparelho de origem e é entregue sozinho quando o destino aparecer.
 
 **Pasta** — Diretório, em cada aparelho, onde arquivos recebidos são gravados.
 Por padrão `Downloads/SynchroNice`, trocável nas configurações. Os arquivos são
-arquivos comuns do sistema: o app não gerencia sua vida depois de gravados, e
-sobrevivem ao fim da Sessão.
+arquivos comuns do sistema e sobrevivem ao fim da Sessão. **Apagar tudo** é a
+exceção: o app pode apagar os arquivos da Sessão atual que ele mesmo gravou;
+no PC, vão para a Lixeira. O original de um Item enviado nunca é apagado,
+mesmo depois que sua bolha sai da Sessão. Sem o vínculo da Sessão, o app não
+recupera um arquivo antigo para apagá-lo.
 
 **Compartilhar** — O caminho principal de entrada no celular: a ação
 "Compartilhar" do Android com o SynchroNice como destino, sem abrir o chat.
