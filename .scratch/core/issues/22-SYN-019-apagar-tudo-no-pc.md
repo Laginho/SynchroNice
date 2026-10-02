@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -382,3 +382,5 @@ Spec, 1 bloqueador (o mesmo ciclo impede concluir upload/exclusão).
 individual. Não havia linha SYN-019 no ledger a retirar.
 
 - Stage 2, segunda reabertura (2026-10-02): costura mantida em `tests/server.rs`, API pública e HTTP. Chamadores reconferidos de `received_files`: só `Running::caminho_do_arquivo`, `apply_delete` e `finish_received_file`; Items notifica observadores sob o próprio lock (`push_text`, `start_file`, `file_progress`, `file_done`), então qualquer observador que consulte o caminho cria Items → mapa, contra mapa → Items nas duas operações. Teste com defeito de harness, corrigido antes do vermelho: a primeira versão excluía por HTTP e passou no código atual, porque o runtime do servidor tem uma thread só e o observador preso nela segura a própria requisição de exclusão; os testes agora correm contra `Running::apagar_tudo` (a mesma sonda da revisão) e contra a pausa de rename já existente, que roda a finalização em thread de bloqueio. Vermelho: `observador_de_done_nao_trava_apagar_tudo_concorrente` e `observador_nao_trava_a_finalizacao_de_upload_em_andamento` falham por timeout do observador (61 HTTP verdes, 2 vermelhos; 4 unitários, 7 config e 5 outbox verdes).
+- Stage 2, correção: `received_files` virou lock folha (get/insert/remove/clone, nunca segurado enquanto outro lock é pedido) e um mutex novo, `file_ops`, que nenhum observador toma, serializa `apply_delete` e `finish_received_file`, então rename + registro e descarte seguem atômicos um contra o outro e a proteção dos originais (`unless_original`) não mudou. Ordem: `file_ops` → `accepted_item_ids` → Items; isso também fecha o segundo ciclo (`post_file`/`post_text` seguram `accepted_item_ids` e o observador de `start_file` consulta o mapa). `recycle_received_file` trabalha numa cópia do mapa; `finish_received_file` consulta o Items só sob `file_ops`, sem o mapa. Só `server.rs`, sem costura nova.
+- Verde: os dois testes novos passam, 63 HTTP, 4 unitários, 7 config e 5 outbox; gate completo passou (fmt, clippy, cargo test, tsc, node 47 + 14, gradle). O `cargo fmt --check` apontou três diffs que o `-TestsOnly` não vê, corrigidos em dois commits de estilo (um só de teste, outro só de código).
