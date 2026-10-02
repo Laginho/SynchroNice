@@ -11,6 +11,9 @@ Difficulty: normal
   - pc/ui/main.ts (paste, drop, Enter, ➤, Esc)
   - pc/ui/styles.css, pc/index.html (a bandeja acima do composer)
   - gate.ps1 (roda `bandeja.test.ts` junto com `copiaveis.test.ts`)
+  - pc/src-tauri/src/lib.rs (comando `previa_de_caminho`, registro no
+    `generate_handler!` e um teste no `mod tests` que já existe). Sem mexer em
+    `Cargo.toml`, `tauri.conf.json`, capabilities ou no protocolo.
 
 #### What to build
 
@@ -39,12 +42,25 @@ Decisões do stage 1 (2026-10-01):
 - **Cópia para a fila.** O arquivo é lido e copiado no Enviar, não ao entrar
   na bandeja. O print colado guarda os bytes até lá. Uma entrada cuja origem
   sumiu fica na bandeja, marcada como não encontrada, e o resto vai, sem toast
-  novo.
+  novo. No Enviar, o `main.ts` chama `send_files` com **um caminho por
+  entrada** (e `send_bytes` para o print), em sequência, para saber qual
+  falhou; os dois comandos não mudam.
 - **Arrasto de volta.** Todo caminho que alimenta a bandeja mantém o guard
   `arrastandoDaBolha`: soltar na janela o arquivo arrastado de uma bolha não
   entra na bandeja.
 - **Visual.** Chips acima do composer: miniatura nas imagens, nome e tamanho
   nos documentos, ✕ em cada um. O polimento fica para o `/impeccable`.
+- **Prévia do chip (proxy, 2026-10-02).** Drop e Ctrl+V de arquivo só trazem
+  caminhos, e a janela não tem como ler um caminho. Um comando novo e
+  somente leitura, `previa_de_caminho(caminho) -> { tamanho, bytes }`, chamado
+  uma vez por entrada quando ela entra na bandeja, devolve o tamanho e, só
+  para imagem (as extensões de `IMAGEM` do `main.ts`) de até 10 MiB, os bytes
+  para a miniatura (`bytes: null` nos outros casos). Imagem maior vira chip de
+  documento. Não copia nem enfileira nada: os bytes da prévia nunca vão para o
+  `send_bytes`, e a cópia para a fila continua sendo feita a partir do caminho,
+  no Enviar. Se a prévia falhar, o chip mostra só o nome, sem marca: "não
+  encontrada" só aparece depois de um Enviar. O print colado já tem os bytes e
+  o tamanho no `File`, então não passa pelo comando.
 - **Lógica num módulo puro,** `bandeja.ts`, testado pelo executor nativo do
   Node como o `copiaveis.ts`. O `main.ts` só liga eventos e renderiza.
 
@@ -66,19 +82,31 @@ Decisões do stage 1 (2026-10-01):
    campo.
 8. A bandeja sobrevive a esconder e reabrir a janela.
 9. Os testes existentes seguem verdes.
+10. `previa_de_caminho` devolve o tamanho do arquivo; devolve os bytes só para
+    imagem de até 10 MiB (`bytes: null` para documento e para imagem maior);
+    caminho que não existe dá erro. Nada é copiado para a fila.
+11. Na janela, o chip de documento mostra nome e tamanho; o de imagem, colada
+    ou por caminho, mostra a miniatura; imagem acima de 10 MiB aparece como
+    chip de documento.
 
 #### Verification
 
     powershell -ExecutionPolicy Bypass -File .\gate.ps1
 
-QA no stage 3: kit no emulador, critérios 5 a 8 pelo CDP. Use a primitiva de
-paste do kit. Se o drop nativo não for alcançável, ele fica 👤.
+QA no stage 3: kit no emulador, critérios 5 a 8 e 11 pelo CDP. Use as
+primitivas `paste-image` e `paste-files` (um `.pdf` e um `.png` juntos) e
+confira os chips com `text` e `screenshot`. Se o drop nativo não for
+alcançável, ele fica 👤.
 
 ## Tests stage 2 writes (own commit, red)
 
 - `pc/ui/bandeja.test.ts` (novo), com `node --test`, critérios 1 a 4.
   Vermelho porque `bandeja.ts` não existe. O `gate.ps1` passa a rodá-lo no
   mesmo commit.
+- Um teste no `mod tests` de `pc/src-tauri/src/lib.rs`, critério 10, com
+  arquivos no `tempfile` (já é dev-dependency): um `.txt`, um `.png` pequeno,
+  um `.png` acima de 10 MiB e um caminho inexistente. Chama a função do
+  comando direto, sem `State`. Vermelho porque `previa_de_caminho` não existe.
 
 ## Comments
 
@@ -87,3 +115,13 @@ paste do kit. Se o drop nativo não for alcançável, ele fica 👤.
   é o SYN-021, com o mesmo comportamento.
 - Bloqueado pelo BUG-003, que muda os mesmos caminhos de envio (`send_files`,
   `send_bytes`) e o `main.ts`.
+- Proxy decided: a prévia do chip ganha o comando somente leitura
+  `previa_de_caminho` em `lib.rs` (tamanho e, para imagem de até 10 MiB, os
+  bytes), com o critério 10 coberto por um teste Rust e o 11 pelo QA no CDP. —
+  A janela só recebe caminhos e não tem `fs` nem `assetProtocol`. Ligar um dos
+  dois mexe em `Cargo.toml`/config e abre leitura geral de arquivos. Cortar
+  tamanho e miniatura desfaria a decisão "Visual" do stage 1.
+- Proxy decided: não há seam novo nem módulo separado. — O comando é uma
+  função de `lib.rs` como `read_file_bytes`. A única regra com ramo (só
+  imagem, até 10 MiB) leva um teste unitário no `mod tests` que já existe. O
+  resto é cola de interface, verificada pelo QA como o `main.ts`.
