@@ -79,7 +79,7 @@
 //! Parear de novo troca só o token; o nome de instância é estável por
 //! instalação.
 
-use crate::items::Items;
+use crate::items::{Item, ItemBody, Items};
 use crate::outbox::{OutItem, Outbox};
 use axum::extract::{Path as AxPath, Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -519,8 +519,7 @@ async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: Stri
 
 #[derive(serde::Deserialize)]
 struct DeleteRequest {
-    #[serde(rename = "do_pc")]
-    _do_pc: Vec<u64>,
+    do_pc: Vec<u64>,
     do_celular: Vec<String>,
 }
 
@@ -535,19 +534,78 @@ async fn post_delete(
     let Ok(request) = serde_json::from_str::<DeleteRequest>(&body) else {
         return StatusCode::BAD_REQUEST;
     };
-    let ids: Vec<u64> = state
+    match tokio::task::spawn_blocking(move || apply_delete(&state, request)).await {
+        Ok(Ok(())) => StatusCode::NO_CONTENT,
+        result => {
+            eprintln!("não foi possível aplicar a exclusão: {result:?}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+fn apply_delete(state: &AppState, request: DeleteRequest) -> io::Result<()> {
+    // O mesmo lock protege o registro do caminho e a conclusão do upload:
+    // a exclusão vê o arquivo completo ou fica marcada para o seu término.
+    let mut files = state
+        .received_files
+        .lock()
+        .expect("arquivos recebidos sem panic");
+    let mut accepted = state
+        .accepted_item_ids
+        .lock()
+        .expect("ids aceitos sem panic");
+    let requested: HashSet<String> = request.do_celular.into_iter().collect();
+    let received: Vec<Item> = state
         .items
         .snapshot()
-        .iter()
+        .into_iter()
         .filter(|item| {
             item.sender_id
                 .as_ref()
-                .is_some_and(|id| request.do_celular.contains(id))
+                .is_some_and(|id| requested.contains(id))
         })
-        .map(|item| item.id)
         .collect();
-    state.items.forget(&ids);
-    StatusCode::NO_CONTENT
+    state.outbox.forget(&request.do_pc)?;
+    for item in &received {
+        if let Some(id) = &item.sender_id {
+            // Mesmo um upload que falhe depois do pedido não pode ressuscitar
+            // por um retry. Só ids de Itens conhecidos entram aqui.
+            accepted.insert(id.clone());
+        }
+    }
+    drop(accepted);
+    for item in &received {
+        recycle_received_file(&files, item);
+        files.remove(&item.id);
+    }
+    state
+        .items
+        .forget(&received.iter().map(|item| item.id).collect::<Vec<_>>());
+    Ok(())
+}
+
+fn recycle_received_file(files: &HashMap<u64, PathBuf>, item: &Item) {
+    let (Some(path), ItemBody::File { received, .. }) = (files.get(&item.id), &item.body) else {
+        return;
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    if !metadata.is_file() || metadata.len() != *received {
+        return;
+    }
+    let Ok(canonical) = path.canonicalize() else {
+        return;
+    };
+    // canonicalize também compara grafias diferentes do mesmo caminho no Windows.
+    if files.iter().any(|(id, newer)| {
+        *id > item.id && newer.canonicalize().is_ok_and(|path| path == canonical)
+    }) {
+        return;
+    }
+    if let Err(error) = trash::delete(path) {
+        eprintln!("não foi possível mover {path:?} para a Lixeira: {error}");
+    }
 }
 
 async fn post_file(State(state): State<AppState>, request: Request) -> StatusCode {
@@ -633,7 +691,18 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
     // compartilhamento de exclusão e de o sistema de arquivos aceitar apagar
     // um arquivo aberto — a Pasta é escolhida pelo usuário e pode estar em
     // exFAT ou num share de rede.
-    let item = state.items.start_file(final_name, size);
+    let item = {
+        let accepted = state
+            .accepted_item_ids
+            .lock()
+            .expect("ids aceitos sem panic");
+        if item_id.as_ref().is_some_and(|id| accepted.contains(id)) {
+            return StatusCode::CREATED;
+        }
+        state
+            .items
+            .start_file_with_sender_id(final_name, size, item_id.clone())
+    };
     let fail_guard = FailGuard {
         items: state.items.clone(),
         item_id: item.id,
@@ -732,11 +801,17 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
                 // Só agora o arquivo existe com o nome final: o sinal de fim
                 // não pode vir antes disso, ou a UI tentaria ler um caminho
                 // que ainda não existe.
-                received_files
-                    .lock()
-                    .expect("arquivos recebidos sem panic")
-                    .insert(item.id, final_path_bg.clone());
-                items.file_done(item.id);
+                {
+                    let mut files = received_files.lock().expect("arquivos recebidos sem panic");
+                    files.insert(item.id, final_path_bg.clone());
+                    if items.delete_requested(item.id) {
+                        if let Some(completed) = items.snapshot().iter().find(|i| i.id == item.id) {
+                            recycle_received_file(&files, completed);
+                        }
+                        files.remove(&item.id);
+                    }
+                    items.file_done(item.id);
+                }
                 if let Some(id) = item_id {
                     // Depois do rename: um crash entre os dois duplica, nunca
                     // dá 201 a um reenvio cujo arquivo não chegou à Pasta.

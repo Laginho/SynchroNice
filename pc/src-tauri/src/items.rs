@@ -1,6 +1,7 @@
 //! A Sessão do PC: a lista de Itens em memória. Some quando o app encerra.
 
 use serde::Serialize;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -58,6 +59,7 @@ type Listener = Box<dyn Fn(&Item) + Send + Sync>;
 struct Inner {
     next_id: u64,
     items: Vec<Item>,
+    deleting: HashSet<u64>,
     listeners: Vec<Listener>,
 }
 
@@ -103,11 +105,20 @@ impl Items {
     /// Acrescenta um Item de arquivo com `received: 0` — a bolha nasce antes
     /// dos bytes chegarem, para mostrar a barra de progresso desde o início.
     pub fn start_file(&self, name: String, size: u64) -> Item {
+        self.start_file_with_sender_id(name, size, None)
+    }
+
+    pub fn start_file_with_sender_id(
+        &self,
+        name: String,
+        size: u64,
+        sender_id: Option<String>,
+    ) -> Item {
         let mut inner = self.inner.lock().expect("lista de Itens sem panic");
         inner.next_id += 1;
         let item = Item {
             id: inner.next_id,
-            sender_id: None,
+            sender_id,
             at_ms: now_ms(),
             body: ItemBody::File {
                 name,
@@ -129,11 +140,20 @@ impl Items {
         let Some(slot) = inner.items.iter_mut().find(|i| i.id == id) else {
             return;
         };
-        if let ItemBody::File { received: r, .. } = &mut slot.body {
+        if let ItemBody::File {
+            received: r,
+            status: FileStatus::Receiving,
+            ..
+        } = &mut slot.body
+        {
             *r = received;
+        } else {
+            return;
         }
         let item = slot.clone();
-        inner.notify(&item);
+        if !inner.deleting.contains(&id) {
+            inner.notify(&item);
+        }
     }
 
     /// Marca um Item de arquivo como terminado e avisa quem escuta. Chamado
@@ -152,6 +172,10 @@ impl Items {
             _ => return,
         }
         let item = slot.clone();
+        if inner.deleting.remove(&id) {
+            inner.items.retain(|item| item.id != id);
+            return;
+        }
         inner.notify(&item);
     }
 
@@ -172,6 +196,10 @@ impl Items {
             _ => return,
         }
         let item = slot.clone();
+        if inner.deleting.remove(&id) {
+            inner.items.retain(|item| item.id != id);
+            return;
+        }
         inner.notify(&item);
     }
 
@@ -185,11 +213,36 @@ impl Items {
     }
 
     pub(crate) fn forget(&self, ids: &[u64]) {
+        let mut inner = self.inner.lock().expect("lista de Itens sem panic");
+        let requested: HashSet<u64> = ids.iter().copied().collect();
+        let receiving: Vec<u64> = inner
+            .items
+            .iter()
+            .filter(|item| {
+                requested.contains(&item.id)
+                    && matches!(
+                        item.body,
+                        ItemBody::File {
+                            status: FileStatus::Receiving,
+                            ..
+                        }
+                    )
+            })
+            .map(|item| item.id)
+            .collect();
+        inner.deleting.extend(receiving);
+        let deleting = inner.deleting.clone();
+        inner
+            .items
+            .retain(|item| !requested.contains(&item.id) || deleting.contains(&item.id));
+    }
+
+    pub(crate) fn delete_requested(&self, id: u64) -> bool {
         self.inner
             .lock()
             .expect("lista de Itens sem panic")
-            .items
-            .retain(|item| !ids.contains(&item.id));
+            .deleting
+            .contains(&id)
     }
 
     /// Chamado a cada Item novo ou atualizado, na thread que o gerou.

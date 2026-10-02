@@ -9,6 +9,7 @@
 //! reinício sem colidir com um id já visto pelo celular.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -41,6 +42,8 @@ pub struct SentItem {
     pub entregue: bool,
     #[serde(skip)]
     pub path: Option<PathBuf>,
+    #[serde(skip)]
+    session_copy: bool,
 }
 
 fn now_ms() -> u64 {
@@ -228,6 +231,7 @@ impl Outbox {
             item: item.clone(),
             entregue: false,
             path: None,
+            session_copy: false,
         });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
@@ -270,6 +274,7 @@ impl Outbox {
         }
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
         let id = inner.manifest.next_id;
+        let session_copy = path.is_none();
         let path = match path {
             Some(path) => path,
             None => {
@@ -297,6 +302,7 @@ impl Outbox {
             item: item.clone(),
             entregue: false,
             path: Some(path),
+            session_copy,
         });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
@@ -342,6 +348,56 @@ impl Outbox {
             .iter()
             .find(|sent| sent.item.id == id)
             .and_then(|sent| sent.path.clone())
+    }
+
+    /// Esquece só enviadas desta Sessão. Persiste o descarte dos Pendentes
+    /// antes de remover payloads; o original de um drop nunca é apagado.
+    pub(crate) fn forget(&self, ids: &[u64]) -> io::Result<Vec<u64>> {
+        let mut inner = self.inner.lock().expect("fila de saída sem panic");
+        let requested: HashSet<u64> = ids.iter().copied().collect();
+        let removed: Vec<SentItem> = inner
+            .sent
+            .iter()
+            .filter(|sent| requested.contains(&sent.item.id))
+            .cloned()
+            .collect();
+        let removed_ids: HashSet<u64> = removed.iter().map(|sent| sent.item.id).collect();
+        if removed_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let manifest = Manifest {
+            next_id: inner.manifest.next_id,
+            items: inner
+                .manifest
+                .items
+                .iter()
+                .filter(|item| !removed_ids.contains(&item.id))
+                .cloned()
+                .collect(),
+        };
+        save_manifest(&self.dir, &manifest)?;
+        inner.manifest = manifest;
+        for sent in &removed {
+            if let OutBody::File { size, .. } = sent.item.body {
+                let _ = std::fs::remove_file(self.file_path(sent.item.id));
+                if sent.session_copy {
+                    if let Some(path) = &sent.path {
+                        let same_size = std::fs::symlink_metadata(path)
+                            .is_ok_and(|m| m.is_file() && m.len() == size);
+                        let reused = inner.sent.iter().any(|newer| {
+                            newer.item.id > sent.item.id && newer.path.as_ref() == Some(path)
+                        });
+                        if same_size && !reused {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    }
+                }
+            }
+        }
+        inner
+            .sent
+            .retain(|sent| !removed_ids.contains(&sent.item.id));
+        Ok(removed.iter().map(|sent| sent.item.id).collect())
     }
 
     /// Descarta o destino antigo sem reutilizar ids. Só publica o estado
