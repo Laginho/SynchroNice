@@ -654,9 +654,6 @@ fn apply_delete(
             .filter_map(|item| item.sender_id.clone())
             .collect()
     });
-    // Uma recebida pode ter sido reenviada e sua bolha enviada já excluída.
-    // A proteção da origem dura toda a Sessão, independentemente da bolha.
-    let sent_paths = state.outbox.original_paths();
     let sent = state.outbox.delete_items(sent_ids, do_celular)?;
     for item in &received {
         if let Some(id) = &item.sender_id {
@@ -667,7 +664,7 @@ fn apply_delete(
     }
     drop(accepted);
     for item in &received {
-        recycle_received_file(state, &files, item, &sent_paths);
+        recycle_received_file(state, &files, item);
         files.remove(&item.id);
     }
     state.items.forget(
@@ -680,12 +677,7 @@ fn apply_delete(
     Ok(())
 }
 
-fn recycle_received_file(
-    _state: &AppState,
-    files: &HashMap<u64, PathBuf>,
-    item: &Item,
-    sent_paths: &[PathBuf],
-) {
+fn recycle_received_file(state: &AppState, files: &HashMap<u64, PathBuf>, item: &Item) {
     let (Some(path), ItemBody::File { received, .. }) = (files.get(&item.id), &item.body) else {
         return;
     };
@@ -701,29 +693,27 @@ fn recycle_received_file(
     // canonicalize também compara grafias diferentes do mesmo caminho no Windows.
     if files.iter().any(|(id, newer)| {
         *id > item.id && newer.canonicalize().is_ok_and(|path| path == canonical)
-    }) || sent_paths
-        .iter()
-        .any(|original| match original.canonicalize() {
-            Ok(path) => path == canonical,
-            Err(error) => error.kind() != io::ErrorKind::NotFound,
-        })
-    {
+    }) {
         return;
     }
-    #[cfg(debug_assertions)]
-    {
-        let pause = _state
-            .before_file_recycle_for_tests
-            .lock()
-            .expect("pausa de teste sem panic")
-            .take();
-        if let Some(pause) = pause {
-            pause.wait();
+    // O original de um envio protege o arquivo por toda a Sessão, mesmo com a
+    // bolha enviada já excluída; conferir e apagar sob a trava do envio.
+    state.outbox.unless_original(path, || {
+        #[cfg(debug_assertions)]
+        {
+            let pause = state
+                .before_file_recycle_for_tests
+                .lock()
+                .expect("pausa de teste sem panic")
+                .take();
+            if let Some(pause) = pause {
+                pause.wait();
+            }
         }
-    }
-    if let Err(error) = trash::delete(path) {
-        eprintln!("não foi possível mover {path:?} para a Lixeira: {error}");
-    }
+        if let Err(error) = trash::delete(path) {
+            eprintln!("não foi possível mover {path:?} para a Lixeira: {error}");
+        }
+    });
 }
 
 /// Rename e registro pertencem à mesma operação protegida da exclusão.
@@ -753,7 +743,7 @@ fn finish_received_file(state: &AppState, item: &Item, temp: &Path, path: &Path)
     files.insert(item.id, path.to_path_buf());
     if state.items.delete_requested(item.id) {
         if let Some(completed) = state.items.snapshot().iter().find(|i| i.id == item.id) {
-            recycle_received_file(state, &files, completed, &state.outbox.original_paths());
+            recycle_received_file(state, &files, completed);
         }
         files.remove(&item.id);
     }

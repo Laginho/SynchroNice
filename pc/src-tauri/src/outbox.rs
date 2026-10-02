@@ -302,6 +302,10 @@ impl Outbox {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "nome inválido"));
         }
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
+        if let Some(path) = &path {
+            // Uma exclusão pode ter reciclado o original depois da leitura.
+            std::fs::metadata(path)?;
+        }
         let id = inner.manifest.next_id;
         let session_copy = path.is_none();
         let original = path
@@ -385,14 +389,15 @@ impl Outbox {
             .and_then(|sent| sent.path.clone())
     }
 
-    pub(crate) fn original_paths(&self) -> Vec<PathBuf> {
-        self.inner
-            .lock()
-            .expect("fila de saída sem panic")
-            .original_paths
-            .iter()
-            .cloned()
-            .collect()
+    /// Roda `act` sob a mesma trava em que um envio registra a origem, a menos
+    /// que `path` seja o original de um envio desta Sessão. Devolve se rodou.
+    pub(crate) fn unless_original(&self, path: &Path, act: impl FnOnce()) -> bool {
+        let inner = self.inner.lock().expect("fila de saída sem panic");
+        let free = !inner.is_original_file(path);
+        if free {
+            act();
+        }
+        free
     }
 
     /// Esquece enviadas desta Sessão. Some enfileira também o controle para
