@@ -1,5 +1,5 @@
 # SYN-021: Colar imagem no chat do Android, numa bandeja como a do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -185,3 +185,32 @@ independentes. Todos os achados desta passagem estão abaixo.
 - Retomar stage 2 no branch `syn-021` pelos dois ❌, com novos testes em
   commits próprios antes do código. Nenhuma alteração de critério ou seam
   foi feita na revisão. Sem merge nem entrada no ledger.
+
+#### Retomada stage 2 (2026-10-01)
+
+- Corrigidos os dois ❌ da revisão. `contentReceiver` delega a colagem ao
+  AppState: copia a URI imediatamente e deixa o item com texto explícito
+  para o campo inserir a legenda. Texto sozinho, URI sozinha e legendas
+  com URI recusada ou ilegível têm cobertura. Câmera e Compartilhar não
+  foram alterados.
+- O BackHandler passou de ChatScreen para a raiz da MainActivity, mantendo
+  a proteção durante envio. O teste abre Configurações pelo botão real da
+  árvore semântica Compose, verifica que o primeiro Voltar apaga a cópia e
+  esvazia a bandeja sem encerrar a atividade, e que o segundo permite sair.
+- Limpeza indicada em Standards: cada botão ✕ recebeu uma testTag distinta
+  (`remove-paste-<id do staging>`), preservando a descrição acessível.
+- Prova red-green: `4294ac5` contém só testes e metadados do ticket; o gate
+  `-TestsOnly` falhou por ausência de pasteItem. `bbc892c` contém só código
+  de produção; o gate de testes passou com 11 casos em PasteTrayTest.
+  `387c7b9` adicionou só o teste de Voltar: o gate mostrou 71 testes Android,
+  um vermelho na asserção de bandeja vazia após Voltar em Configurações.
+  Com a correção deste commit, os 12 casos de PasteTrayTest passaram.
+- Gate completo passou: Rust 52, UI 47, kit QA 14, protocolo JVM 62 e app
+  Android 71, total 246, zero falhas. fmt, Clippy, TypeScript e lint Android
+  passaram. Contagens JVM conferidas nos XMLs; nenhum teste ignorado.
+  Logs locais: `.scratch/run-log/syn-021-retry-paste-red.log`,
+  `syn-021-retry-paste-green.log`, `syn-021-retry-back-red.log` e
+  `syn-021-retry-gate.log`, todos no mesmo diretório.
+- Diff revisado e `git diff --check` limpo; commits de produção não alteram
+  testes. QA visual do critério 7 permanece para o stage 3; esta retomada
+  verificou a navegação em Robolectric, sem execução em aparelho/emulador.

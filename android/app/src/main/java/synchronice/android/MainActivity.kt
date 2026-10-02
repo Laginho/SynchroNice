@@ -811,6 +811,9 @@ class MainActivity : ComponentActivity() {
         photoName = savedInstanceState?.getString("camera-photo")
         val state = (application as SynchroNiceApplication).state
         setContent {
+            BackHandler(enabled = state.pasteTray.isNotEmpty()) {
+                if (!state.sendingComposer) state.clearPasteTray()
+            }
             MaterialTheme {
                 Surface(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
                     var showSettings by remember(state.pairing) { mutableStateOf(false) }
@@ -873,9 +876,6 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
     val listState = rememberLazyListState()
     val draft = state.composer
     var viewedImage by remember { mutableStateOf<ChatMessage?>(null) }
-    BackHandler(enabled = state.pasteTray.isNotEmpty()) {
-        if (!state.sendingComposer) state.clearPasteTray()
-    }
     ConnectionLifecycle(state)
 
     LaunchedEffect(state.messages.size) {
@@ -916,7 +916,8 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
                         TextButton(
                             enabled = !state.sendingComposer,
                             onClick = { state.removePaste(file) },
-                            modifier = Modifier.semantics { contentDescription = "Remover ${file.name}" },
+                            modifier = Modifier.testTag("remove-paste-${file.parentFile?.name}")
+                                .semantics { contentDescription = "Remover ${file.name}" },
                         ) { Text("✕") }
                     }
                 }
