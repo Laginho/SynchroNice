@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -276,13 +276,107 @@ Spec, 3 falhas de preservação de arquivo, duas reproduzidas (pior: arquivo
 fora da seleção/original é apagado). O callback foi citado nos dois eixos
 como o mesmo achado, não como outro defeito.
 
-- 2026-10-02 Proxy decided: retomar da branch `syn-019` em `f2b2530`, sem recomeçar nem fatiar, no próximo run com o hard do lineup (sonnet-5.5 xhigh) e `-ImplementMinutes 75` — dos cinco ❌ da revisão, quatro já estão vermelho→verde na branch e o último tem o teste vermelho committed; fatiar para destravar SYN-028/027 tiraria daqui a guarda de "o original de quem enviou nunca é tocado" e o teste da branch para ganhar menos de um ciclo (a rodada 2 fechou um a cada ~8 min).
-  - **Para o stage 2 (retomada):**
-    - Trabalhe na branch `syn-019` como está; não recrie a branch nem refaça os testes já committed. Prova da rodada 2, conferida pelo proxy nos logs locais de `.scratch/qa-runs/2026-10-02-syn-019-reopen/` (`gate.ps1 -TestsOnly`): `6078c66` → `817dfe8` (56 HTTP + 1 vermelho → 57), `7d8ae2e` → `475bcdf` (57 + 1 → 58), `27b3cfb` → `3adbe4a` (58 + 1 → 59), `db2bb99` → `16da8d5` (59 + 1 → 60); 4 unitários, 7 config e 5 outbox verdes em todas.
-    - Comece pelo teste de `f2b2530`, `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente` (o ❌ "proteção concorrente de original" da revisão): rode `gate.ps1 -TestsOnly` em primeiro plano e registre o vermelho. Essa prova ainda não existe: o timeout matou a rodada na compilação (`send-race-red.log`). Se falhar só pelo harness, conserte em commit de teste.
-    - Depois, a correção em commit só de código. A revisão aponta o formato: uma operação da Outbox que confere os originais e faz a ação no arquivo sob a mesma trava em que `enqueue_file_from_path` confere a origem e registra o caminho, usada pelos dois chamadores (`apply_delete` e `finish_received_file`); isso também tira a captura duplicada.
-    - É o último ❌. Não abra ciclos novos para outros intervalos: um risco novo vai como nota aqui, para o stage 3. Verde → gate completo em primeiro plano → `to-review`.
-
 - Stage 2, retomada final (2026-10-02): último ❌ ("proteção concorrente de original") fechado. Vermelho: `gate.ps1 -TestsOnly` em primeiro plano sobre `f2b2530` falhou só em `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente` (60 HTTP verdes, 1 vermelho: o envio aceito durante a exclusão perdeu o original, `NotFound` em `tests/server.rs:2202`); 4 unitários, 7 config e 5 outbox verdes. Verde: `2d6869a` (só código, `outbox.rs` e `server.rs`) passou os 61 HTTP. A correção é `Outbox::unless_original`, que confere o original e age no arquivo sob a trava em que `enqueue_file_from_path` registra a origem; `apply_delete` e `finish_received_file` a usam (a captura duplicada de `original_paths` saiu), e um envio cujo arquivo já foi reciclado devolve `NotFound`. A Lixeira roda com a trava da Outbox segurada; a ordem de locks é a de antes (`received_files` → Outbox) e nenhum ouvinte é chamado sob ela.
   - Gate completo, em primeiro plano: `gate: passou`. Formatação e Clippy verdes; Rust: 61 HTTP + 4 unitários + 7 config + 5 outbox; UI 47/47; kit QA 14/14; Gradle `BUILD SUCCESSFUL`.
   - Diff desde o último commit de teste (`f2b2530`): só `src/outbox.rs` e `src/server.rs`, nenhum arquivo de teste, tudo dentro dos Primary files.
+
+#### Re-review stage 3 (2026-10-02)
+
+Verdict: Reopen — fechamento incompleto do callback: exclusão concorrente e observador de Done ainda travam por inversão de locks.
+
+Revisão independente nos eixos Standards e Spec, sobre `e9960c5`, após
+rebase na sessão `sweatshop/2026-10-01-2019` (`d2c5759`). O delta conferido
+foi `git diff e031567..e9960c5`; `e031567` é o antigo `4c7dab3` revisado na
+primeira passagem. O rebase conflitou somente nos Comments deste ticket:
+histórico preservado, bloco de decisão repetido consolidado. Nenhum código
+de produção ou teste de regressão foi alterado pelo stage 3.
+
+##### Standards
+
+- ❌ **P2, fechamento incompleto do callback anterior / S2-implícito.**
+  `server.rs:637-647` adquire `received_files` antes de
+  `Items::snapshot`. `Items::file_done` mantém Items durante `on_new`
+  (`items.rs:189-204`); o observador aprovado que resolve o arquivo
+  adquire `received_files` em `Running::caminho_do_arquivo`
+  (`server.rs:375-382`). A conclusão entra no observador; uma exclusão
+  concorrente segura o mapa e espera Items; o observador consulta o caminho
+  e espera o mapa. Viola Engineering Workflow, quality gate 1
+  (preservação do comportamento existente). **Variante concorrente omitida
+  pela primeira revisão:** a ordem mapa → Items já existia em
+  `e031567:587-599`. `f7012fb` removeu o autodeadlock, mas não esse ciclo.
+  O novo `finish_received_file` também consulta Items segurando o mapa
+  (`server.rs:721-745`). Exige teste novo e correção no stage 2.
+- ✅ Primary files e separação teste/código respeitados nos 25 commits.
+  `272a338` e `4c01564` incluem somente suporte de agendamento aprovado
+  junto dos testes; commits de implementação não tocam testes.
+  `Cargo.lock` é a atualização necessária da dependência `trash` aprovada.
+  A duplicação antes apontada saiu; nenhuma outra heurística merece veto.
+- ✅ A corrida de original enviado está corrigida: `unless_original`
+  conserva a trava durante checagem e descarte; registro da origem e
+  conferência de existência usam a mesma trava, nos dois chamadores.
+
+##### Spec
+
+- ❌ **Mesmo bloqueador, não outro defeito.** Critério 3, “Ids desconhecidos
+  [...] respondem 204 e não mudam nada”: `apply_delete` pode travar antes
+  de resolver os ids. A regressão do observador de Done também continua
+  parcialmente aberta. O probe da revisão reproduziu upload HTTP mais
+  `Running::apagar_tudo(&[999], &[999])` concorrente: consulta ao mapa antes
+  da exclusão funcionou; depois, o mapa ficou preso, observador e exclusão
+  não retornaram, e upload expirou com Windows 10060. A rota HTTP chama o
+  mesmo `apply_delete`; o ciclo nela foi conferido estaticamente. O teste
+  atual (`tests/server.rs:1640`) cobre só upload isolado. **Não é requisito
+  novo; é fechamento incompleto do ❌ anterior, cuja variante concorrente
+  a primeira revisão deixou passar.**
+- ✅ Os três ❌ anteriores de Spec estão resolvidos: rename/registro
+  compartilham a trava da exclusão; originais ficam protegidos por toda a
+  Sessão; reuso de print por alias Windows usa caminhos canônicos. Os dois
+  últimos passaram também no executável. O autodeadlock isolado do
+  callback foi removido. Nenhum requisito básico adicional ausente nem
+  escopo indevido identificado.
+
+**Prova red-green da reabertura:** logs locais e commits conferidos;
+`b8a66c4` → `f7012fb` (56 HTTP verdes + 1 vermelho → 57),
+`530cc41` → `0c8482f` (57 + 1 → 58),
+`fd0ef41` → `aea08b3` (58 + 1 → 59),
+`272a338` → `9843e73` (59 + 1 → 60).
+Último caso: `4c01564` → `a4a183d` (60 + 1 → 61), conforme o registro
+final do stage 2 em `.scratch/run-log/SYN-019-implement-20261002-144543.txt.final`.
+Os hashes anteriores ao rebase continuam nos comentários históricos.
+
+**Validação:** gate completo em primeiro plano após rebase, exit 0,
+`gate: passou`. Rust 61 HTTP + 4 unitários + 7 config + 5 outbox = 77;
+UI 47/47; QA 14/14; fmt, Clippy e TypeScript verdes. Android `check`
+verde; XMLs reutilizados `UP-TO-DATE` com 71 testes do app e 62 do cliente,
+sem falhas, erros ou pulos. Essa suíte verde não cobre o ciclo reproduzido.
+
+**QA:** [relatório desta revisão](../../qa-runs/2026-10-02-syn-019-rereview.md).
+Critério 2 ✅, Lixeira confirmada por SHA-256 idêntico. Exclusões separadas
+e alias Windows ✅. Callback concorrente ❌, reproduzido contra a biblioteca
+de produção, sem mudança de fonte. Arquivos novos rastreados limpos pelo
+kit, cópia interna removida após encerrar a Sessão, `down` concluído.
+
+**Decisões do proxy conferidas:** as três linhas únicas `Proxy decided`
+mantêm (1) protocolo/backend/Lixeira/docs aqui e janela no SYN-028;
+(2) retomada da branch existente sem refazer as quatro correções, com o
+teste restante primeiro; (3) retomada após corrigir permissões do driver.
+A implementação segue essas decisões; esta revisão não mudou critérios
+nem introduziu decisão em nome do proxy.
+
+**Para o stage 2, só falta o ❌ de callback concorrente:**
+
+1. Na costura já aprovada de `tests/server.rs`, acrescentar em commit
+   próprio o teste vermelho de observador de Done que consulta o caminho
+   junto com exclusão concorrente; exercitar código de produção por HTTP
+   e pela API pública, com esperas limitadas e interleaving controlado.
+2. Eliminar o ciclo mapa ↔ Items, preservando a atomicidade de
+   rename/registro e descarte e a proteção dos originais. Conferir também
+   as consultas a Items em `finish_received_file`. Correção em commit
+   somente de código; nenhuma costura nova necessária.
+3. Provar verde, rodar o gate completo em primeiro plano e devolver a
+   `to-review`. Não refazer as quatro correções já aprovadas.
+
+Resumo por eixo: Standards, 1 bloqueador (callback e exclusão travam);
+Spec, 1 bloqueador (o mesmo ciclo impede concluir upload/exclusão).
+`Stage: to-implement` committed na branch `syn-019`, sem merge, push ou PR
+individual. Não havia linha SYN-019 no ledger a retirar.
