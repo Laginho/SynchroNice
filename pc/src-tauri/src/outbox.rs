@@ -9,6 +9,7 @@
 //! reinício sem colidir com um id já visto pelo celular.
 
 use serde::{Deserialize, Serialize};
+use std::fs::{File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -31,6 +32,17 @@ pub struct OutItem {
     pub body: OutBody,
 }
 
+/// Uma enviada desta vida do processo. Separada da fila persistida: ACK
+/// remove a Pendente, mas conserva a bolha e a origem até o fim da Sessão.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SentItem {
+    #[serde(flatten)]
+    pub item: OutItem,
+    pub entregue: bool,
+    #[serde(skip)]
+    pub path: Option<PathBuf>,
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -39,6 +51,80 @@ fn now_ms() -> u64 {
 }
 
 const MANIFEST_FILE: &str = "manifest.json";
+const SESSION_FILES: &str = "session-files";
+
+/// Cada fila tem suas próprias cópias. O lock da dona dura até o último
+/// clone ou a morte do processo; a varredura só remove diretórios sem dona.
+struct SessionFiles {
+    path: PathBuf,
+    lease: Option<File>,
+    registry: File,
+}
+
+fn open_lock(path: &Path) -> io::Result<File> {
+    File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
+impl SessionFiles {
+    fn new(root: &Path) -> io::Result<Self> {
+        std::fs::create_dir_all(root)?;
+        let registry = open_lock(&root.join(".lock"))?;
+        // Serializa criação, varredura e descarte. Nenhum diretório novo
+        // pode ser confundido com abandonado antes de adquirir seu lock.
+        registry.lock()?;
+        for entry in std::fs::read_dir(root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let lease = open_lock(&entry.path().join(".lock"))?;
+            match lease.try_lock() {
+                Ok(()) => {
+                    drop(lease);
+                    std::fs::remove_dir_all(entry.path())?;
+                }
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Error(error)) => return Err(error),
+            }
+        }
+
+        let path = loop {
+            let mut bytes = [0u8; 16];
+            getrandom::fill(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
+            let name: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            let path = root.join(name);
+            match std::fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        };
+        let lease = open_lock(&path.join(".lock"))?;
+        lease.lock()?;
+        registry.unlock()?;
+        Ok(Self {
+            path,
+            lease: Some(lease),
+            registry,
+        })
+    }
+}
+
+impl Drop for SessionFiles {
+    fn drop(&mut self) {
+        if self.registry.lock().is_ok() {
+            // Fecha o arquivo de lock antes de remover a pasta no Windows.
+            drop(self.lease.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+        // A alça registry é fechada ao sair, liberando a varredura seguinte.
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct Manifest {
@@ -67,7 +153,7 @@ fn save_manifest(dir: &Path, manifest: &Manifest) -> io::Result<()> {
     std::fs::write(dir.join(MANIFEST_FILE), data)
 }
 
-/// Chamado quando um Item entra na fila (`entregue: false`) ou quando o
+/// Chamado quando um Item desta Sessão entra na fila (`entregue: false`) ou quando o
 /// celular confirma o recebimento e ele sai (`entregue: true`) — é o que a
 /// janela do PC escuta para desenhar a bolha à direita e trocá-la de
 /// Pendente para Entregue.
@@ -75,6 +161,8 @@ type ChangeListener = Box<dyn Fn(&OutItem, bool) + Send + Sync>;
 
 struct Inner {
     manifest: Manifest,
+    sent: Vec<SentItem>,
+    session_files: SessionFiles,
     /// Um remetente por conexão `/listen` viva, para anunciar um Item novo
     /// assim que ele é enfileirado. Descartados sob demanda: um `send` que
     /// falha (celular desconectou) tira o remetente da lista na próxima
@@ -102,16 +190,20 @@ pub struct Outbox {
 }
 
 impl Outbox {
-    /// Carrega a fila persistida em `dir`, ou começa vazia se `dir` ainda
-    /// não tiver um manifesto — mesmo diretório entre reinícios do processo
-    /// é o que faz a fila sobreviver a sair e reabrir o app.
+    /// Carrega a fila persistida em `dir`, ou começa vazia se não houver
+    /// manifesto. A Sessão sempre começa vazia, e cópias de prints da vida
+    /// anterior são varridas sem apagar cópias de outras filas vivas nem os
+    /// payloads de entrega dos Pendentes.
     pub fn new(dir: PathBuf) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
+        let session_files = SessionFiles::new(&dir.join(SESSION_FILES))?;
         let manifest = load_manifest(&dir);
         Ok(Self {
             dir,
             inner: Arc::new(Mutex::new(Inner {
                 manifest,
+                sent: Vec::new(),
+                session_files,
                 listeners: Vec::new(),
                 changed: Vec::new(),
             })),
@@ -132,6 +224,11 @@ impl Outbox {
         inner.manifest.next_id += 1;
         inner.manifest.items.push(item.clone());
         save_manifest(&self.dir, &inner.manifest)?;
+        inner.sent.push(SentItem {
+            item: item.clone(),
+            entregue: false,
+            path: None,
+        });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
         Ok(item)
@@ -145,10 +242,45 @@ impl Outbox {
 
     /// Copia `bytes` para dentro da fila (nunca só um caminho: a origem —
     /// PNG temporário do clipboard, caminho de um drop — pode sumir antes da
-    /// entrega) e enfileira o Item de arquivo.
+    /// entrega) e enfileira o Item de arquivo. Sem origem, cria também uma
+    /// cópia com o nome do Item, que dura até o fim da Sessão.
     pub fn enqueue_file(&self, name: String, bytes: &[u8]) -> io::Result<OutItem> {
+        self.enqueue_file_with_origin(name, bytes, None)
+    }
+
+    /// Drop/Explorer: a entrega usa uma cópia, a bolha usa o original.
+    pub fn enqueue_file_from_path(&self, path: &Path) -> io::Result<OutItem> {
+        let bytes = std::fs::read(path)?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "nome inválido"))?
+            .to_string();
+        self.enqueue_file_with_origin(name, &bytes, Some(path.to_path_buf()))
+    }
+
+    fn enqueue_file_with_origin(
+        &self,
+        name: String,
+        bytes: &[u8],
+        path: Option<PathBuf>,
+    ) -> io::Result<OutItem> {
+        if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', ':']) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "nome inválido"));
+        }
         let mut inner = self.inner.lock().expect("fila de saída sem panic");
         let id = inner.manifest.next_id;
+        let path = match path {
+            Some(path) => path,
+            None => {
+                // Um diretório por Item evita sobrescrever prints homônimos.
+                let dir = inner.session_files.path.join(id.to_string());
+                std::fs::create_dir_all(&dir)?;
+                let path = dir.join(&name);
+                std::fs::write(&path, bytes)?;
+                path
+            }
+        };
         std::fs::write(self.file_path(id), bytes)?;
         let item = OutItem {
             id,
@@ -161,12 +293,18 @@ impl Outbox {
         inner.manifest.next_id += 1;
         inner.manifest.items.push(item.clone());
         save_manifest(&self.dir, &inner.manifest)?;
+        inner.sent.push(SentItem {
+            item: item.clone(),
+            entregue: false,
+            path: Some(path),
+        });
         notify(&mut inner.listeners, &item);
         notify_change(&inner, &item, false);
         Ok(item)
     }
 
-    /// Chamado a cada Item enfileirado ou confirmado, na thread que o gerou.
+    /// Chamado a cada Item desta Sessão enfileirado ou confirmado, na thread
+    /// que o gerou. ACK de Pendente herdado não publica uma bolha nova.
     pub fn on_change(&self, listener: impl Fn(&OutItem, bool) + Send + Sync + 'static) {
         self.inner
             .lock()
@@ -183,6 +321,27 @@ impl Outbox {
             .manifest
             .items
             .clone()
+    }
+
+    /// Enviadas da Sessão, em ordem de inserção, incluindo as confirmadas.
+    pub fn session_items(&self) -> Vec<SentItem> {
+        self.inner
+            .lock()
+            .expect("fila de saída sem panic")
+            .sent
+            .clone()
+    }
+
+    /// Consulta a origem de novo a cada tentativa; a ausência no disco não
+    /// remove o caminho, pois o arquivo pode voltar ao mesmo lugar.
+    pub fn session_file_path(&self, id: u64) -> Option<PathBuf> {
+        self.inner
+            .lock()
+            .expect("fila de saída sem panic")
+            .sent
+            .iter()
+            .find(|sent| sent.item.id == id)
+            .and_then(|sent| sent.path.clone())
     }
 
     /// Descarta o destino antigo sem reutilizar ids. Só publica o estado
@@ -222,9 +381,18 @@ impl Outbox {
             return;
         };
         let item = inner.manifest.items.remove(pos);
+        let nesta_sessao = if let Some(sent) = inner.sent.iter_mut().find(|sent| sent.item.id == id)
+        {
+            sent.entregue = true;
+            true
+        } else {
+            false
+        };
         let _ = std::fs::remove_file(self.file_path(id));
         let _ = save_manifest(&self.dir, &inner.manifest);
-        notify_change(&inner, &item, true);
+        if nesta_sessao {
+            notify_change(&inner, &item, true);
+        }
     }
 
     /// Os Pendentes de agora, mais um canal para os que forem enfileirados
