@@ -112,6 +112,7 @@ body {
 }
 .scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
   display: flex;
@@ -140,6 +141,7 @@ body {
 }
 .composer input {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: 0;
   outline: 0;
@@ -164,6 +166,81 @@ body {
   color: #ddd;
   cursor: pointer;
   flex: none;
+}
+
+.composer .send:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+#bandeja {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px;
+  overflow-x: auto;
+  list-style: none;
+  background: var(--bg2);
+  border-top: 1px solid var(--line);
+}
+.bandeja-chip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 240px;
+  padding: 8px;
+  border: 1px solid #555;
+  border-radius: 8px;
+  background: #333;
+}
+.bandeja-chip img {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.bandeja-info {
+  flex: 1;
+  min-width: 0;
+}
+.bandeja-nome,
+.bandeja-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bandeja-nome {
+  white-space: nowrap;
+}
+.bandeja-meta {
+  color: #bbb;
+  font-size: 12px;
+}
+.bandeja-chip.falhou {
+  border-color: #e9a788;
+}
+.bandeja-chip.falhou .bandeja-meta {
+  color: #ffc4a8;
+}
+.bandeja-chip button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.bandeja-chip button:hover {
+  background: #484848;
+}
+.bandeja-chip button:focus-visible,
+.composer .send:focus-visible {
+  outline: 2px solid #7ba7ff;
+  outline-offset: 2px;
 }
 
 /* tela de QR (SYN-005) — sem Par gravado, ou "parear de novo" */
