@@ -469,6 +469,7 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/items/text", post(post_text))
         .route("/items/file", post(post_file))
+        .route("/items/delete", post(post_delete))
         .route("/listen", get(get_listen).head(head_listen))
         .route("/outbox/{id}/file", get(get_outbox_file))
         .route("/outbox/{id}/ack", post(post_outbox_ack))
@@ -509,11 +510,44 @@ async fn post_text(State(state): State<AppState>, headers: HeaderMap, body: Stri
     if item_id.as_ref().is_some_and(|id| accepted.contains(id)) {
         return StatusCode::CREATED;
     }
-    state.items.push_text(body);
+    state.items.push_text_with_sender_id(body, item_id.clone());
     if let Some(id) = item_id {
         accepted.insert(id);
     }
     StatusCode::CREATED
+}
+
+#[derive(serde::Deserialize)]
+struct DeleteRequest {
+    #[serde(rename = "do_pc")]
+    _do_pc: Vec<u64>,
+    do_celular: Vec<String>,
+}
+
+async fn post_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> StatusCode {
+    if !authorized(&headers, &state.token) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    let Ok(request) = serde_json::from_str::<DeleteRequest>(&body) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    let ids: Vec<u64> = state
+        .items
+        .snapshot()
+        .iter()
+        .filter(|item| {
+            item.sender_id
+                .as_ref()
+                .is_some_and(|id| request.do_celular.contains(id))
+        })
+        .map(|item| item.id)
+        .collect();
+    state.items.forget(&ids);
+    StatusCode::NO_CONTENT
 }
 
 async fn post_file(State(state): State<AppState>, request: Request) -> StatusCode {

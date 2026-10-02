@@ -36,6 +36,9 @@ pub enum ItemBody {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Item {
     pub id: u64,
+    /// Id do celular (`X-Item-Id`), independente da chave local da bolha.
+    #[serde(skip)]
+    pub sender_id: Option<String>,
     /// Hora de chegada, em milissegundos desde a época Unix.
     pub at_ms: u64,
     #[serde(flatten)]
@@ -53,6 +56,7 @@ type Listener = Box<dyn Fn(&Item) + Send + Sync>;
 
 #[derive(Default)]
 struct Inner {
+    next_id: u64,
     items: Vec<Item>,
     listeners: Vec<Listener>,
 }
@@ -79,9 +83,15 @@ impl Items {
 
     /// Acrescenta um Item de texto ao fim da lista e avisa quem escuta.
     pub fn push_text(&self, text: String) -> Item {
+        self.push_text_with_sender_id(text, None)
+    }
+
+    pub fn push_text_with_sender_id(&self, text: String, sender_id: Option<String>) -> Item {
         let mut inner = self.inner.lock().expect("lista de Itens sem panic");
+        inner.next_id += 1;
         let item = Item {
-            id: inner.items.len() as u64 + 1,
+            id: inner.next_id,
+            sender_id,
             at_ms: now_ms(),
             body: ItemBody::Text { text },
         };
@@ -94,8 +104,10 @@ impl Items {
     /// dos bytes chegarem, para mostrar a barra de progresso desde o início.
     pub fn start_file(&self, name: String, size: u64) -> Item {
         let mut inner = self.inner.lock().expect("lista de Itens sem panic");
+        inner.next_id += 1;
         let item = Item {
-            id: inner.items.len() as u64 + 1,
+            id: inner.next_id,
+            sender_id: None,
             at_ms: now_ms(),
             body: ItemBody::File {
                 name,
@@ -170,6 +182,14 @@ impl Items {
             .expect("lista de Itens sem panic")
             .items
             .clone()
+    }
+
+    pub(crate) fn forget(&self, ids: &[u64]) {
+        self.inner
+            .lock()
+            .expect("lista de Itens sem panic")
+            .items
+            .retain(|item| !ids.contains(&item.id));
     }
 
     /// Chamado a cada Item novo ou atualizado, na thread que o gerou.
