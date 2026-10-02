@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -384,3 +384,80 @@ individual. Não havia linha SYN-019 no ledger a retirar.
 - Stage 2, segunda reabertura (2026-10-02): costura mantida em `tests/server.rs`, API pública e HTTP. Chamadores reconferidos de `received_files`: só `Running::caminho_do_arquivo`, `apply_delete` e `finish_received_file`; Items notifica observadores sob o próprio lock (`push_text`, `start_file`, `file_progress`, `file_done`), então qualquer observador que consulte o caminho cria Items → mapa, contra mapa → Items nas duas operações. Teste com defeito de harness, corrigido antes do vermelho: a primeira versão excluía por HTTP e passou no código atual, porque o runtime do servidor tem uma thread só e o observador preso nela segura a própria requisição de exclusão; os testes agora correm contra `Running::apagar_tudo` (a mesma sonda da revisão) e contra a pausa de rename já existente, que roda a finalização em thread de bloqueio. Vermelho: `observador_de_done_nao_trava_apagar_tudo_concorrente` e `observador_nao_trava_a_finalizacao_de_upload_em_andamento` falham por timeout do observador (61 HTTP verdes, 2 vermelhos; 4 unitários, 7 config e 5 outbox verdes).
 - Stage 2, correção: `received_files` virou lock folha (get/insert/remove/clone, nunca segurado enquanto outro lock é pedido) e um mutex novo, `file_ops`, que nenhum observador toma, serializa `apply_delete` e `finish_received_file`, então rename + registro e descarte seguem atômicos um contra o outro e a proteção dos originais (`unless_original`) não mudou. Ordem: `file_ops` → `accepted_item_ids` → Items; isso também fecha o segundo ciclo (`post_file`/`post_text` seguram `accepted_item_ids` e o observador de `start_file` consulta o mapa). `recycle_received_file` trabalha numa cópia do mapa; `finish_received_file` consulta o Items só sob `file_ops`, sem o mapa. Só `server.rs`, sem costura nova.
 - Verde: os dois testes novos passam, 63 HTTP, 4 unitários, 7 config e 5 outbox; gate completo passou (fmt, clippy, cargo test, tsc, node 47 + 14, gradle). O `cargo fmt --check` apontou três diffs que o `-TestsOnly` não vê, corrigidos em dois commits de estilo (um só de teste, outro só de código).
+
+#### Resolution (2026-10-02)
+
+Verdict: Approve
+
+Re-revisão do ❌ restante e do delta `git diff e9960c5..983ebbf`, com
+os eixos Standards e Spec em subagentes independentes. A correção fecha
+o ciclo de locks entre observadores de Items, exclusão e conclusão de
+upload. Nenhum código de produção ou teste foi alterado pelo stage 3.
+
+##### Standards
+
+- ✅ `received_files` é lock folha: get/clone/insert/remove liberam o mapa
+  antes de pedir Items ou Outbox (`server.rs:382,670,674,756,759,762`).
+  `file_ops` serializa exclusão e rename/registro/descarte
+  (`server.rs:639,735`); callbacks de Done e aviso de exclusão continuam
+  fora dessas travas (`server.rs:966,681-682`). O ❌ de preservação do
+  comportamento existente está fechado.
+- ✅ Primary files e separação teste/código respeitados nos 31 commits
+  revisados. Nesta rodada: `a980c9d` só testes/histórico; `4e4c91f` só
+  produção; `753f9b0` e `7286d18` separam a formatação de testes e código.
+  `Cargo.lock` conserva a atualização necessária já aprovada.
+- ✅ Registro de originais e `unless_original` continuam sob a mesma
+  trava da Outbox. Zero violações documentadas ou novos smells.
+- Limitação sem veto: os dois testes concorrentes usam pausas de 300 ms;
+  o interleaving depende do escalonador. A prova vermelha real confirma
+  que ambos atingiram os ciclos de locks.
+
+##### Spec
+
+- ✅ Critério 3 e regressão de callback: consultar o caminho agora retorna
+  mesmo quando exclusão/conclusão espera Items. Os dois testes novos
+  exercitam os observadores pela API pública e pelo HTTP de produção.
+- ✅ A atomicidade de rename/registro contra exclusão permanece, assim
+  como a proteção de originais por toda a Sessão, os aliases Windows,
+  a ausência de bolha/evento `enviado` para controles e o ouvinte de
+  exclusão fora dos locks. Os ❌ anteriores continuam resolvidos.
+- ✅ Nenhum requisito ausente/parcial, escopo indevido ou novo achado
+  em código já revisado. Nenhuma correção ou teste adicional necessário.
+
+**Arquivos:** protocolo e operações em `server.rs`, `items.rs` e
+`outbox.rs`; `trash` em Cargo e lock; testes na costura aprovada
+`tests/server.rs`; exceção de Apagar tudo no `CONTEXT.md` e ADR-0002.
+A janela permanece no SYN-028 e o Android nos SYN-027/029.
+
+**Prova vermelho→verde:** logs reais do último stage 2 conferidos;
+`a980c9d` → `4e4c91f`: 61 HTTP verdes + dois vermelhos por timeout do
+observador → 63 HTTP verdes. Logs preservados no RunDir da revisão
+final como `stage2-red.log` e `stage2-green.log`. As correções anteriores
+e suas provas continuam registradas nas revisões acima.
+
+**Validação:** gate completo em primeiro plano, exit 0, `gate: passou`.
+Rust: 63 HTTP + 4 unitários + 7 config + 5 outbox = 79; UI 47/47;
+kit QA 14/14; fmt, Clippy e TypeScript verdes. Android `check` verde;
+XMLs reutilizados `UP-TO-DATE`, 71 testes do app + 62 do cliente,
+zero falhas, erros ou pulos. O rebase na sessão `d2c5759` foi no-op;
+a fonte validada não mudou.
+
+**QA:** [relatório final do emulador](../../qa-runs/2026-10-02-syn-019-final-review.md).
+Critério 2 ✅ no executável debug atual: destino na Lixeira confirmado
+com Pasta de origem correta e SHA-256 idêntico. Repetição (critério 3)
+✅, HTTP 204. Limpeza do arquivo rastreado e `down` concluídos;
+nenhum arquivo anterior afetado ou débito humano neste recorte.
+
+**Decisões do proxy conferidas:** as três linhas únicas `Proxy decided`
+mantêm (1) protocolo/backend/Lixeira/docs aqui, janela no SYN-028;
+(2) retomada da branch sem refazer as quatro correções aprovadas,
+começando pelo teste restante; (3) retomada após corrigir permissões
+do driver. A implementação segue todas; esta revisão não mudou critérios
+ou decisões em nome do proxy.
+
+**Fechamento:** merge `--no-ff` `ee7eb26` na sessão
+`sweatshop/2026-10-01-2019`; `Stage: done` e linha do ledger no mesmo
+commit de fechamento. O merge do PR de sessão continua humano.
+
+Resumo por eixo: Standards, zero bloqueadores (limitação de agendamento
+registrada); Spec, zero achados. Ticket aprovado.
