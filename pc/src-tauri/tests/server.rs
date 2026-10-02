@@ -1668,6 +1668,117 @@ fn observador_de_upload_concluido_pode_consultar_o_arquivo_recebido() {
     assert_eq!(http_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
 }
 
+// Observador preso sob a lista de Itens, a pedir o caminho de um arquivo
+// recebido (`alvo`, ou o próprio Item) assim que a bolha é liberada por `go`.
+// O runtime do servidor tem uma thread só: um observador preso nela também
+// segura as outras requisições HTTP, então quem corre contra ele é a API
+// pública (`Running::apagar_tudo`) e a finalização de upload, que roda em
+// thread de bloqueio.
+fn observador_travado(
+    items: &Items,
+    running: std::sync::Arc<server::Running>,
+    quando: fn(&pc_lib::items::Item) -> bool,
+    alvo: Option<u64>,
+) -> (
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+    std::sync::mpsc::Receiver<Option<std::path::PathBuf>>,
+) {
+    let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let go_rx = std::sync::Mutex::new(go_rx);
+    let (path_tx, path_rx) = std::sync::mpsc::channel();
+    items.on_new(move |item| {
+        if quando(item) {
+            let _ = reached_tx.send(());
+            let _ = go_rx.lock().unwrap().recv_timeout(Duration::from_secs(5));
+            let _ = path_tx.send(running.caminho_do_arquivo(alvo.unwrap_or(item.id)));
+        }
+    });
+    (reached_rx, go_tx, path_rx)
+}
+
+#[test]
+fn observador_de_done_nao_trava_apagar_tudo_concorrente() {
+    let (base, items, _outbox, running, _raiz) = sobe_para_exclusao();
+    let running = std::sync::Arc::new(running);
+    let (reached, go, path) = observador_travado(
+        &items,
+        running.clone(),
+        |item| {
+            matches!(
+                item.body,
+                ItemBody::File {
+                    status: FileStatus::Done,
+                    ..
+                }
+            )
+        },
+        None,
+    );
+    let (upload_tx, upload_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = upload_tx.send(post_arquivo(&base, Some(TOKEN), "foto.png", b"imagem"));
+    });
+    reached
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o observador de Done roda sob a lista de Itens");
+
+    let (delete_tx, delete_rx) = std::sync::mpsc::channel();
+    let apagando = running.clone();
+    std::thread::spawn(move || {
+        let _ = delete_tx.send(apagando.apagar_tudo(&[999], &[999]).is_ok());
+    });
+    // A exclusão já ocupa o que pega primeiro e espera a lista de Itens.
+    std::thread::sleep(Duration::from_millis(300));
+    go.send(()).unwrap();
+
+    assert!(
+        path.recv_timeout(Duration::from_secs(3))
+            .expect("o observador de Done consulta o caminho sem esperar a exclusão")
+            .is_some()
+    );
+    assert!(delete_rx.recv_timeout(Duration::from_secs(3)).unwrap());
+    assert_eq!(upload_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+    assert_eq!(items.snapshot().len(), 1, "ids desconhecidos não mudam nada");
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn observador_nao_trava_a_finalizacao_de_upload_em_andamento() {
+    let (base, items, _outbox, running, _raiz) = sobe_para_exclusao();
+    let (renamed, resume) = running.pause_after_file_rename_for_tests();
+    let (upload_tx, upload_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = upload_tx.send(post_arquivo(&base, Some(TOKEN), "lento.bin", b"dados"));
+    });
+    renamed
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o upload chegou ao nome final");
+    let lento = items.snapshot()[0].id;
+
+    let running = std::sync::Arc::new(running);
+    let (_reached, go, path) = observador_travado(
+        &items,
+        running.clone(),
+        |item| matches!(item.body, ItemBody::Text { .. }),
+        Some(lento),
+    );
+    go.send(()).unwrap();
+    let publicando = items.clone();
+    std::thread::spawn(move || {
+        publicando.push_text("oi".into());
+    });
+    // O observador já consulta o caminho; a finalização retoma e pede a lista.
+    std::thread::sleep(Duration::from_millis(300));
+    resume.send(()).unwrap();
+
+    path.recv_timeout(Duration::from_secs(3))
+        .expect("o observador consulta o caminho sem esperar a finalização do upload");
+    assert_eq!(upload_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+    assert!(running.caminho_do_arquivo(lento).is_some());
+}
+
 fn post_exclusao(base: &str, token: Option<&str>, body: &str) -> u16 {
     let bounded = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()

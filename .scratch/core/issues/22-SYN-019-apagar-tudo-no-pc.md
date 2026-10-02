@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -380,3 +380,5 @@ Resumo por eixo: Standards, 1 bloqueador (callback e exclusão travam);
 Spec, 1 bloqueador (o mesmo ciclo impede concluir upload/exclusão).
 `Stage: to-implement` committed na branch `syn-019`, sem merge, push ou PR
 individual. Não havia linha SYN-019 no ledger a retirar.
+
+- Stage 2, segunda reabertura (2026-10-02): costura mantida em `tests/server.rs`, API pública e HTTP. Chamadores reconferidos de `received_files`: só `Running::caminho_do_arquivo`, `apply_delete` e `finish_received_file`; Items notifica observadores sob o próprio lock (`push_text`, `start_file`, `file_progress`, `file_done`), então qualquer observador que consulte o caminho cria Items → mapa, contra mapa → Items nas duas operações. Teste com defeito de harness, corrigido antes do vermelho: a primeira versão excluía por HTTP e passou no código atual, porque o runtime do servidor tem uma thread só e o observador preso nela segura a própria requisição de exclusão; os testes agora correm contra `Running::apagar_tudo` (a mesma sonda da revisão) e contra a pausa de rename já existente, que roda a finalização em thread de bloqueio. Vermelho: `observador_de_done_nao_trava_apagar_tudo_concorrente` e `observador_nao_trava_a_finalizacao_de_upload_em_andamento` falham por timeout do observador (61 HTTP verdes, 2 vermelhos; 4 unitários, 7 config e 5 outbox verdes).
