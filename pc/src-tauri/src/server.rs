@@ -223,6 +223,8 @@ struct AppState {
     after_file_rename: Arc<Mutex<Option<TestPause>>>,
     #[cfg(debug_assertions)]
     after_file_rename_for_tests: Arc<Mutex<Option<FileTestPause>>>,
+    #[cfg(debug_assertions)]
+    before_file_recycle_for_tests: Arc<Mutex<Option<FileTestPause>>>,
 }
 
 // Controles de agendamento para a costura HTTP de integração. Não existem
@@ -355,6 +357,12 @@ impl Running {
         prepare_file_test_pause(&self.state.after_file_rename_for_tests)
     }
 
+    #[doc(hidden)]
+    #[cfg(debug_assertions)]
+    pub fn pause_before_file_recycle_for_tests(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        prepare_file_test_pause(&self.state.before_file_recycle_for_tests)
+    }
+
     /// Persiste a escolha e a aplica ao servidor que já está escutando.
     pub fn escolher_pasta(&self, config_dir: &Path, pasta: &Path) -> io::Result<()> {
         crate::config::save_pasta(config_dir, pasta)?;
@@ -481,6 +489,8 @@ fn spawn_inner(
         after_file_rename: Arc::new(Mutex::new(None)),
         #[cfg(debug_assertions)]
         after_file_rename_for_tests: Arc::new(Mutex::new(None)),
+        #[cfg(debug_assertions)]
+        before_file_recycle_for_tests: Arc::new(Mutex::new(None)),
     };
     let state_da_thread = state.clone();
 
@@ -657,7 +667,7 @@ fn apply_delete(
     }
     drop(accepted);
     for item in &received {
-        recycle_received_file(&files, item, &sent_paths);
+        recycle_received_file(state, &files, item, &sent_paths);
         files.remove(&item.id);
     }
     state.items.forget(
@@ -670,7 +680,12 @@ fn apply_delete(
     Ok(())
 }
 
-fn recycle_received_file(files: &HashMap<u64, PathBuf>, item: &Item, sent_paths: &[PathBuf]) {
+fn recycle_received_file(
+    _state: &AppState,
+    files: &HashMap<u64, PathBuf>,
+    item: &Item,
+    sent_paths: &[PathBuf],
+) {
     let (Some(path), ItemBody::File { received, .. }) = (files.get(&item.id), &item.body) else {
         return;
     };
@@ -694,6 +709,17 @@ fn recycle_received_file(files: &HashMap<u64, PathBuf>, item: &Item, sent_paths:
         })
     {
         return;
+    }
+    #[cfg(debug_assertions)]
+    {
+        let pause = _state
+            .before_file_recycle_for_tests
+            .lock()
+            .expect("pausa de teste sem panic")
+            .take();
+        if let Some(pause) = pause {
+            pause.wait();
+        }
     }
     if let Err(error) = trash::delete(path) {
         eprintln!("não foi possível mover {path:?} para a Lixeira: {error}");
@@ -727,7 +753,7 @@ fn finish_received_file(state: &AppState, item: &Item, temp: &Path, path: &Path)
     files.insert(item.id, path.to_path_buf());
     if state.items.delete_requested(item.id) {
         if let Some(completed) = state.items.snapshot().iter().find(|i| i.id == item.id) {
-            recycle_received_file(&files, completed, &state.outbox.original_paths());
+            recycle_received_file(state, &files, completed, &state.outbox.original_paths());
         }
         files.remove(&item.id);
     }
@@ -1247,6 +1273,8 @@ mod tests {
                 after_file_rename: Arc::new(Mutex::new(Some(finalization.clone()))),
                 #[cfg(debug_assertions)]
                 after_file_rename_for_tests: Arc::new(Mutex::new(None)),
+                #[cfg(debug_assertions)]
+                before_file_recycle_for_tests: Arc::new(Mutex::new(None)),
             };
 
             let first = tokio::spawn(post_file(

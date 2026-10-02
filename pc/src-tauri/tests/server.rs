@@ -2081,7 +2081,10 @@ fn exclusao_de_recebido_antigo_durante_rename_preserva_upload_novo() {
     assert_eq!(restantes.len(), 1);
     assert_ne!(restantes[0].id, antigo);
     assert_eq!(restantes[0].sender_id.as_deref(), Some("novo"));
-    assert_eq!(running.caminho_do_arquivo(restantes[0].id), Some(path.clone()));
+    assert_eq!(
+        running.caminho_do_arquivo(restantes[0].id),
+        Some(path.clone())
+    );
     assert_eq!(std::fs::read(path).unwrap(), b"novo");
 }
 
@@ -2129,6 +2132,85 @@ fn original_reenviado_continua_protegido_apos_excluir_a_enviada() {
             b"original",
             "excluir a bolha enviada não encerra a proteção da origem nesta Sessão"
         );
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente() {
+    for (local, durante_upload) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (base, items, outbox, running, raiz) = sobe_para_exclusao();
+        let running = std::sync::Arc::new(running);
+        let stream = if durante_upload {
+            Some(inicia_upload_parcial(&base, &items, "curso"))
+        } else {
+            assert_eq!(
+                post_arquivo_com_id(&base, TOKEN, "curso", "curso.bin", b"12345678"),
+                201
+            );
+            None
+        };
+        let recebido = items.snapshot()[0].id;
+        let original = raiz.path().join("pasta/curso.bin");
+        let (recycling, resume) = running.pause_before_file_recycle_for_tests();
+        if durante_upload {
+            if local {
+                running.apagar_tudo(&[recebido], &[]).unwrap();
+            } else {
+                assert_eq!(excluir_ids(&base, &[], &["curso"]), 204);
+            }
+        }
+        let clearing = running.clone();
+        let (operation_tx, operation_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Some(mut stream) = stream {
+                stream.write_all(b"5678").unwrap();
+                let mut response = String::new();
+                stream.read_to_string(&mut response).unwrap();
+                assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+            } else if local {
+                clearing.apagar_tudo(&[recebido], &[]).unwrap();
+            } else {
+                assert_eq!(excluir_ids(&base, &[], &["curso"]), 204);
+            }
+            let _ = operation_tx.send(());
+        });
+        recycling
+            .recv_timeout(Duration::from_secs(3))
+            .expect("a exclusão chegou à ação no arquivo");
+        assert_eq!(std::fs::read(&original).unwrap(), b"12345678");
+
+        let sending = outbox.clone();
+        let sending_path = original.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (sent_tx, sent_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = started_tx.send(());
+            let _ = sent_tx.send(sending.enqueue_file_from_path(&sending_path));
+        });
+        started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let early_send = sent_rx.recv_timeout(Duration::from_secs(3)).ok();
+        resume.send(()).unwrap();
+        let sent =
+            early_send.unwrap_or_else(|| sent_rx.recv_timeout(Duration::from_secs(3)).unwrap());
+        operation_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(items.snapshot().is_empty());
+        match sent {
+            Ok(item) => {
+                assert_eq!(outbox.session_file_path(item.id), Some(original.clone()));
+                assert_eq!(
+                    std::fs::read(&original).unwrap(),
+                    b"12345678",
+                    "um envio aceito durante a exclusão conserva seu original"
+                );
+                assert_eq!(outbox.file_bytes(item.id).unwrap(), b"12345678");
+            }
+            Err(error) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+                assert!(outbox.session_items().is_empty());
+                assert!(!original.exists(), "a exclusão venceu antes do envio");
+            }
+        }
     }
 }
 
