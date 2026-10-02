@@ -1,5 +1,5 @@
 # SYN-028: Apagar tudo na janela do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -68,3 +68,4 @@ mande `POST /items/delete` com o `X-Item-Id` de um Item recebido.
 ## Comments
 
 - 2026-10-01 Proxy decided: nasceu do fatiamento do SYN-019 a pedido do dono. Veio para cá a janela do PC (critérios 10 e 11 do original, aqui 1 e 3), mais o comando Tauri e o evento de exclusão recebida no `lib.rs`; os critérios 2 e 4 deixam explícitas decisões que no original eram só prosa, para cada metade ter o seu lado verificável. Ficaram no SYN-019 o protocolo, o backend, a Lixeira e as docs. Blocked by: SYN-019, que dá a operação e o ouvinte que esta janela chama. Difficulty: normal: interface e cola fina, sem concorrência nem lógica de arquivo. Review: agent, porque as docs ficaram no SYN-019.
+- 2026-10-02 stage 2: sem testes novos, como o ticket manda (cola Tauri e interface; operação, exclusão recebida e ouvinte são do SYN-019). Gate verde. Interface não exercida no app: fica para o QA do stage 3. Notas: durante a janela de Desfazer o `apagar_tudo` ainda não rodou, então recarregar a janela nesse intervalo devolve as bolhas (nada é apagado); o Desfazer refaz um snapshot (`list_items`/`list_sent_items`) para pôr em dia progresso e entregas ocorridos na janela.

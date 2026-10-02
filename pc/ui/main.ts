@@ -516,6 +516,7 @@ function renderArquivo(item: FileItem): HTMLElement {
 }
 
 function renderRecebido(item: Item): void {
+  if (janelaDeDesfazer?.recebidas.has(item.id)) return;
   const existente = recebidas.get(item.id);
   if (existente) {
     // Só um arquivo em andamento gera evento repetido para o mesmo id.
@@ -535,6 +536,7 @@ function renderRecebido(item: Item): void {
   if (item.kind === "file") bubble.dataset.received = String(item.received);
   recebidas.set(item.id, bubble);
   inserirBolha(bubble, item);
+  atualizarLixeira();
 }
 
 /** Eventos e snapshots usam a mesma ordenação, mesmo quando a bolha nova
@@ -542,9 +544,15 @@ function renderRecebido(item: Item): void {
 function inserirBolha(bubble: HTMLElement, item: Item | Enviado): void {
   bubble.dataset.atMs = String(item.at_ms);
   bubble.dataset.ordem = String(item.ordem);
+  reinserirBolha(bubble);
+}
+
+function reinserirBolha(bubble: HTMLElement): void {
+  const atMsDaBolha = Number(bubble.dataset.atMs);
+  const ordemDaBolha = Number(bubble.dataset.ordem);
   const depois = Array.from(scroll.querySelectorAll<HTMLElement>(".item")).find((outra) => {
     const atMs = Number(outra.dataset.atMs);
-    return atMs > item.at_ms || (atMs === item.at_ms && Number(outra.dataset.ordem) > item.ordem);
+    return atMs > atMsDaBolha || (atMs === atMsDaBolha && Number(outra.dataset.ordem) > ordemDaBolha);
   });
   scroll.insertBefore(bubble, depois ?? null);
   bubble.scrollIntoView({ block: "end" });
@@ -614,6 +622,7 @@ function renderArquivoEnviado(item: EnviadoArquivo): HTMLElement {
 }
 
 function renderEnviado(item: Enviado): void {
+  if (janelaDeDesfazer?.enviadas.has(item.id)) return;
   const existente = enviadas.get(item.id);
   if (existente) {
     const rodape = existente.querySelector<HTMLElement>(".rodape")!;
@@ -626,6 +635,102 @@ function renderEnviado(item: Enviado): void {
   const bubble = item.kind === "text" ? renderTextoEnviado(item) : renderArquivoEnviado(item);
   enviadas.set(item.id, bubble);
   inserirBolha(bubble, item);
+  atualizarLixeira();
+}
+
+/** O 🗑 só existe com o chat não vazio; vazio, volta o "Nada aqui ainda". */
+function atualizarLixeira(): void {
+  const vazio = recebidas.size + enviadas.size === 0;
+  empty.hidden = !vazio;
+  document.querySelector<HTMLElement>("#clear-all")!.hidden = vazio;
+}
+
+/** Apagar tudo (SYN-028): as bolhas saem na hora, mas nada é apagado nem sai
+ * pela rede até a janela de Desfazer fechar. Guarda as bolhas esvaziadas. */
+interface JanelaDeDesfazer {
+  recebidas: Map<number, HTMLElement>;
+  enviadas: Map<number, HTMLElement>;
+  timer: number;
+}
+let janelaDeDesfazer: JanelaDeDesfazer | null = null;
+const JANELA_DE_DESFAZER_MS = 5000;
+
+/** Fecha a janela e só então chama o Apagar tudo, com os Itens que ela esvaziou. */
+function fecharJanelaDeDesfazer(): void {
+  const janela = janelaDeDesfazer;
+  if (!janela) return;
+  janelaDeDesfazer = null;
+  clearTimeout(janela.timer);
+  document.querySelector<HTMLElement>("#aviso-apagar")!.hidden = true;
+  invoke("apagar_tudo", {
+    received: [...janela.recebidas.keys()],
+    sent: [...janela.enviadas.keys()],
+  }).catch((e) => console.error(`não foi possível apagar a conversa: ${e}`));
+}
+
+function apagarTudo(): void {
+  if (recebidas.size + enviadas.size === 0) return;
+  // Segundo clique na janela: a anterior fecha na hora e esta abre outra.
+  fecharJanelaDeDesfazer();
+  const janela: JanelaDeDesfazer = {
+    recebidas: new Map(recebidas),
+    enviadas: new Map(enviadas),
+    timer: window.setTimeout(fecharJanelaDeDesfazer, JANELA_DE_DESFAZER_MS),
+  };
+  const bolhas = [...janela.recebidas.values(), ...janela.enviadas.values()];
+  const arquivos = bolhas.filter((bolha) => bolha.classList.contains("file")).length;
+  for (const bolha of bolhas) bolha.remove();
+  recebidas.clear();
+  enviadas.clear();
+  janelaDeDesfazer = janela;
+  atualizarLixeira();
+
+  const aviso = document.querySelector<HTMLElement>("#aviso-apagar")!;
+  const n = bolhas.length;
+  aviso.querySelector<HTMLElement>(".aviso-texto")!.textContent =
+    `Conversa apagada · ${n} ${n === 1 ? "Item" : "Itens"} e ${arquivos} ${arquivos === 1 ? "arquivo" : "arquivos"}`;
+  const barra = aviso.querySelector<HTMLElement>(".aviso-barra")!;
+  barra.style.animation = "none";
+  aviso.hidden = false;
+  void barra.offsetWidth;
+  barra.style.animation = "";
+}
+
+async function desfazerApagarTudo(): Promise<void> {
+  const janela = janelaDeDesfazer;
+  if (!janela) return;
+  janelaDeDesfazer = null;
+  clearTimeout(janela.timer);
+  document.querySelector<HTMLElement>("#aviso-apagar")!.hidden = true;
+  // As bolhas voltam onde estavam, depois de um snapshot que as põe em dia com
+  // o que mudou durante a janela (progresso de um arquivo, uma entrega).
+  const ordenadas = [...janela.recebidas.values(), ...janela.enviadas.values()];
+  for (const [id, bolha] of janela.recebidas) recebidas.set(id, bolha);
+  for (const [id, bolha] of janela.enviadas) enviadas.set(id, bolha);
+  for (const bolha of ordenadas) reinserirBolha(bolha);
+  atualizarLixeira();
+  const [novosRecebidos, novosEnviados] = await Promise.all([
+    invoke<Item[]>("list_items").catch((): Item[] => []),
+    invoke<Enviado[]>("list_sent_items").catch((): Enviado[] => []),
+  ]);
+  for (const item of novosRecebidos) if (janela.recebidas.has(item.id)) renderRecebido(item);
+  for (const item of novosEnviados) if (janela.enviadas.has(item.id)) renderEnviado(item);
+}
+
+/** Uma exclusão vinda do celular (ou a nossa, já concluída) tira as bolhas
+ * sem rastro — também das que estão guardadas na janela de Desfazer. */
+function removerExcluidos(excluidos: { received: number[]; sent: number[] }): void {
+  for (const id of excluidos.received) {
+    recebidas.get(id)?.remove();
+    recebidas.delete(id);
+    janelaDeDesfazer?.recebidas.delete(id);
+  }
+  for (const id of excluidos.sent) {
+    enviadas.get(id)?.remove();
+    enviadas.delete(id);
+    janelaDeDesfazer?.enviadas.delete(id);
+  }
+  atualizarLixeira();
 }
 
 function atualizarPresenca(online: boolean): void {
@@ -859,6 +964,9 @@ async function main(): Promise<void> {
   // `recebidas`/`enviadas` descartam o que vier duas vezes como criação.
   await listen<Item>("item", (event) => renderRecebido(event.payload));
   await listen<Enviado>("enviado", (event) => renderEnviado(event.payload));
+  await listen<{ received: number[]; sent: number[] }>("apagado", (event) =>
+    removerExcluidos(event.payload),
+  );
   await listen<boolean>("presenca", (event) => {
     atualizarPresenca(event.payload);
     // O celular só conecta com o token certo: presença é o próprio sinal de
@@ -895,6 +1003,10 @@ async function main(): Promise<void> {
   for (const item of recebidos) renderRecebido(item);
   for (const item of enviados) renderEnviado(item);
 
+  document.querySelector<HTMLElement>("#clear-all")!.addEventListener("click", apagarTudo);
+  document.querySelector<HTMLElement>("#desfazer")!.addEventListener("click", () => {
+    void desfazerApagarTudo();
+  });
   ligarComposer();
   ligarDrop();
   ligarColar();

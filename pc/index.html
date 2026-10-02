@@ -10,6 +10,16 @@
   <body>
     <header class="chat-header">
       <button
+        id="clear-all"
+        class="settings-toggle"
+        type="button"
+        aria-label="Apagar tudo"
+        title="Apagar tudo"
+        hidden
+      >
+        🗑
+      </button>
+      <button
         id="settings-toggle"
         class="settings-toggle"
         type="button"
@@ -42,6 +52,11 @@
         </div>
       </div>
       <ul id="bandeja" aria-label="Arquivos para enviar" hidden></ul>
+      <div id="aviso-apagar" class="aviso-apagar" role="status" hidden>
+        <span class="aviso-texto"></span>
+        <button id="desfazer" type="button">Desfazer</button>
+        <div class="aviso-barra"></div>
+      </div>
       <div class="composer">
         <span class="presenca" id="presenca" data-online="false"></span>
         <input id="composer-input" placeholder="texto para o celular…" autocomplete="off" />

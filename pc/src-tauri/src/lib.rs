@@ -26,6 +26,10 @@ const SENT_EVENT: &str = "enviado";
 /// há uma conexão `/listen` viva, `false` quando ela cai.
 const PRESENCE_EVENT: &str = "presenca";
 
+/// Evento que a janela escuta quando Itens saem da Sessão por uma exclusão
+/// (do celular, ou o Apagar tudo da própria janela): payload `DeletedItems`.
+const DELETED_EVENT: &str = "apagado";
+
 /// Payload do evento `enviado`: o Item mais se ele já foi confirmado pelo
 /// celular (Entregue) ou ainda está Pendente.
 #[derive(Clone, serde::Serialize)]
@@ -162,6 +166,24 @@ async fn mudar_pasta(app: tauri::AppHandle) -> Result<bool, String> {
         .escolher_pasta(&config_dir, &pasta)
         .map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Fim da janela de Desfazer do Apagar tudo: `received` são ids de `Items`,
+/// `sent` as chaves da lista de enviados.
+#[tauri::command]
+async fn apagar_tudo(
+    app: tauri::AppHandle,
+    received: Vec<u64>,
+    sent: Vec<u64>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<server::Running>()
+            .ok_or_else(|| "servidor HTTP não está disponível".to_string())?
+            .apagar_tudo(&received, &sent)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Caminho do arquivo recebido de um Item que terminou de gravar. A consulta
@@ -390,6 +412,13 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     });
 
     let handle = app.clone();
+    items.on_delete(move |deleted| {
+        if let Err(e) = handle.emit(DELETED_EVENT, deleted) {
+            eprintln!("não foi possível avisar a janela da exclusão: {e}");
+        }
+    });
+
+    let handle = app.clone();
     let order = app.state::<SessionOrder>().inner().clone();
     outbox.on_change(move |item, entregue| {
         let payload = Enviado {
@@ -468,6 +497,7 @@ pub fn run() {
             estado_par_inicial,
             parear_de_novo,
             mudar_pasta,
+            apagar_tudo,
             read_file_bytes,
             read_sent_file_bytes,
             send_text,
