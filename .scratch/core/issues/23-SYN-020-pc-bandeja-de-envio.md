@@ -1,5 +1,5 @@
 # SYN-020: Bandeja de envio no PC antes de mandar
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: agent
@@ -137,3 +137,62 @@ alcançável, ele fica 👤.
   resto é cola de interface, verificada pelo QA como o `main.ts`.
 
 - 2026-10-02 Attempt 1 failed: exit 0. Log tail: SYN-020 is not at `to-review`: the full gate exits 1 because `cargo test` can't run. The fix itself is committed on `syn-020`. /  / - **Fix:** A pasted image over 10 MiB now gets a document chip instead of a thumbnail (criterion 11). The test is commit `113f18e`, red because `temPrevia` didn't exist. The fix is `ef84226`. / - **Gate:** The UI tests (55/55), `tsc`, kit (14/14) and Android all pass. I didn't touch any Rust, so the 58/58 PC result from the last review should stand. / - **Blocker:** `cargo test` fails with `failed to remove ...\target\debug\pc.exe: Access is denied`. Some process holds that file. It could be your real PC app, so I didn't kill it. I couldn't inspect processes, and a run with a separate `CARGO_TARGET_DIR` needed approval. /  / Close whatever is running `pc.exe` (or approve the alternate target dir), then run this and I'll finish: confirm green, set `Stage: to-review`, commit. /  / ```powershell / powershell -ExecutionPolicy Bypass -File .\gate.ps1 / ``` /  / I didn't re-run the native paste QA for a pasted image over 10 MiB. Stage 3 should check that case, along with the small pasted image.
+
+#### Stage 2 — implementação concluída (2026-10-02)
+
+- Branch `syn-020`, base `sweatshop/2026-10-01-2019` (`add06b4`, que
+  registra as decisões do proxy). Todos os Primary files respeitados.
+  Testes em commits próprios antes da produção, sem alteração de testes
+  nos commits de implementação:
+  - `1ad6bba` e `42dafcb`: entradas e prévia. Vermelho pelo
+    `gate.ps1 -TestsOnly`: módulo TS ausente (`ERR_MODULE_NOT_FOUND`) e
+    comando Rust ausente (`E0425`); kit 14/14 e Android verdes.
+  - `35a5f3f`: sequência, texto opcional e snapshot — 1 verde / 3 vermelhos
+    (`sequencia` ausente); após `3c4deb8`, 4/4 verdes.
+  - `b728e9d`: limpar e não reutilizar ids — 4 verdes / 1 vermelho
+    (`limpar` ausente); após `f1fd396`, 5/5 verdes.
+  - `85d31de`: falha parcial e resultados atrasados — 5 verdes / 2
+    vermelhos (`concluir` ausente); após `55855b5`, 7/7 verdes.
+- Produção em `d08b8e8`, `3c4deb8`, `f1fd396`, `55855b5` e `5d70217`:
+  entradas independentes, remoção por id, sequência com texto por último,
+  limpeza e retenção só das falhas; chips com nome/tamanho/miniatura e ✕;
+  paste/drop preparam a bandeja sem enviar. Enter e ➤ enviam um caminho
+  por vez ou os bytes do print, sem usar os bytes da prévia para entrega.
+  O Esc fecha primeiro as configurações e preserva o texto; limpar também
+  invalida colagens ainda aguardando CF_HDROP. Adições são processadas em
+  ordem, e enviar aguarda as capturas anteriores. O guard do arrasto de
+  bolha permanece em todos os caminhos de entrada.
+- Gate completo saiu **0**: fmt, Clippy e TypeScript verdes, **PC 58/58**
+  (5 unitários, 7 configuração, 5 outbox, 41 servidor), **UI 54/54**
+  (47 existentes + 7 bandeja), **kit 14/14**, `gradle check` verde.
+  Os XMLs Android somam **133 testes**, zero falhas/erros, com tarefas de
+  teste `UP-TO-DATE`. `npx tauri build --debug --no-bundle` também passou.
+- Smoke de implementação com executável novo, PC isolado e CDP 9226;
+  clipboard nativo pelas primitivas `paste-files` e `paste-image` do kit:
+
+  | Critério | Evidência |
+  | --- | --- |
+  | 1, 5 (colagem), 11 | PNG/PDF/PNG viram três chips na ordem, com duas miniaturas de 32 px e PDF de 19 B; nenhum enviado antes do Enviar. Print colado vira mais um chip. |
+  | 7 | ✕ remove só a entrada escolhida; primeiro Esc fecha configurações e mantém os chips; segundo limpa e preserva `legenda preservada`. Texto puro colado cai no composer. |
+  | 2, 4, 6 | Origem movida depois da colagem permanece marcada; PDF, PNG, print e legenda são quatro Itens enviados nessa ordem. Restaurar a origem e clicar ➤ com campo vazio envia só a falha e esvazia a bandeja. |
+  | 10, 11 | Imagem de 10 MiB + 1 aparece sem miniatura e com tamanho `10,0 MB`. Prévia é somente leitura, testada também no limite exato e com caminho inexistente/diretório. |
+  | Vida JS | Recarregar com um chip descarta a bandeja e mantém os seis enviados desta Sessão. |
+
+- Evidências locais ignoradas em
+  `.scratch/qa-runs/2026-10-02-syn-020-stage2/`: `smoke.mjs`,
+  `result.json`, `chips.png`, `large.png` e logs. Screenshots inspecionados.
+  O harness inicial foi corrigido: configuração sem BOM (o BOM fazia o
+  perfil de QA cair no QR) e tamanho literal do PDF (19 B). Nenhum deles
+  exigiu alteração de produção.
+- **Stage 3 pendente:** QA no emulador conforme Verification; gesto de
+  drop nativo e guard de arrasto de volta; critério 8 (esconder/reabrir).
+  `window.hide` pelo CDP foi negado por `core:window:allow-hide`; o smoke
+  não verificou esse gesto, nem alterou capabilities para permiti-lo.
+  A bandeja não é persistida nem ligada ao fechamento da janela.
+- Limpeza: `pc.ps1 clean -Isolated` retornou `[]`; Pasta isolada vazia,
+  fonte movida restaurada e processo de QA encerrado. Nenhum PC real estava
+  aberto antes ou ficou encerrado pelo smoke. Dados/artefatos de QA ficaram
+  só no diretório ignorado. A CLI Tauri regravou `Cargo.toml` sem diferença
+  de conteúdo; essa regravação foi desfeita, mantendo o arquivo fora do
+  ticket. Diff final conferido: sem segredos, artefatos gerados ou fonte
+  fora dos Primary files.
