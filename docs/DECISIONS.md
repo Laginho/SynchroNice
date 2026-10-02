@@ -26,7 +26,8 @@
 - 2026-09-20 — **Experimento: humano simulado no fluxo.** Neste repo, o que o
   `ticket-flow`/`foreman` devolveria ao humano no meio do run (perguntas em
   `blocked`, `Needs your call`, `Review: human`, verificação manual) vai para
-  um subagente fable high que decide e desbloqueia; o que não dá para fazer
+  o agente `proxy` (`~/.claude/agents/proxy.md`, único lugar do seu modelo e
+  esforço), que decide e desbloqueia; o que não dá para fazer
   sem humano vira `Débito humano:` em `## Comments`. Objetivo: rodar todos os
   tickets de uma vez e revisar tudo junto no PR de sessão. Regra completa em
   `AGENTS.md`, seção "Humano simulado".

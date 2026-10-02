@@ -13,8 +13,8 @@ só aponta.
 ## Contexto que não está em arquivo nenhum
 
 Este repo roda sob a regra **"Humano simulado"** do `AGENTS.md` (seção própria):
-tudo que o fluxo devolveria ao humano no meio do run vai para um subagente fable
-high, e o que um agente não consegue fazer de fato vira uma linha
+tudo que o fluxo devolveria ao humano no meio do run vai para o agente
+`proxy` (`~/.claude/agents/proxy.md`), e o que um agente não consegue fazer de fato vira uma linha
 `Débito humano:` no ticket. É por isso que a lista abaixo é longa — ela é o
 produto desenhado do experimento, não um sintoma de run malfeito.
 
