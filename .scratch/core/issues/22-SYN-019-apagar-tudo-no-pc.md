@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -122,6 +122,8 @@ está na Lixeira do Windows.
   ouvinte de exclusão não existem.
 
 ## Comments
+
+- Stage 2, reabertura (2026-10-02): costura mantida em `tests/server.rs`, HTTP e API pública do servidor. Chamadores reconferidos: conclusão/falha/progresso de uploads e observadores de `Items`; `Running::caminho_do_arquivo` para leitura/abertura/drag; envio de arquivo/bytes, ACK, escuta, rotação do Par e exclusão local/remota na Outbox. Casos reprovados: observador de Done que resolve o caminho, proteção de original após excluir a enviada, aliases Windows e interleavings de rename/registro e envio/exclusão. Nenhuma decisão ou critério novo; testes em commits próprios antes de cada correção.
 
 - Stage 2 concluído (2026-10-02), branch `syn-019`: protocolo de exclusão, Apagar tudo público, descarte seguro de recebidos e cópias de prints, remoção de enviados/Pendentes e ouvinte de exclusão implementados. `CONTEXT.md` e ADR-0002 atualizados; a janela e o Android seguem nos tickets já definidos.
   - Prova red-green restante, conferida no log da tentativa anterior: `f84bf1d` falhou por `Items::on_delete` e `Running::apagar_tudo` ausentes; `5d61d52` passou os 55 HTTP. Nesta retomada, o teste de `082a39e` falhou por original ausente (55 verdes, 1 vermelho), e `940a692` passou os 56 HTTP, incluindo as quatro combinações de exclusão local/remota e envio Pendente/Entregue.

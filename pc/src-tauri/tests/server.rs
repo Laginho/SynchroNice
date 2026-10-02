@@ -1636,6 +1636,38 @@ fn rotacionar_troca_o_token_e_o_servidor_recusa_o_antigo_e_aceita_o_novo() {
 }
 
 // SYN-019: Apagar tudo, na mesma costura HTTP dos envios.
+#[test]
+fn observador_de_upload_concluido_pode_consultar_o_arquivo_recebido() {
+    let (base, items, _outbox, running, _raiz) = sobe_para_exclusao();
+    let running = std::sync::Arc::new(running);
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    items.on_new(move |item| {
+        if matches!(
+            item.body,
+            ItemBody::File {
+                status: FileStatus::Done,
+                ..
+            }
+        ) {
+            let path = running.caminho_do_arquivo(item.id).unwrap();
+            let _ = done_tx.send(std::fs::read(path).unwrap());
+        }
+    });
+    let (http_tx, http_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let status = post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"imagem");
+        let _ = http_tx.send(status);
+    });
+
+    assert_eq!(
+        done_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("Done permite resolver e ler o arquivo sem deadlock"),
+        b"imagem"
+    );
+    assert_eq!(http_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+}
+
 fn post_exclusao(base: &str, token: Option<&str>, body: &str) -> u16 {
     let bounded = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
