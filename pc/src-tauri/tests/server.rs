@@ -1692,3 +1692,304 @@ fn exclusao_exige_bearer_e_corpo_com_os_dois_espacos_de_ids() {
     }
     assert_eq!(textos(&items), vec!["conservar"]);
 }
+
+fn excluir_ids(base: &str, do_pc: &[u64], do_celular: &[&str]) -> u16 {
+    let body = serde_json::json!({ "do_pc": do_pc, "do_celular": do_celular });
+    post_exclusao(base, Some(TOKEN), &body.to_string())
+}
+
+fn sobe_para_exclusao() -> (String, Items, Outbox, server::Running, tempfile::TempDir) {
+    let raiz = tempfile::tempdir().unwrap();
+    let items = Items::new();
+    let outbox = Outbox::new(raiz.path().join("outbox")).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        items.clone(),
+        outbox.clone(),
+        Some(raiz.path().join("pasta")),
+    )
+    .unwrap();
+    (
+        format!("http://{}", running.addr),
+        items,
+        outbox,
+        running,
+        raiz,
+    )
+}
+
+#[test]
+fn exclusao_de_arquivo_esquece_o_caminho_sem_apagar_outros_arquivos() {
+    let (base, items, outbox, running, raiz) = sobe_para_exclusao();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"foto"),
+        201
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "outra", "outra.png", b"outra"),
+        201
+    );
+    let removido = items.snapshot()[0].id;
+
+    assert_eq!(excluir_ids(&base, &[], &["foto", "inexistente"]), 204);
+    assert!(!raiz.path().join("pasta/foto.png").exists());
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/outra.png")).unwrap(),
+        b"outra"
+    );
+    assert_eq!(items.snapshot().len(), 1);
+    assert_eq!(running.caminho_do_arquivo(removido), None);
+    assert!(outbox.pending().is_empty());
+    assert_eq!(excluir_ids(&base, &[], &["foto"]), 204);
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"foto"),
+        201
+    );
+    assert!(
+        !raiz.path().join("pasta/foto.png").exists(),
+        "retry não restaura o arquivo"
+    );
+}
+
+#[test]
+fn exclusao_conserva_arquivo_alterado_e_ignora_arquivo_ja_ausente() {
+    let (base, items, _outbox, raiz) = sobe();
+    for id in ["alterado", "ausente"] {
+        assert_eq!(
+            post_arquivo_com_id(&base, TOKEN, id, &format!("{id}.bin"), b"antes"),
+            201
+        );
+    }
+    let alterado = raiz.path().join("pasta/alterado.bin");
+    std::fs::write(&alterado, b"conteudo alterado pelo usuario").unwrap();
+    std::fs::remove_file(raiz.path().join("pasta/ausente.bin")).unwrap();
+    assert_eq!(excluir_ids(&base, &[], &["alterado", "ausente"]), 204);
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read(alterado).unwrap(),
+        b"conteudo alterado pelo usuario"
+    );
+}
+
+#[test]
+fn exclusao_de_item_antigo_nao_apaga_caminho_reutilizado_por_item_novo() {
+    let (base, items, _outbox, raiz) = sobe();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "antigo", "foto.png", b"velh"),
+        201
+    );
+    std::fs::remove_file(raiz.path().join("pasta/foto.png")).unwrap();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "novo", "FOTO.PNG", b"novo"),
+        201
+    );
+
+    assert_eq!(excluir_ids(&base, &[], &["antigo"]), 204);
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/FOTO.PNG")).unwrap(),
+        b"novo"
+    );
+    assert_eq!(items.snapshot().len(), 1);
+    assert_eq!(excluir_ids(&base, &[], &["novo"]), 204);
+    assert!(!raiz.path().join("pasta/FOTO.PNG").exists());
+}
+
+#[test]
+fn exclusao_usa_a_pasta_original_e_nao_reconstroi_sessao_anterior() {
+    let (base, items, _outbox, running, raiz) = sobe_para_exclusao();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "original", "foto.png", b"antes"),
+        201
+    );
+    let nova = raiz.path().join("nova");
+    running.escolher_pasta(raiz.path(), &nova).unwrap();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "nova", "foto.png", b"nova"),
+        201
+    );
+    assert_eq!(excluir_ids(&base, &[], &["original"]), 204);
+    assert!(!raiz.path().join("pasta/foto.png").exists());
+    assert_eq!(std::fs::read(nova.join("foto.png")).unwrap(), b"nova");
+    assert_eq!(items.snapshot().len(), 1);
+
+    let depois = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        Items::new(),
+        Outbox::new(raiz.path().join("outra-outbox")).unwrap(),
+        Some(nova.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        excluir_ids(&format!("http://{}", depois.addr), &[], &["nova"]),
+        204
+    );
+    assert_eq!(
+        std::fs::read(nova.join("foto.png")).unwrap(),
+        b"nova",
+        "uma Sessão nova não recupera o vínculo id → arquivo"
+    );
+}
+
+#[test]
+fn exclusao_de_enviados_remove_pendentes_e_entregues_sem_tocar_no_original() {
+    let (base, _items, outbox, raiz) = sobe();
+    let original = raiz.path().join("original.bin");
+    std::fs::write(&original, b"original").unwrap();
+    let arquivo = outbox.enqueue_file_from_path(&original).unwrap();
+    let entregue = outbox.enqueue_text("entregue".into()).unwrap();
+    assert_eq!(
+        requisicao_crua(
+            &base,
+            "POST",
+            &format!("/outbox/{}/ack", entregue.id),
+            Some(TOKEN)
+        )
+        .0,
+        204
+    );
+    let fica = outbox.enqueue_text("conservar".into()).unwrap();
+
+    assert_eq!(
+        excluir_ids(&base, &[arquivo.id, entregue.id, arquivo.id, 999], &[]),
+        204
+    );
+    assert_eq!(
+        outbox
+            .session_items()
+            .iter()
+            .map(|i| i.item.id)
+            .collect::<Vec<_>>(),
+        vec![fica.id]
+    );
+    assert_eq!(std::fs::read(original).unwrap(), b"original");
+    assert_eq!(
+        requisicao_crua(
+            &base,
+            "GET",
+            &format!("/outbox/{}/file", arquivo.id),
+            Some(TOKEN)
+        )
+        .0,
+        404
+    );
+    let (status, body) = requisicao_crua_com_timeout(
+        &base,
+        "GET",
+        "/listen",
+        Some(TOKEN),
+        Some(Duration::from_secs(3)),
+    );
+    assert_eq!(status, 200);
+    let linhas: Vec<OutItem> = String::from_utf8(body)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(linhas, vec![fica]);
+    let recriada = Outbox::new(raiz.path().join("outbox")).unwrap();
+    assert_eq!(
+        recriada.pending(),
+        outbox.pending(),
+        "o descarte da fila persiste"
+    );
+}
+
+fn inicia_upload_parcial(base: &str, items: &Items, id: &str) -> TcpStream {
+    let (tx, rx) = std::sync::mpsc::channel();
+    items.on_new(move |item| {
+        if matches!(
+            item.body,
+            ItemBody::File {
+                received: 4,
+                status: FileStatus::Receiving,
+                ..
+            }
+        ) {
+            let _ = tx.send(());
+        }
+    });
+    let addr = base.strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(stream, "POST /items/file HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {TOKEN}\r\nX-Item-Id: {id}\r\nX-File-Name: curso.bin\r\nContent-Length: 8\r\nConnection: close\r\n\r\n1234").unwrap();
+    rx.recv_timeout(Duration::from_secs(3))
+        .expect("o upload recebeu a primeira metade");
+    stream
+}
+
+#[test]
+fn exclusao_durante_upload_espera_o_fim_e_nao_deixa_arquivo_na_pasta() {
+    let (base, items, _outbox, raiz) = sobe();
+    let mut stream = inicia_upload_parcial(&base, &items, "curso");
+    assert_eq!(excluir_ids(&base, &[], &["curso"]), 204);
+    stream.write_all(b"5678").unwrap();
+    let mut resposta = String::new();
+    stream.read_to_string(&mut resposta).unwrap();
+    assert!(resposta.starts_with("HTTP/1.1 201"), "{resposta}");
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn exclusao_durante_upload_que_falha_descarta_item_e_retry() {
+    let (base, items, _outbox, raiz) = sobe();
+    let stream = inicia_upload_parcial(&base, &items, "cortado");
+    assert_eq!(excluir_ids(&base, &[], &["cortado"]), 204);
+    drop(stream);
+    let limite = Instant::now() + Duration::from_secs(3);
+    while !items.snapshot().is_empty() && Instant::now() < limite {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "cortado", "curso.bin", b"retry"),
+        201
+    );
+    assert!(items.snapshot().is_empty());
+    assert!(!raiz.path().join("pasta/curso.bin").exists());
+}
+
+#[test]
+fn exclusao_de_arquivo_vazio_e_chunked_de_tamanho_desconhecido() {
+    let (base, items, _outbox, raiz) = sobe();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "vazio", "vazio.bin", b""),
+        201
+    );
+    let addr = base.strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(stream, "POST /items/file HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {TOKEN}\r\nX-Item-Id: chunked\r\nX-File-Name: chunked.bin\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n0\r\n\r\n").unwrap();
+    let mut resposta = String::new();
+    stream.read_to_string(&mut resposta).unwrap();
+    assert!(resposta.starts_with("HTTP/1.1 201"), "{resposta}");
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/chunked.bin")).unwrap(),
+        b"abc"
+    );
+    assert_eq!(excluir_ids(&base, &[], &["vazio", "chunked"]), 204);
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
