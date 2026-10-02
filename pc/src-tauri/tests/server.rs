@@ -1733,14 +1733,17 @@ fn observador_de_done_nao_trava_apagar_tudo_concorrente() {
     std::thread::sleep(Duration::from_millis(300));
     go.send(()).unwrap();
 
-    assert!(
-        path.recv_timeout(Duration::from_secs(3))
-            .expect("o observador de Done consulta o caminho sem esperar a exclusão")
-            .is_some()
-    );
+    assert!(path
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o observador de Done consulta o caminho sem esperar a exclusão")
+        .is_some());
     assert!(delete_rx.recv_timeout(Duration::from_secs(3)).unwrap());
     assert_eq!(upload_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
-    assert_eq!(items.snapshot().len(), 1, "ids desconhecidos não mudam nada");
+    assert_eq!(
+        items.snapshot().len(),
+        1,
+        "ids desconhecidos não mudam nada"
+    );
 }
 
 #[cfg(debug_assertions)]
