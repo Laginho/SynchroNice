@@ -2,7 +2,14 @@
 import { test } from "node:test";
 // @ts-ignore Node's native test runner provides these built-ins at runtime.
 import assert from "node:assert/strict";
-import { Bandeja } from "./bandeja.ts";
+import { Bandeja, temPrevia } from "./bandeja.ts";
+
+test("miniatura só até 10 MiB, inclusive para imagem colada", () => {
+  assert.equal(temPrevia(0), true);
+  assert.equal(temPrevia(10 * 1024 * 1024), true);
+  assert.equal(temPrevia(10 * 1024 * 1024 + 1), false);
+  assert.equal(temPrevia(15_933_610), false);
+});
 
 test("entradas preservam ordem e duplicatas; remover tira só a entrada escolhida", () => {
   const bandeja = new Bandeja<string>();
