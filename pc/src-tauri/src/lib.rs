@@ -36,7 +36,7 @@ struct Enviado {
     ordem: usize,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct Recebido {
     #[serde(flatten)]
     item: Item,

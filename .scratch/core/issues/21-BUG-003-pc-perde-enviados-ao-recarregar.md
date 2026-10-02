@@ -1,5 +1,5 @@
 # BUG-003: O PC perde os enviados ao recarregar, e a bolha enviada não abre nem arrasta
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -93,6 +93,20 @@ CDP). Arrastar para fora da janela continua 👤.
   de texto/prints vazia, cópia de print ausente e nome com caminho aceito.
   O ciclo de vida cobre também nomes repetidos, bytes vazios, limpeza após
   morte sem destrutor, Pendentes herdados sem bolha/aviso e último clone.
+- Stage 2 concluído (2026-10-01), branch `bug-003`, base
+  `sweatshop/2026-10-01-2019`. Testes vermelhos em `f19a2ca` e `a292e88`,
+  separados dos commits de produção; formatação dos testes em `ba21bb3`.
+  Gate completo: **PC 56/56** (4 novos em `outbox`), **UI 47/47**, **kit
+  14/14**, fmt, Clippy e typecheck verdes, `gradle check` verde (133 testes
+  Android nos relatórios, reutilizados pelo Gradle como `UP-TO-DATE`).
+  A primeira rodada completa encontrou E0277 no payload de evento recebido;
+  o derive `Clone` foi corrigido antes desta rodada verde.
+  Os enviados vivem em memória; arquivos usam a origem e prints usam
+  `outbox/session-files/<id>/<nome>`. ACK apaga só o payload de entrega.
+  A UI relista ambos os lados e desempata `at_ms` com ordem de inserção
+  compartilhada; comandos de arquivo enviados têm namespace próprio e o
+  guard de executável é compartilhado. Snapshot atrasado não desfaz ACK.
+  QA no emulador dos critérios 6–8 e drag nativo aguardam o stage 3.
 
 - Stage 1 (2026-10-01), grilling com o dono e o `proxy`. O dono escolheu o
   caminho original, com cópia só para o print colado, em vez de uma cópia de

@@ -79,7 +79,7 @@ fn save_manifest(dir: &Path, manifest: &Manifest) -> io::Result<()> {
     std::fs::write(dir.join(MANIFEST_FILE), data)
 }
 
-/// Chamado quando um Item entra na fila (`entregue: false`) ou quando o
+/// Chamado quando um Item desta Sessão entra na fila (`entregue: false`) ou quando o
 /// celular confirma o recebimento e ele sai (`entregue: true`) — é o que a
 /// janela do PC escuta para desenhar a bolha à direita e trocá-la de
 /// Pendente para Entregue.
@@ -123,9 +123,9 @@ pub struct Outbox {
 }
 
 impl Outbox {
-    /// Carrega a fila persistida em `dir`, ou começa vazia se `dir` ainda
-    /// não tiver um manifesto — mesmo diretório entre reinícios do processo
-    /// é o que faz a fila sobreviver a sair e reabrir o app.
+    /// Carrega a fila persistida em `dir`, ou começa vazia se não houver
+    /// manifesto. A Sessão sempre começa vazia, e cópias de prints da vida
+    /// anterior são varridas sem apagar os payloads de entrega dos Pendentes.
     pub fn new(dir: PathBuf) -> io::Result<Self> {
         std::fs::create_dir_all(&dir)?;
         let session_dir = dir.join(SESSION_FILES);
@@ -240,7 +240,8 @@ impl Outbox {
         Ok(item)
     }
 
-    /// Chamado a cada Item enfileirado ou confirmado, na thread que o gerou.
+    /// Chamado a cada Item desta Sessão enfileirado ou confirmado, na thread
+    /// que o gerou. ACK de Pendente herdado não publica uma bolha nova.
     pub fn on_change(&self, listener: impl Fn(&OutItem, bool) + Send + Sync + 'static) {
         self.inner
             .lock()
