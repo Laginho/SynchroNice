@@ -123,6 +123,8 @@ está na Lixeira do Windows.
 
 ## Comments
 
+- Harness de concorrência da reabertura: os testes continuam em `tests/server.rs`, observando HTTP, listas e arquivos pela API pública. Pausas de agendamento opcionais em `server.rs` (`debug_assertions`, omitidas no release) tornam os intervalos reproduzíveis; não substituem rede, fila ou filesystem, e soltam a operação mesmo se o teste falhar. Commits dessas pausas são suporte de teste, separados das correções de produção.
+
 - Stage 2, reabertura (2026-10-02): costura mantida em `tests/server.rs`, HTTP e API pública do servidor. Chamadores reconferidos: conclusão/falha/progresso de uploads e observadores de `Items`; `Running::caminho_do_arquivo` para leitura/abertura/drag; envio de arquivo/bytes, ACK, escuta, rotação do Par e exclusão local/remota na Outbox. Casos reprovados: observador de Done que resolve o caminho, proteção de original após excluir a enviada, aliases Windows e interleavings de rename/registro e envio/exclusão. Nenhuma decisão ou critério novo; testes em commits próprios antes de cada correção.
 
 - Stage 2 concluído (2026-10-02), branch `syn-019`: protocolo de exclusão, Apagar tudo público, descarte seguro de recebidos e cópias de prints, remoção de enviados/Pendentes e ouvinte de exclusão implementados. `CONTEXT.md` e ADR-0002 atualizados; a janela e o Android seguem nos tickets já definidos.

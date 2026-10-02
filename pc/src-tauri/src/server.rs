@@ -221,6 +221,38 @@ struct AppState {
     before_file_item_id_lock: Arc<Mutex<Option<TestPause>>>,
     #[cfg(test)]
     after_file_rename: Arc<Mutex<Option<TestPause>>>,
+    #[cfg(debug_assertions)]
+    after_file_rename_for_tests: Arc<Mutex<Option<FileTestPause>>>,
+}
+
+// Controles de agendamento para a costura HTTP de integração. Não existem
+// no release e não alteram a execução quando nenhum teste instala uma pausa.
+#[cfg(debug_assertions)]
+struct FileTestPause {
+    reached: mpsc::Sender<()>,
+    resume: mpsc::Receiver<()>,
+}
+
+#[cfg(debug_assertions)]
+impl FileTestPause {
+    fn wait(self) {
+        let _ = self.reached.send(());
+        // Descartar o remetente também libera a operação se o teste falhar.
+        let _ = self.resume.recv();
+    }
+}
+
+#[cfg(debug_assertions)]
+fn prepare_file_test_pause(
+    slot: &Mutex<Option<FileTestPause>>,
+) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+    let (reached_tx, reached_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
+    *slot.lock().expect("pausa de teste sem panic") = Some(FileTestPause {
+        reached: reached_tx,
+        resume: resume_rx,
+    });
+    (reached_rx, resume_tx)
 }
 
 #[cfg(test)]
@@ -317,6 +349,12 @@ pub struct Running {
 }
 
 impl Running {
+    #[doc(hidden)]
+    #[cfg(debug_assertions)]
+    pub fn pause_after_file_rename_for_tests(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        prepare_file_test_pause(&self.state.after_file_rename_for_tests)
+    }
+
     /// Persiste a escolha e a aplica ao servidor que já está escutando.
     pub fn escolher_pasta(&self, config_dir: &Path, pasta: &Path) -> io::Result<()> {
         crate::config::save_pasta(config_dir, pasta)?;
@@ -441,6 +479,8 @@ fn spawn_inner(
         before_file_item_id_lock: Arc::new(Mutex::new(None)),
         #[cfg(test)]
         after_file_rename: Arc::new(Mutex::new(None)),
+        #[cfg(debug_assertions)]
+        after_file_rename_for_tests: Arc::new(Mutex::new(None)),
     };
     let state_da_thread = state.clone();
 
@@ -850,6 +890,19 @@ async fn post_file(State(state): State<AppState>, request: Request) -> StatusCod
             Ok(()) => {
                 #[cfg(test)]
                 pause_once(&state.after_file_rename).await;
+                #[cfg(debug_assertions)]
+                {
+                    let pause = state
+                        .after_file_rename_for_tests
+                        .lock()
+                        .expect("pausa de teste sem panic")
+                        .take();
+                    if let Some(pause) = pause {
+                        tokio::task::spawn_blocking(move || pause.wait())
+                            .await
+                            .expect("pausa de teste sem panic");
+                    }
+                }
                 // Só agora o arquivo existe com o nome final: o sinal de fim
                 // não pode vir antes disso, ou a UI tentaria ler um caminho
                 // que ainda não existe.
@@ -1184,6 +1237,8 @@ mod tests {
                 upload_inactivity_timeout: UPLOAD_INACTIVITY_TIMEOUT,
                 before_file_item_id_lock: Arc::new(Mutex::new(None)),
                 after_file_rename: Arc::new(Mutex::new(Some(finalization.clone()))),
+                #[cfg(debug_assertions)]
+                after_file_rename_for_tests: Arc::new(Mutex::new(None)),
             };
 
             let first = tokio::spawn(post_file(

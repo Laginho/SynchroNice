@@ -2041,6 +2041,50 @@ fn exclusao_de_recebido_reenviado_preserva_o_original_do_enviado() {
     }
 }
 
+#[cfg(debug_assertions)]
+#[test]
+fn exclusao_de_recebido_antigo_durante_rename_preserva_upload_novo() {
+    let (base, items, _outbox, running, raiz) = sobe_para_exclusao();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "antigo", "foto.png", b"velh"),
+        201
+    );
+    let antigo = items.snapshot()[0].id;
+    let path = raiz.path().join("pasta/foto.png");
+    std::fs::remove_file(&path).unwrap();
+    let (renamed, resume) = running.pause_after_file_rename_for_tests();
+    let upload_base = base.clone();
+    let (upload_tx, upload_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let status = post_arquivo_com_id(&upload_base, TOKEN, "novo", "foto.png", b"novo");
+        let _ = upload_tx.send(status);
+    });
+    renamed
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o upload novo chegou ao nome final");
+    assert_eq!(std::fs::read(&path).unwrap(), b"novo");
+
+    let (delete_tx, delete_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = delete_tx.send(excluir_ids(&base, &[], &["antigo"]));
+    });
+    // A exclusão pode esperar a finalização ou terminar antes dela; ambas
+    // as ordens devem preservar o arquivo do Item novo fora da seleção.
+    let early_delete = delete_rx.recv_timeout(Duration::from_secs(3)).ok();
+    resume.send(()).unwrap();
+    assert_eq!(
+        early_delete.unwrap_or_else(|| delete_rx.recv_timeout(Duration::from_secs(3)).unwrap()),
+        204
+    );
+    assert_eq!(upload_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+    let restantes = items.snapshot();
+    assert_eq!(restantes.len(), 1);
+    assert_ne!(restantes[0].id, antigo);
+    assert_eq!(restantes[0].sender_id.as_deref(), Some("novo"));
+    assert_eq!(running.caminho_do_arquivo(restantes[0].id), Some(path.clone()));
+    assert_eq!(std::fs::read(path).unwrap(), b"novo");
+}
+
 #[test]
 fn original_reenviado_continua_protegido_apos_excluir_a_enviada() {
     for (local, entregue) in [(false, false), (false, true), (true, false), (true, true)] {
