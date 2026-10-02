@@ -88,6 +88,11 @@ CDP). Arrastar para fora da janela continua 👤.
   `gate.ps1 -TestsOnly` sai 1, com E0599 nas APIs de origem/lista/caminho da
   Sessão. O teste cobre ACK repetido, origem apagada/restaurada e cópia de
   entrega independente da origem. UI 47/47, kit 14/14 e Android verdes.
+- Primeiro verde: PC 53/53 (`outbox` 1/1), UI 47/47, kit 14/14,
+  Android verde. Segundo vermelho: `outbox` 1 verde/3 vermelhos — lista
+  de texto/prints vazia, cópia de print ausente e nome com caminho aceito.
+  O ciclo de vida cobre também nomes repetidos, bytes vazios, limpeza após
+  morte sem destrutor, Pendentes herdados sem bolha/aviso e último clone.
 
 - Stage 1 (2026-10-01), grilling com o dono e o `proxy`. O dono escolheu o
   caminho original, com cópia só para o print colado, em vez de uma cópia de
