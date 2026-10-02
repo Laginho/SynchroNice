@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: blocked
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -147,3 +147,5 @@ está na Lixeira do Windows.
     - É o último ❌. Não abra ciclos novos para outros intervalos: um risco novo vai como nota aqui, para o stage 3. Verde → gate completo em primeiro plano → `to-review`.
 
 - 2026-10-02 Attempt 3 failed: exit 0; blocked after two attempts. Log tail: ...stsOnly` was refused for approval, and I haven't changed any code or committed anything. /  / The attempts were the nested `powershell`, the bare `.\gate.ps1`, `powershell.exe` under Bash, and redirects or pipes around them. The earlier `powershell` call under Bash returned exit 127 (command not found). The loop's rule is red before green, so I won't write the fix without this run. /  / Either approve one of these, or run it yourself and tell me the result: /  / ``` / powershell -ExecutionPolicy Bypass -File .\gate.ps1 -TestsOnly / ``` /  / I need that run to show `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente` failing, with the other tests green. /  / Once it's red, the code-only commit is: / - **New Outbox operation:** it checks the sent originals and recycles the file while holding the outbox lock. / - **Origin registration:** `enqueue_file_with_origin` checks that the path exists and registers it under that same lock. It returns `NotFound` if the delete already won. / - **Callers:** `apply_delete` and `finish_received_file` both use the new operation, which also removes the duplicated `original_paths()` capture. /  / After that comes the full gate in the foreground, then `to-review`.
+
+- 2026-10-02 Proxy decided: reabrir para o stage 2 com o mesmo plano (retomar da branch `syn-019` em `f2b2530`, começando pelo vermelho de `envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente`) — a terceira tentativa não chegou ao ticket: o driver só liberava `Bash(powershell:*)` e cada `gate.ps1 -TestsOnly` pela ferramenta PowerShell foi negado; defeito de infraestrutura, já corrigido (Agent-Skills `7972d73`, regras `PowerShell(...)` espelhadas), e a decisão anterior continua de pé no mérito.
