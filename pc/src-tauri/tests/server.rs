@@ -1481,7 +1481,7 @@ fn escuta_entrega_pendentes_em_ordem_e_confirmacao_os_remove_da_fila() {
         .iter()
         .map(|item| match &item.body {
             OutBody::Text { text } => text.clone(),
-            OutBody::File { .. } => panic!("esperava texto"),
+            _ => panic!("esperava texto"),
         })
         .collect();
     assert_eq!(
@@ -1633,4 +1633,62 @@ fn rotacionar_troca_o_token_e_o_servidor_recusa_o_antigo_e_aceita_o_novo() {
         "o token antigo deve ser recusado imediatamente, sem reiniciar o servidor"
     );
     assert_eq!(post_texto(&base, Some(&novo), "com o token novo"), 201);
+}
+
+// SYN-019: Apagar tudo, na mesma costura HTTP dos envios.
+fn post_exclusao(base: &str, token: Option<&str>, body: &str) -> u16 {
+    let mut req = agent()
+        .post(format!("{base}/items/delete"))
+        .header("Content-Type", "application/json");
+    if let Some(token) = token {
+        req = req.header("Authorization", format!("Bearer {token}"));
+    }
+    req.send(body).unwrap().status().as_u16()
+}
+
+#[test]
+fn exclusao_de_texto_por_id_do_remetente_e_idempotente_sem_reusar_ids_locais() {
+    let (base, items, outbox, _raiz) = sobe();
+    assert_eq!(post_texto_com_id(&base, TOKEN, "primeiro", "apagar"), 201);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "segundo", "conservar"), 201);
+    let id_antigo = items.snapshot()[1].id;
+
+    let desconhecida = r#"{"do_pc":[999],"do_celular":["desconhecido"]}"#;
+    assert_eq!(post_exclusao(&base, Some(TOKEN), desconhecida), 204);
+    assert_eq!(textos(&items), vec!["apagar", "conservar"]);
+
+    let exclusao = r#"{"do_pc":[],"do_celular":["primeiro","primeiro"]}"#;
+    assert_eq!(post_exclusao(&base, Some(TOKEN), exclusao), 204);
+    assert_eq!(post_exclusao(&base, Some(TOKEN), exclusao), 204);
+    assert_eq!(textos(&items), vec!["conservar"]);
+    assert!(
+        outbox.pending().is_empty(),
+        "não devolve a exclusão ao celular"
+    );
+
+    assert_eq!(post_texto_com_id(&base, TOKEN, "terceiro", "novo"), 201);
+    assert!(items.snapshot()[1].id > id_antigo);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "primeiro", "retry"), 201);
+    assert_eq!(
+        textos(&items),
+        vec!["conservar", "novo"],
+        "retry não ressuscita o Item"
+    );
+}
+
+#[test]
+fn exclusao_exige_bearer_e_corpo_com_os_dois_espacos_de_ids() {
+    let (base, items, _outbox, _raiz) = sobe();
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto", "conservar"), 201);
+    let body = r#"{"do_pc":[],"do_celular":["texto"]}"#;
+    assert_eq!(post_exclusao(&base, None, body), 401);
+    assert_eq!(post_exclusao(&base, Some("outro-token"), "inválido"), 401);
+    for invalido in [
+        "inválido",
+        r#"{"do_pc":["1"],"do_celular":[]}"#,
+        r#"{"do_pc":[]}"#,
+    ] {
+        assert_eq!(post_exclusao(&base, Some(TOKEN), invalido), 400);
+    }
+    assert_eq!(textos(&items), vec!["conservar"]);
 }

@@ -1,5 +1,5 @@
 # SYN-019: Apagar tudo, protocolo e backend do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: BUG-003
 Review: human
@@ -122,6 +122,8 @@ está na Lixeira do Windows.
   ouvinte de exclusão não existem.
 
 ## Comments
+
+- Stage 2 (2026-10-02): costura aprovada `tests/server.rs`, HTTP e API pública do servidor. Chamadores revistos: `post_text`/`post_file` criam e terminam recebidos; `FailGuard` termina uploads cancelados; a janela consulta os snapshots e caminhos, e escuta `on_new`/`on_change`; `/listen`, download, ACK e rotação do Par usam a fila. A exclusão precisa preservar ids locais monotônicos, retries já aceitos, uploads em curso (sucesso e falha), arquivos de tamanho desconhecido/zero, a Pasta original após troca, caminhos reutilizados e originais de enviados. Testes e código serão entregues em commits separados por fatia.
 
 - Stage 1 (2026-10-01), grilling com o dono e o `proxy`.
   - **Decisões do dono:**
