@@ -27,6 +27,10 @@ export class Bandeja<T> {
     this.itens = this.itens.filter((entrada) => entrada.id !== id);
   }
 
+  limpar(): void {
+    this.itens = [];
+  }
+
   sequencia(texto: string): Envio<T>[] {
     const envios: Envio<T>[] = this.itens.map((entrada) => ({ tipo: "entrada", entrada }));
     const legenda = texto.trim();
