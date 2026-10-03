@@ -333,8 +333,9 @@ sleep __SECONDS__
         'stop' { Adb-Run @('shell','am','force-stop','synchronice.android') }
         'pair' {
             $pair = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
-            if ($pair.nome_instancia -cnotmatch '^synchronice-[0-9a-fA-F]{8}$' -or
-                $pair.token -cnotmatch '^[0-9a-fA-F]{32}$') { throw 'config.json sem Par valido' }
+            if ($pair.nome_instancia -isnot [string] -or $pair.token -isnot [string] -or
+                $pair.nome_instancia -cnotmatch '\Asynchronice-[0-9a-fA-F]{8}\z' -or
+                $pair.token -cnotmatch '\A[0-9a-fA-F]{32}\z') { throw 'config.json sem Par valido' }
             if (-not $Ip) {
                 # Same route lookup as the PC QR: UDP connect selects an address without sending data.
                 $socket = [Net.Sockets.UdpClient]::new()
