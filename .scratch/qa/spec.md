@@ -214,7 +214,7 @@ O humano fica só com o que o kit não alcança, e sabe exatamente o que é.
   ou não faz. Nada sobre como o kit está organizado por dentro.
 - **Resolução do diretório do PC:** teste de unidade da função pura. Com a
   variável, usa o caminho dela e desliga o autostart. Sem ela, usa o padrão
-  e mantém o autostart. Arte anterior: `pc/src-tauri/tests/config.rs`.
+  e permite o autostart, que a engrenagem liga (SYN-030). Arte anterior: `pc/src-tauri/tests/config.rs`.
 - **Atalho de pareamento:** teste Robolectric no source set de teste de
   debug. Depois do intent com o JSON, o Par existe e o `last-address` tem o IP
   do QR. Arte anterior: `ShareActivityTest` (activity dirigida por intent) e

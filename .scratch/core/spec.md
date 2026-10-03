@@ -89,7 +89,7 @@ descartada ao encerrar, o Par persiste.
 - **Arrastar para fora no PC.** A bolha de arquivo inicia um drag nativo de arquivo (API do Tauri), com o caminho na Pasta. Funciona para qualquer tipo, não só imagem.
 - **Android.** Activity única com o chat. Intent filter de SEND e SEND_MULTIPLE para texto e qualquer mime. Múltiplos itens viram Itens separados. Envio roda em um serviço em primeiro plano com notificação de progresso, para sobreviver ao app sair de tela. Miniatura de imagem recebida fica no cache do app; salvar na galeria é um toque.
 - **UI.** Variante A do protótipo: bolhas, "eu" à direita. Estilo Slip: fundo escuro, bolhas claras. Progresso é uma barra animada dentro da bolha. Pendente reduz a opacidade e mostra um indicador girando.
-- **Bandeja e autostart no PC.** Ícone na bandeja com "Abrir" e "Sair". Registro em autostart do Windows no primeiro uso.
+- **Bandeja e autostart no PC.** Ícone na bandeja com "Abrir" e "Sair". Autostart do Windows opcional, desligado por padrão, na engrenagem (SYN-030; até lá, registro no primeiro uso).
 
 ## Testing Decisions
 

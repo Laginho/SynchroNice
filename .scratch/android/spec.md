@@ -106,6 +106,9 @@ enquanto dura um envio longo.
 47. Como usuário, quero que o link seja azul sublinhado e o copiável azul sem sublinhado, para saber antes de tocar se aquilo abre ou copia.
 48. Como usuário, quero o mesmo comportamento no PC e no celular, e que no PC arrastar o mouse continue selecionando um trecho do texto.
 
+### Iniciar com o Windows (PC)
+49. Como usuário, quero escolher na engrenagem do PC se o app inicia com o Windows, desligado por padrão, para o app só subir no login quando eu quiser (SYN-030).
+
 ## Implementation Decisions
 
 ### Copiáveis
@@ -151,7 +154,11 @@ enquanto dura um envio longo.
   "Mudar pasta…", que abre o diálogo nativo de pasta e vale na hora, igual ao
   caminho que já atualiza o servidor em execução, e com "Desparear", que é o
   re-pareamento que já existe: token novo, Pendentes descartados, QR novo. Tem
-  também "Copiar com pontuação". A bandeja não muda.
+  também "Copiar com pontuação" e "Iniciar com o Windows". A bandeja não muda.
+- **Iniciar com o Windows (SYN-030).** A fonte da verdade é a própria entrada
+  do HKCU Run, sem campo de configuração. O app não mexe nela ao iniciar: só
+  o checkbox liga e desliga. O perfil isolado do QA não lê nem grava o
+  autostart, e um build de debug não se registra.
 - **Celular.** A mesma engrenagem no topo do chat, com "Mudar pasta…" (seletor
   de pasta nativo do Android), "Desparear", "Copiar com pontuação" e "Guardar
   fotos tiradas". As opções ficam nas preferências do app, fora do Par.
