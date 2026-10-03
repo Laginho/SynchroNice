@@ -3,11 +3,13 @@ package synchronice.android
 import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.sun.net.httpserver.HttpExchange
@@ -27,6 +29,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Robolectric
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
@@ -59,6 +63,7 @@ private class FakePc {
     /** Segura o ack de um arquivo até o teste soltar: o download já terminou, o PC ainda não confirmou. */
     @Volatile var ackGate: CountDownLatch? = null
     val textIds = CopyOnWriteArrayList<String>()
+    val uploads = CopyOnWriteArrayList<String>()
     val deletes = CopyOnWriteArrayList<JSONObject>()
     val acks = ConcurrentHashMap<Long, AtAck>()
     val downloads = AtomicInteger()
@@ -86,6 +91,11 @@ private class FakePc {
             exchange.sendResponseHeaders(deleteStatus.get(), -1)
             exchange.close()
         }
+        server.createContext("/items/file") { exchange ->
+            uploads.add(exchange.requestBody.readBytes().decodeToString())
+            exchange.sendResponseHeaders(201, -1)
+            exchange.close()
+        }
         server.createContext("/outbox/") { exchange ->
             val parts = exchange.requestURI.path.split('/')
             if (parts[3] == "ack") {
@@ -101,8 +111,7 @@ private class FakePc {
         server.start()
     }
 
-    fun pair(app: Application): AppState {
-        val state = AppState(app)
+    fun pair(app: Application, state: AppState = AppState(app)): AppState {
         assertTrue(state.acceptQr("""{"instance_name":"synchronice-1234abcd","port":${server.address.port},"token":"$TOKEN"}"""))
         state.knownAddress.save("127.0.0.1")
         observe = { AtAck(state.messages.map { it.text }, state.hasPending()) }
@@ -129,8 +138,8 @@ private class MediaFake(app: Application) {
                 ParcelFileDescriptor.open(backing(uri), ParcelFileDescriptor.parseMode(mode) or ParcelFileDescriptor.MODE_CREATE)
             override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 1
             override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
-                MatrixCursor(arrayOf(OpenableColumns.SIZE)).also { cursor ->
-                    backing(uri).takeIf { it.exists() }?.let { cursor.addRow(arrayOf<Any?>(it.length())) }
+                MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)).also { cursor ->
+                    backing(uri).takeIf { it.exists() }?.let { cursor.addRow(arrayOf<Any?>("a.bin", it.length())) }
                 }
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
                 deleteError?.let { throw it }
@@ -284,6 +293,35 @@ class ApagarTudoTest {
             waitUntil { pc.acks.containsKey(9L) }
             assertTrue(state.messages.isEmpty())
             assertEquals(listOf(saved), media.deleted.toList())
+        }
+    }
+
+    @Test
+    fun aReceivedFileSharedBackRemainsAnOriginalAfterItsOutgoingBubbleWasRemoved() = withPc { pc, app ->
+        val media = MediaFake(app)
+        val state = pc.pair(app, (app as SynchroNiceApplication).state)
+        pc.batches.put(receivedFile)
+        whileListening(state) {
+            state.waitForDownloadedFile()
+            val source = state.messages.single().uri!!
+            val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, source)
+            val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).create().get()
+            waitUntil {
+                shadowOf(Looper.getMainLooper()).idle()
+                activity.isFinishing
+            }
+            state.retryPending()
+            assertEquals(listOf("payl"), pc.uploads.toList(), "o arquivo recebido foi enviado de volta")
+            val sent = state.messages.single { it.outgoing }.sentId!!
+            pc.batches.put(deleteLine(8, doCelular = "\"$sent\""))
+            waitUntil { pc.acks.containsKey(8L) }
+            assertEquals(1, state.messages.size, "a bolha enviada já saiu da Sessão")
+
+            pc.batches.put(deleteLine(9, doPc = "1"))
+            waitUntil { pc.acks.containsKey(9L) }
+
+            assertTrue(state.messages.isEmpty())
+            assertTrue(media.deleted.isEmpty(), "o original enviado fica protegido durante toda a Sessão")
         }
     }
 
