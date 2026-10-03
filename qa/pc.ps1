@@ -96,7 +96,8 @@ try {
                     foreach ($recycled in $shell.Namespace(10).Items()) {
                         if ($previousRecycled -contains $recycled.Path) { continue }
                         $originalFolder = $recycled.ExtendedProperty('System.Recycle.DeletedFrom')
-                        $originalName = $recycled.ExtendedProperty('System.ItemNameDisplay')
+                        # Display names omit extensions such as .lnk even when extensions are visible.
+                        $originalName = $recycled.ExtendedProperty('System.FileName')
                         if ($originalFolder -and $originalName -and
                             (Join-Path $originalFolder $originalName) -eq $target -and
                             (Get-FileHash -LiteralPath $recycled.Path).Hash -eq $entry.hash) {
