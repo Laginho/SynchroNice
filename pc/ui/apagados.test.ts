@@ -35,6 +35,26 @@ test("marcar de novo acumula, e recebidos e enviados têm sequências separadas"
   assert.deepStrictEqual(ids(apagados.filtrarRecebidos([{ id: 1 }, { id: 2 }])), [2]);
 });
 
+test("Apagar tudo que falha libera os Itens para tentar de novo, sem restaurar exclusões do celular", () => {
+  const apagados = new Apagados();
+  const exclusao = apagados.iniciar([1, 2], [1, 3]);
+  const recebidos = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  const enviados = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  // Enquanto o comando está em andamento, snapshots e eventos não recriam
+  // os selecionados; chegadas novas continuam visíveis em cada origem.
+  assert.deepStrictEqual(ids(apagados.filtrarRecebidos(recebidos)), [3]);
+  assert.deepStrictEqual(ids(apagados.filtrarEnviados(enviados)), [2]);
+  apagados.marcar([2], [3]);
+  exclusao.cancelar();
+  assert.deepStrictEqual(ids(apagados.filtrarRecebidos(recebidos)), [1, 3]);
+  assert.deepStrictEqual(ids(apagados.filtrarEnviados(enviados)), [1, 2]);
+
+  const tentativa = apagados.iniciar([1], [1]);
+  tentativa.confirmar();
+  assert.deepStrictEqual(ids(apagados.filtrarRecebidos(recebidos)), [3]);
+  assert.deepStrictEqual(ids(apagados.filtrarEnviados(enviados)), [2]);
+});
+
 type Tratador = (event: { payload: unknown }) => void;
 
 /** Um `listen` que só vale depois de um turno do laço de eventos, como o IPC do
