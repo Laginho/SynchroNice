@@ -49,9 +49,10 @@ for the owner, not claims of manual verification or owner approval.
 
 ## One desktop verification pass
 
-Use disposable files. Start the PC app once; it registers autostart as part of
-normal startup. If it already runs in the tray, open that instance rather than
-launching a second one. No live-window checks below were performed by this agent.
+Use disposable files. Start the PC app once. Autostart is optional: enable
+"Iniciar com o Windows" in settings if needed (SYN-030). If it already runs in
+the tray, open that instance rather than launching a second one. No live-window
+checks below were performed by this agent.
 
 1. On a fresh profile, select the folder and receive a file without restarting.
    Confirm the QR is visible and mDNS can be discovered on another LAN device.

@@ -127,9 +127,9 @@ O humano fica só com o que o kit não alcança, e sabe exatamente o que é.
     definida:
     - toda a configuração (Par, Pasta, outbox, `accepted-file-ids.txt`) vive
       nesse diretório;
-    - o registro no autostart não acontece.
-  - Uma função pura resolve o diretório e diz se o autostart vale. Os dois
-    lugares que hoje pedem o `app_config_dir()` passam por ela.
+    - os comandos de autostart recusam leitura e mudança (SYN-030).
+  - Uma função pura resolve o diretório e diz se o autostart pode ser lido e
+    mudado. Os dois lugares que hoje pedem o `app_config_dir()` passam por ela.
   - O kit define também `WEBVIEW2_USER_DATA_FOLDER`, que o próprio WebView2
     respeita, para não dividir o perfil com a instância real.
   - A porta continua 47820 fixa. O kit mata a instância real antes e a reabre
@@ -213,8 +213,9 @@ O humano fica só com o que o kit não alcança, e sabe exatamente o que é.
 - Um bom teste aqui prova comportamento externo: dado um ambiente, o app faz
   ou não faz. Nada sobre como o kit está organizado por dentro.
 - **Resolução do diretório do PC:** teste de unidade da função pura. Com a
-  variável, usa o caminho dela e desliga o autostart. Sem ela, usa o padrão
-  e permite o autostart, que a engrenagem liga (SYN-030). Arte anterior: `pc/src-tauri/tests/config.rs`.
+  variável, usa o caminho dela e recusa acesso ao autostart. Sem ela, usa o
+  padrão e permite ler e mudar o autostart pela engrenagem (SYN-030).
+  Arte anterior: `pc/src-tauri/tests/config.rs`.
 - **Atalho de pareamento:** teste Robolectric no source set de teste de
   debug. Depois do intent com o JSON, o Par existe e o `last-address` tem o IP
   do QR. Arte anterior: `ShareActivityTest` (activity dirigida por intent) e
