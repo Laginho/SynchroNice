@@ -1,5 +1,5 @@
 # CLEAN-018: Preservar uma verificação executável do wrapper pair
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -58,6 +58,7 @@ ticket que não houve vermelho por não haver defeito.
 ## Comments
 
 - Stage 2, reabertura (2026-10-03): seam mantida na CLI real de `qa/phone.ps1`, com adb falso. Chamador de produção conferido: `qa/up.ps1`, que fornece strings canônicas via config e IPv4 explícito. Casos degenerados: arrays vazios, arrays com uma string válida e LF final em cada campo. Teste focado `node --test --test-name-pattern='pair validates' qa/phone.test.mjs`: 12 testes, 5 passaram e 7 falharam (os seis novos casos e o pai); todos os casos novos retornaram 0/Starting: Intent em vez de rejeitar o Par. Produção ainda intacta neste commit.
+- Handoff da reabertura (2026-10-03): testes vermelhos em `e97e45a`; correção de produção separada em `763c6dc`, sem alterar testes. O guard exige `[string]` nos dois campos e usa `\A`/`\z` para validar o valor inteiro. Teste focado após a correção: 12/12 passaram, 27 execuções do wrapper; os seis casos novos conferem exit 1, mensagem de Par inválido e nenhum `am start`. Gate completo em primeiro plano: exit 0, `gate: passou`; Rust 83, PC/UI 61, QA 26 testes passaram; fmt, clippy e typecheck passaram. Android `BUILD SUCCESSFUL`, 41 tasks (1 executada, 40 up-to-date, incluindo testes). Diff revisado: apenas os dois Primary files e este ticket; nenhuma mudança de contrato ou documentação de uso necessária. Limitação preservada: fake `.ps1` não verifica transporte nativo de argv; QA real fica para o stage 3.
 
 - Standards identificou uma limpeza não bloqueante em `qa/phone.ps1`,
   ação `pair`: validação do config e IPv4, descoberta da rota e escape do
