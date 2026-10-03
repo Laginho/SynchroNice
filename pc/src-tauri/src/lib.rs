@@ -9,7 +9,7 @@ pub mod server;
 use items::{Item, Items};
 use outbox::{OutItem, Outbox};
 use par::Par;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
@@ -25,6 +25,10 @@ const SENT_EVENT: &str = "enviado";
 /// Evento que a janela escuta para o indicador de presença: `true` enquanto
 /// há uma conexão `/listen` viva, `false` quando ela cai.
 const PRESENCE_EVENT: &str = "presenca";
+
+/// Evento que a janela escuta quando Itens saem da Sessão por uma exclusão
+/// recebida do celular: payload `DeletedItems`.
+const DELETED_EVENT: &str = "apagado";
 
 /// Payload do evento `enviado`: o Item mais se ele já foi confirmado pelo
 /// celular (Entregue) ou ainda está Pendente.
@@ -78,11 +82,32 @@ fn pasta_efetiva(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, S
 /// Evento que a janela escuta para desenhar a bolha de um Item novo.
 const ITEM_EVENT: &str = "item";
 
+/// Itens da Sessão sem os que já foram selecionados para exclusão: um upload
+/// em andamento fica em `Items` até terminar, mas a janela não o redesenha.
+fn recebidos_visiveis(items: &Items) -> Vec<Item> {
+    visiveis(|| items.snapshot(), |id| items.delete_requested(id))
+}
+
+/// A lista e a marca de exclusão vêm de locks separados, e o término de um
+/// upload selecionado tira o Item e a marca juntos. Consultar as marcas antes
+/// da lista final garante que quem estava marcado e ainda aparece nela segue
+/// escondido; quem terminou nesse meio tempo já não aparece.
+fn visiveis(listar: impl Fn() -> Vec<Item>, selecionado: impl Fn(u64) -> bool) -> Vec<Item> {
+    let marcados: HashSet<u64> = listar()
+        .iter()
+        .map(|item| item.id)
+        .filter(|&id| selecionado(id))
+        .collect();
+    listar()
+        .into_iter()
+        .filter(|item| !marcados.contains(&item.id))
+        .collect()
+}
+
 /// A Sessão atual, para a janela se alinhar ao abrir (ou reabrir).
 #[tauri::command]
 fn list_items(items: State<'_, Items>, order: State<'_, SessionOrder>) -> Vec<Recebido> {
-    items
-        .snapshot()
+    recebidos_visiveis(&items)
         .into_iter()
         .map(|item| Recebido {
             ordem: order.of(false, item.id),
@@ -162,6 +187,24 @@ async fn mudar_pasta(app: tauri::AppHandle) -> Result<bool, String> {
         .escolher_pasta(&config_dir, &pasta)
         .map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Fim da janela de Desfazer do Apagar tudo: `received` são ids de `Items`,
+/// `sent` as chaves da lista de enviados.
+#[tauri::command]
+async fn apagar_tudo(
+    app: tauri::AppHandle,
+    received: Vec<u64>,
+    sent: Vec<u64>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<server::Running>()
+            .ok_or_else(|| "servidor HTTP não está disponível".to_string())?
+            .apagar_tudo(&received, &sent)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Caminho do arquivo recebido de um Item que terminou de gravar. A consulta
@@ -390,6 +433,13 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     });
 
     let handle = app.clone();
+    items.on_delete(move |deleted| {
+        if let Err(e) = handle.emit(DELETED_EVENT, deleted) {
+            eprintln!("não foi possível avisar a janela da exclusão: {e}");
+        }
+    });
+
+    let handle = app.clone();
     let order = app.state::<SessionOrder>().inner().clone();
     outbox.on_change(move |item, entregue| {
         let payload = Enviado {
@@ -468,6 +518,7 @@ pub fn run() {
             estado_par_inicial,
             parear_de_novo,
             mudar_pasta,
+            apagar_tudo,
             read_file_bytes,
             read_sent_file_bytes,
             send_text,
@@ -537,6 +588,64 @@ mod tests {
         .is_err());
         assert!(super::previa_de_caminho(dir.path().to_string_lossy().into_owned()).is_err());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+
+    #[test]
+    fn snapshot_da_janela_esconde_upload_ja_selecionado_para_exclusao() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let concluido = items.start_file("b.bin".into(), 100);
+        items.file_done(concluido.id);
+        let texto = items.push_text("fica".into());
+
+        items.forget(&[enviando.id, concluido.id], vec![], false);
+
+        let ids: Vec<u64> = super::recebidos_visiveis(&items)
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, vec![texto.id]);
+        assert!(items.delete_requested(enviando.id));
+    }
+
+    #[test]
+    fn snapshot_da_janela_mantem_upload_nao_selecionado() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let outro = items.start_file("b.bin".into(), 100);
+
+        items.forget(&[outro.id], vec![], false);
+
+        let ids: Vec<u64> = super::recebidos_visiveis(&items)
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, vec![enviando.id]);
+    }
+
+    #[test]
+    fn snapshot_da_janela_nao_devolve_upload_que_termina_entre_a_lista_e_a_marca() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let texto = items.push_text("fica".into());
+        items.forget(&[enviando.id], vec![], false);
+
+        // O upload selecionado termina justo quando a marca é consultada:
+        // `file_done` tira o Item e a marca ao mesmo tempo.
+        let ids: Vec<u64> = super::visiveis(
+            || items.snapshot(),
+            |id| {
+                if id == enviando.id {
+                    items.file_done(id);
+                }
+                items.delete_requested(id)
+            },
+        )
+        .iter()
+        .map(|item| item.id)
+        .collect();
+
+        assert_eq!(ids, vec![texto.id]);
     }
 
     use super::executavel;
