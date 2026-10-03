@@ -81,10 +81,10 @@ test('PC accepts a drive root as Pasta without touching the real drive root', ()
     writeFileSync(join(directory, 'synchronice-qa-test-root.txt'), 'new QA file');
     const tracked = run('track');
     assert.equal(tracked.status, 0, tracked.stderr);
-    rmSync(join(directory, 'synchronice-qa-test-root.txt'));
     const cleaned = run('clean');
     assert.equal(cleaned.status, 0, cleaned.stderr);
-    assert.deepEqual(JSON.parse(cleaned.stdout), [{ path: `${root}synchronice-qa-test-root.txt`, destination: 'ja ausente' }]);
+    assert.deepEqual(JSON.parse(cleaned.stdout), [{ path: `${root}synchronice-qa-test-root.txt`, destination: 'remocao permanente' }]);
+    assert.equal(existsSync(join(directory, 'synchronice-qa-test-root.txt')), false);
   } finally {
     const unmounted = spawnSync('subst.exe', [`${drive}:`, '/D'], { encoding: 'utf8' });
     assert.equal(unmounted.status, 0, unmounted.stderr);

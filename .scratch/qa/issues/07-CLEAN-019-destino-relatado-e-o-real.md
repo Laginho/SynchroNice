@@ -1,5 +1,5 @@
 # CLEAN-019: Destino relatado pela limpeza é o destino real (celular e PC)
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -90,6 +90,17 @@ permanente.
   presente no `clean`, e o destino relatado conferido. Critério 8.
 
 ## Comments
+
+- Stage 2 (2026-10-03): seams exercitadas pelos wrappers `phone.ps1 clean`
+  (push real do wrapper, adb falso e query executada por sh) e `pc.ps1 clean`
+  (Pasta real e drive subst). Callers examinados: `clean` consome o manifesto
+  de `push`/`track`; `Media-Uri` também atende `share`, que permanece intacto.
+  Regressões cobertas pelos testes existentes: lista vazia/repetição, arquivos
+  alterados ou anteriores e uploads interrompidos. Red: comando focado
+  `node --test --test-name-pattern='cleanup reports|PC accepts' qa/phone.test.mjs qa/pc.test.mjs`
+  deu 9 testes, 0 passando, 9 falhando (inclui o agrupador dos 7 cenários).
+  Falhas: query chega em 8 argumentos; confirmação falha perde o destino real;
+  Downloads não é tentado; rm silencioso perde tracked; subst relata Lixeira.
 
 - `qa/phone.ps1:226` passa o extra
   `android:query-arg-match-trashed:i:1` à query de confirmação. O
