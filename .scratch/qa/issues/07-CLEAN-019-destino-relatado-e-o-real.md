@@ -1,5 +1,5 @@
 # CLEAN-019: Destino relatado pela limpeza é o destino real (celular e PC)
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -214,3 +214,12 @@ Verdict: Reopen — critério 7: atalho reciclado é relatado como remoção per
   Red no Windows real: `node --test qa/pc.test.mjs`, 2 testes, 1 passou e
   1 falhou: o .txt é relatado corretamente, mas o .lnk dá
   `remocao permanente` em vez de `Lixeira do Windows`.
+- Reabertura corrigida: `System.FileName` conserva a extensão `.lnk` na
+  reconstrução do caminho original; conferência de nova entrada e SHA-256
+  preservada. Teste vermelho no commit 614420c, correção sem testes no
+  c7618dc. Green focado: 2/2, incluindo o caso subst e preservação do alvo
+  do atalho. Gate completo em primeiro plano: exit 0, `gate: passou`;
+  Rust 83/83, UI 61/61, QA 34/34, formatação, Clippy e typecheck passaram.
+  Android `check` passou (testes UP-TO-DATE). Diff final limitado aos dois
+  Primary files do PC e ao ticket, sem alteração dos critérios ou do celular.
+  Stage 2 encerra em to-review; re-review independente ainda pendente.
