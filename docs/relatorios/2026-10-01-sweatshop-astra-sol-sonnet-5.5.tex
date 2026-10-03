@@ -1,0 +1,550 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs,array,tabularx,longtable}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+\emergencystretch=2em
+
+\definecolor{sol}{HTML}{3B6EA8}
+\definecolor{ocioso}{HTML}{BBBBBB}
+\definecolor{perda}{HTML}{C0504D}
+
+\title{Sweatshop: apagar tudo, em quatro escalações\\\large astra low, sol high, sol high + hard sol max e sonnet-5.5 high + hard xhigh no stage 2; gpt-6.1-sol (max) no stage 3}
+\author{Foreman, sessão \texttt{sweatshop/2026-10-01-2019}}
+\date{1\textsuperscript{o} a 3 de outubro de 2026}
+
+\begin{document}
+\shorthandoff{"}
+\maketitle
+
+\section*{Resumo}
+
+Run longo sobre as filas \texttt{.scratch/core/} e \texttt{.scratch/android/}:
+colar imagem no Android (SYN-021), o BUG-003 (o PC perdia os enviados ao
+recarregar), a bandeja de envio do PC (SYN-020) e o ``Apagar tudo'' nos dois
+lados. O ``Apagar tudo'' (SYN-019 e SYN-027 originais) foi fatiado pelo proxy
+no meio do run em quatro tickets: SYN-019, SYN-027, SYN-028 e SYN-029. O
+stage 3 foi \texttt{gpt-6.1-sol max} do começo ao fim; o stage 2 trocou
+três vezes, por pedido do humano, sempre na linha de comando
+(\texttt{-Models}), nunca no binding.
+
+\begin{itemize}
+  \item \textbf{Produzido:} \textbf{7 tickets mergeados} na sessão, todos
+        \emph{Approve}; SYN-019 com \texttt{Review: human} (backend do Apagar
+        tudo: rota nova do protocolo e originais da Pasta para a Lixeira). A
+        fila ficou vazia (``Nothing runnable''). PR de sessão:
+        \href{https://github.com/Laginho/SynchroNice/pull/9}{\#9}.
+  \item \textbf{Custo:} \textbf{\$83,91} a preço de lista em 30 estágios com
+        preço, mais 12 sem preço (7 erros de API, 4 timeouts e a revisão do
+        SYN-020 que chegou aos 60 min). Por modelo: sol max \$27,85 (+9 sem
+        preço), sonnet-5.5 xhigh \$23,10, astra low \$19,03 (+2), sonnet-5.5
+        high \$7,74, sol high \$6,21 (+1). 1180 min de estágio em 28\,h\,35
+        de relógio; 185,0\,M tokens de entrada (97,7\,\% em cache) e 1,07\,M
+        de saída.
+  \item \textbf{O que deu errado:} \textbf{a cota do Codex}. Cinco limites de
+        uso em 28 horas: o primeiro, com data na mensagem, derrubou o run 1; os
+        outros quatro deixaram o driver dormindo 464 min no total. Somados a
+        quatro timeouts e dois estágios que falharam por permissão, 289 dos
+        1180 min de estágio foram perdidos.
+  \item \textbf{Veredito provisório:} \texttt{sonnet-5.5 high} é o
+        implementador mais barato e rápido do run (14 min, \$0,6--2,3 por
+        implementação) e passou dois de quatro na primeira; \texttt{sonnet-5.5
+        xhigh} fechou os tickets duros (SYN-019, SYN-028, SYN-029), mas o
+        SYN-029 custou \$14,50 em duas implementações. \texttt{astra low} saiu
+        caro (\$8,8--10,2 por implementação) para um ticket só. A revisão em
+        sol max continua dura e reproduz no emulador, mas fez
+        \emph{drip-feeding} duas vezes.
+\end{itemize}
+
+\section{Linha do tempo}
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+\multicolumn{2}{@{}l}{\textbf{01/10, run 1: astra low $\to$ sol max}}\\
+20:19 & Lançamento, sem hard na escalação. SYN-021 implementação (30 min,
+        \$8,82).\\
+21:08 & SYN-021 revisão 1: \textbf{reabre} (colagem mista, Voltar em
+        Configurações, tag de QA). Esta máquina não tinha emulador; um servidor
+        \texttt{adb} órfão segurou o \texttt{codex exec} até o limite de 40 min.\\
+21:56 & SYN-021 implementação 2 (27 min, \$10,21); revisão 2 mergeia às
+        22:17. O foreman instala emulador e imagem API 37 no SDK do D: e cria o
+        AVD a pedido do humano.\\
+22:47 & BUG-003: limite de uso do Codex com data (``1:50 AM''); o driver
+        lê como erro de API, relança, erra de novo e para. O humano usa um
+        reset.\\
+\multicolumn{2}{@{}l}{\textbf{01--02/10, runs 2 e 3: sol high (+ hard sol max) $\to$ sol max}}\\
+22:49 & Relançado com sol high. 23:14: o humano pede hard em sol max.\\
+23:31 & BUG-003 implementação (41 min). O proxy fatia SYN-019/SYN-027 em
+        quatro tickets (\texttt{608165d}) e o driver volta com hard sol max.\\
+00:22 & BUG-003 revisão: timeout aos 40 min (build do PC e QA). Relançado
+        uma vez (causa de infraestrutura).\\
+00:45 & Limite de uso; o driver dorme até 03:51.\\
+04:31 & BUG-003 revisão: timeout de novo, já com os achados commitados
+        (\texttt{1e8b32b}). \textbf{O proxy reabre} pelo veredito, sem terceira
+        revisão. Relançado com \texttt{-ReviewMinutes 60}.\\
+05:09 & BUG-003 implementação 2 (28 min); revisão 2 mergeia às 05:55.\\
+06:24 & SYN-019 (hard, sol max): limite de uso, dorme até 08:52.\\
+09:37 & SYN-019: timeout aos 45 min com 7 commits; tentativa 2 continua da
+        branch e chega a \texttt{to-review} às 09:54.\\
+10:36 & SYN-019 revisão 1: \textbf{reabre} (originais apagados, risco de
+        concorrência). A implementação 2 estoura os 45 min às 11:21: é a
+        segunda tentativa do ticket e ele vai a \texttt{blocked}.\\
+11:53 & SYN-020 implementação (sol high, 32 min). Revisão 1 \textbf{reabre}
+        aos 60 min (imagem $>$10\,MiB ganha miniatura).\\
+13:02 & Limite de uso. O humano troca o stage 2 para \texttt{sonnet-5.5 high},
+        hard \texttt{sonnet-5.5 xhigh}. O proxy manda retomar o SYN-019 da
+        branch.\\
+\multicolumn{2}{@{}l}{\textbf{02--03/10, runs 6 e 7: sonnet-5.5 high + hard xhigh $\to$ sol max}}\\
+14:03 & As duas primeiras sessões Claude falham: o driver só liberava
+        \texttt{Bash(powershell:*)} e o Sonnet usa a ferramenta PowerShell; um
+        \texttt{pc.exe} órfão travava o \texttt{cargo}. O humano aprova a
+        correção do driver (\texttt{7972d73}, Agent-Skills).\\
+15:02 & SYN-019 implementação (17 min). A revisão é recusada pelo Codex
+        (``cybersecurity risk'') ao reproduzir um deadlock; o driver relança.\\
+15:54 & SYN-019 revisão: \textbf{reabre} pela inversão de locks. Implementação
+        (29 min) e revisão mergeiam às 16:42.\\
+16:59 & SYN-027 (17 + 17 min), mergeado de primeira às 17:16.\\
+17:32 & SYN-020 retomado (16 min). Limite de uso às 17:35, até 18:54; revisão
+        2 mergeia às 19:39 (45 min).\\
+19:47 & SYN-028 (8 min, sem testes por ordem do ticket). Revisão 1
+        \textbf{reabre} (três corridas da UI). O stage 2 chama o proxy, que
+        aprova lápides num módulo puro (\texttt{442dc1a}). Revisão 2
+        \textbf{reabre} às 20:55; implementação 3 em xhigh; mergeado às 21:42.\\
+22:35 & SYN-029 implementação (52 min, \$9,72). Revisão 1 \textbf{reabre} com
+        sete achados às 23:22. Implementação 2 (42 min) e revisão 2 mergeiam às
+        00:54 de 03/10. ``Nothing runnable''; PR \#9 com 7 tickets.\\
+\bottomrule
+\end{tabularx}
+
+\section{Métricas por estágio}
+
+As 42 linhas de \texttt{.scratch/run-log.md} do run (dia/hora em que o
+estágio terminou). ``?'' é estágio que o driver não precificou: erro de API,
+timeout ou sessão morta no limite.
+
+\medskip
+\noindent{\footnotesize
+\begin{longtable}{@{}l l l r r r r r l@{}}
+\toprule
+Fim & Estágio & Modelo & Min & Entrada & Cache & Saída & Custo & Desfecho\\
+\midrule
+\endhead
+01/20:49 & S21 impl. & astra low & 30 & 6,7\,M & 98\,\% & 14\,k & 8,819 & to-review\\
+01/21:29 & S21 rev. & sol max & 39 & 4,1\,M & 97\,\% & 21\,k & 1,239 & reaberto\\
+01/21:56 & S21 impl. & astra low & 27 & 8,5\,M & 99\,\% & 14\,k & 10,208 & to-review\\
+01/22:17 & S21 rev. & sol max & 22 & 2,3\,M & 96\,\% & 13\,k & 0,761 & mergeado\\
+01/22:47 & B3 impl. & astra low & 29 & ? & ? & ? & ? & \textcolor{perda}{erro de API}\\
+01/22:47 & B3 impl. & astra low & 0 & ? & ? & ? & ? & \textcolor{perda}{erro de API}\\
+01/23:31 & B3 impl. & sol high & 41 & 9,3\,M & 98\,\% & 28\,k & 2,525 & to-review\\
+02/00:22 & B3 rev. & sol max & 40 & ? & ? & ? & ? & \textcolor{perda}{timeout}\\
+02/00:45 & B3 rev. & sol max & 20 & ? & ? & ? & ? & \textcolor{perda}{erro de API}\\
+02/04:31 & B3 rev. & sol max & 40 & ? & ? & ? & ? & \textcolor{perda}{timeout}\\
+02/05:09 & B3 impl. & sol high & 28 & 6,4\,M & 98\,\% & 22\,k & 1,735 & to-review\\
+02/05:55 & B3 rev. & sol max & 46 & 9,9\,M & 98\,\% & 45\,k & 2,731 & mergeado\\
+02/06:24 & S19 impl. & sol max & 30 & ? & ? & ? & ? & \textcolor{perda}{erro de API}\\
+02/09:37 & S19 impl. & sol max & 45 & ? & ? & ? & ? & \textcolor{perda}{timeout, nova tentativa}\\
+02/09:54 & S19 impl. & sol max & 17 & 4,0\,M & 94\,\% & 19\,k & 1,443 & to-review\\
+02/10:36 & S19 rev. & sol max & 42 & 7,3\,M & 98\,\% & 44\,k & 2,163 & reaberto\\
+02/11:21 & S19 impl. & sol max & 45 & ? & ? & ? & ? & \textcolor{perda}{timeout, blocked}\\
+02/11:53 & S20 impl. & sol high & 32 & 6,9\,M & 98\,\% & 31\,k & 1,945 & to-review\\
+02/12:53 & S20 rev. & sol max & 60 & ? & ? & ? & ? & reaberto\\
+02/13:02 & S20 impl. & sol high & 8 & ? & ? & ? & ? & \textcolor{perda}{erro de API}\\
+02/14:03 & S19 impl. & sonnet xhigh & 2 & 1,4\,M & 96\,\% & 7\,k & 0,905 & \textcolor{perda}{falhou, blocked}\\
+02/14:13 & S20 impl. & sonnet high & 10 & 2,1\,M & 97\,\% & 8\,k & 1,011 & \textcolor{perda}{falhou, nova tentativa}\\
+02/15:02 & S19 impl. & sonnet xhigh & 17 & 2,8\,M & 97\,\% & 19\,k & 1,568 & to-review\\
+02/15:20 & S19 rev. & sol max & 18 & ? & ? & ? & ? & \textcolor{perda}{erro de API}\\
+02/15:54 & S19 rev. & sol max & 34 & 7,6\,M & 98\,\% & 39\,k & 2,200 & reaberto\\
+02/16:23 & S19 impl. & sonnet xhigh & 29 & 5,9\,M & 97\,\% & 62\,k & 3,863 & to-review\\
+02/16:42 & S19 rev. & sol max & 19 & 5,2\,M & 97\,\% & 23\,k & 1,533 & mergeado\\
+02/16:59 & S27 impl. & sonnet high & 17 & 3,4\,M & 97\,\% & 34\,k & 2,263 & to-review\\
+02/17:16 & S27 rev. & sol max & 17 & 3,5\,M & 97\,\% & 20\,k & 1,068 & mergeado\\
+02/17:32 & S20 impl. & sonnet high & 16 & 1,2\,M & 97\,\% & 5\,k & 0,615 & to-review\\
+02/17:35 & S20 rev. & sol max & 2 & ? & ? & ? & ? & \textcolor{perda}{erro de API}\\
+02/19:39 & S20 rev. & sol max & 45 & 12,7\,M & 99\,\% & 55\,k & 3,440 & mergeado\\
+02/19:47 & S28 impl. & sonnet high & 8 & 2,7\,M & 95\,\% & 16\,k & 1,860 & to-review\\
+02/20:20 & S28 rev. & sol max & 32 & 6,4\,M & 98\,\% & 43\,k & 1,962 & reaberto\\
+02/20:35 & S28 impl. & sonnet high & 15 & 3,2\,M & 96\,\% & 25\,k & 1,989 & to-review\\
+02/20:55 & S28 rev. & sol max & 20 & 4,9\,M & 98\,\% & 23\,k & 1,425 & reaberto\\
+02/21:20 & S28 impl. & sonnet xhigh & 25 & 3,5\,M & 97\,\% & 38\,k & 2,260 & to-review\\
+02/21:42 & S28 rev. & sol max & 22 & 5,4\,M & 98\,\% & 26\,k & 1,574 & mergeado\\
+02/22:35 & S29 impl. & sonnet xhigh & 52 & 9,8\,M & 95\,\% & 189\,k & 9,723 & to-review\\
+02/23:22 & S29 rev. & sol max & 48 & 9,3\,M & 98\,\% & 54\,k & 2,712 & reaberto\\
+03/00:04 & S29 impl. & sonnet xhigh & 42 & 14,6\,M & 98\,\% & 89\,k & 4,776 & to-review\\
+03/00:54 & S29 rev. & sol max & 49 & 14,0\,M & 99\,\% & 46\,k & 3,595 & mergeado\\
+\midrule
+\multicolumn{3}{@{}l}{Total} & 1180 & 185,0\,M & 97,7\,\% & 1072\,k & 83,91 & 30 com preço\\
+\multicolumn{3}{@{}l}{Perdido} & 289 & ? & & ? & ? & 12 sem preço\\
+\bottomrule
+\end{longtable}}
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar stacked, bar width=20pt, width=\linewidth, height=6.4cm,
+  ylabel={Minutos de estágio}, ymin=0,
+  symbolic x coords={SYN-021,BUG-003,SYN-019,SYN-020,SYN-027,SYN-028,SYN-029},
+  xtick=data, x tick label style={font=\small},
+  legend style={at={(0.02,0.97)},anchor=north west,draw=none},
+  axis lines*=left, ymajorgrids, grid style={gray!25}]
+\addplot[fill=sol,draw=none] coordinates
+  {(SYN-021,118) (BUG-003,115) (SYN-019,158) (SYN-020,153) (SYN-027,34) (SYN-028,122) (SYN-029,191)};
+\addplot[fill=perda,draw=none] coordinates
+  {(SYN-021,0) (BUG-003,129) (SYN-019,140) (SYN-020,20) (SYN-027,0) (SYN-028,0) (SYN-029,0)};
+\legend{estágio concluído, perdido (erro de API, timeout, falha)}
+\end{axis}
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Onde foi o custo.} Por ticket, só estágios com preço: SYN-021
+\$21,03, SYN-029 \$20,81, SYN-019 \$13,68 (+6 sem preço), SYN-028 \$11,07,
+SYN-020 \$7,01 (+3), BUG-003 \$6,99 (+5), SYN-027 \$3,33. O SYN-021 é caro
+pelo implementador (astra low gastou \$19,03 em duas implementações); o
+SYN-029 pela primeira implementação em xhigh (189\,k tokens de saída, a maior
+do run). A perda foi de tempo: 289 min em estágios sem desfecho (107 de erro
+de API, 170 de timeout, 12 de falha) e mais 464 min de relógio esperando a
+cota do Codex voltar, fora dos estágios.
+
+\section{Comparação}
+
+Números de \texttt{run-log.md}. O run de 30/09--01/10 é o do relatório
+\path{2026-09-30-sweatshop-gpt-6.1-sol.pdf}.
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}X r r@{}}
+\toprule
+& sol high, 30/09--01/10 & misto, 01--03/10\\
+\midrule
+Estágios no log & 16 & 42\\
+Tickets mergeados & 5 & 7\\
+Minutos de estágio por ticket mergeado & 70 & 169\\
+Minutos por ticket, mediana & 51 (13--148) & 173 (34--298)\\
+Custo por ticket mergeado (com preço) & \$0,87--8,01 & \$3,33--21,03\\
+Reaberturas & 3 & 8 (7 no log + BUG-003)\\
+Minutos por implementação até \texttt{to-review}, média & 16,4 & 26,4\\
+Minutos por revisão concluída, média & 14,5 & 35,4\\
+Custo registrado & \$15,97 & \$83,91\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+Ressalva forte: os tickets são de outro tipo. O kit de QA eram scripts; aqui
+há concorrência no backend Rust (locks, Lixeira), corridas na UI do PC e o app
+Android, quase sempre com QA no emulador na revisão. A revisão média subiu de
+14,5 para 35,4 min por isso.
+
+\paragraph{Por implementador, neste run} (revisões concluídas, contando a
+reabertura do BUG-003 decidida pelo proxy; anedota, todas abaixo de 10):
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}X r r r r@{}}
+\toprule
+Implementador & Implementações até review & Min, média & Revisões & Reabertas\\
+\midrule
+gpt-6-astra low & 2 & 28,5 & 2 & 1\\
+gpt-6.1-sol high & 3 & 33,7 & 3 & 2\\
+gpt-6.1-sol max (hard) & 1 & 17,0 & 1 & 1\\
+sonnet-5.5 high & 4 & 14,0 & 4 & 2\\
+sonnet-5.5 xhigh (hard) & 5 & 33,0 & 5 & 2\\
+\bottomrule
+\end{tabularx}}
+
+\section{Atribuição das reaberturas}
+
+Sete rodadas reabertas, 22 achados. Seis rodadas têm linha \texttt{reopened}
+no log; a rodada 1 do BUG-003 não tem: a revisão estourou o tempo depois de
+commitar os achados (\texttt{1e8b32b}) e o proxy reabriu pelo veredito, então o
+driver gravou timeout. O revisor de todas foi \texttt{gpt-6.1-sol max}, que não é
+o modelo do foreman (Opus 5.5); a classificação foi feita por um subagente
+Opus 5.5 com a rubrica e as evidências (o ticket no stage 2, o diff da rodada e
+a revisão), e o foreman só corrigiu a data das linhas do SYN-029 para 02/10, a
+do log. Linhas em \path{.scratch/reopen-attribution.md}.
+
+\medskip
+\noindent{\scriptsize\sloppy
+\begin{longtable}{@{}l c >{\raggedright\arraybackslash}p{1.7cm} >{\raggedright\arraybackslash}p{2.4cm} >{\raggedright\arraybackslash}p{4.0cm} >{\raggedright\arraybackslash}p{4.2cm}@{}}
+\toprule
+Ticket & R & Impl. & Rótulo & Achado & Porquê\\
+\midrule
+\endhead
+BUG-003 & 1 & gpt-6.1-sol high & S2-explícito/código ? & Abrir uma segunda instância com a mesma pasta de dados apaga a cópia de print de uma Sessão viva: \texttt{Outbox::new} e o \texttt{Drop} de \texttt{Inner} removem a pasta \texttt{session-files} inteira & O critério 3 e a decisão "a cópia vive até a Sessão acabar" estão no ticket, e a falta de instância única já está anotada no SYN-005 e em \texttt{.scratch/qa/spec.md}; o ? porque a própria decisão do stage 1 dizia "a pasta é varrida quando a fila é criada", e separar instância viva de morta pede um mecanismo (pasta por instância com lock), quase S1. O revisor de 23:42, que estourou o tempo, já suspeitava deste ponto (1e8b32b)\\
+BUG-003 & 1 & gpt-6.1-sol high & S2-implícito & O \texttt{Promise.all} de \texttt{list\_items} e \texttt{list\_sent\_items} rejeita quando a fila não foi criada, e \texttt{main()} aborta antes de desenhar os recebidos e de ligar composer, drop, colar e engrenagem & Regressão da própria mudança num caminho de falha; o modo de falha já tinha precedente na correção 2 da revisão de SYN-005. Sem teste a cobrar: \texttt{main.ts} não tem seam (1e8b32b)\\
+SYN-019 & 1 & gpt-6.1-sol max & S2-implícito & \texttt{Items::file\_done} é chamado com \texttt{received\_files} travado, e um observador de \texttt{Done} que consulta \path{Running::caminho_do_arquivo} trava a conclusão do upload & Regressão da costura pública que o próprio stage 2 escreveu: antes do diff o lock era solto antes do callback. Nada no ticket fala de callbacks (8ac2715)\\
+SYN-019 & 1 & gpt-6.1-sol max & S2-explícito/código & Um \texttt{enqueue\_file\_from\_path} entre a captura de \texttt{session\_items} e o descarte registra um envio cujo original vai para a Lixeira & A decisão "o original de quem enviou nunca é tocado" está no ticket, e o stage 2 listou originais de enviados no próprio plano; a corrida é do código que ele escreveu. Achado estático, que o teste vermelho de \texttt{4c01564} confirmou depois (8ac2715)\\
+SYN-019 & 1 & gpt-6.1-sol max & S2-explícito/código & Excluir um recebido antigo entre o rename e o registro do caminho de um upload novo, com o mesmo caminho e o mesmo tamanho, recicla o arquivo do upload novo & O critério 7 e a decisão "nenhum Item mais novo da Sessão usa o mesmo caminho" estão no ticket, e o gancho \texttt{after\_file\_rename} já mostrava essa janela. O teste vermelho de \texttt{272a338} confirmou depois (8ac2715)\\
+SYN-019 & 1 & gpt-6.1-sol max & S2-explícito/código & Receber R, reenviar o arquivo de R como S, excluir só S e depois só R apaga o original, porque a proteção só conta os enviados que ainda estão na lista & A decisão "o original de quem enviou nunca é tocado" e o \texttt{CONTEXT.md} dizem isso, e a sequência é simples, sem corrida. Reproduzido no kit (8ac2715)\\
+SYN-019 & 1 & gpt-6.1-sol max & S2-explícito/código ? & Reenviar uma cópia interna por um caminho com outra capitalização e excluir só a cópia apaga o original do outro enviado: \texttt{outbox.rs} compara \texttt{PathBuf} literalmente & Os critérios 7 e 8 e a mesma regra do original estão no ticket. Lembrar que caminhos do Windows não diferenciam maiúsculas é cuidado, não decisão, mas é conhecimento de fora do ticket, daí o ?. Reproduzido no kit (8ac2715)\\
+SYN-019 & 2 & sonnet-5.5 xhigh & S2-implícito & A exclusão trava \texttt{received\_files} e depois espera \texttt{Items}, enquanto \texttt{file\_done} segura \texttt{Items} durante o \texttt{on\_new}, e o observador que consulta o caminho espera o mapa: inversão de locks que trava exclusão e upload & O caminho de concorrência do callback que o stage 2 tinha acabado de corrigir; \texttt{f7012fb} tirou só o autodeadlock. Drip-feeding: a ordem mapa $\to$ Items já estava em \texttt{e031567}, e o revisor admite que a primeira passagem deixou essa variante passar. Churn parcial: \texttt{finish\_received\_file}, que também consulta \texttt{Items} com o mapa travado, nasceu da correção do rename pedida pela rodada 1 (2b8b512)\\
+SYN-020 & 1 & gpt-6.1-sol high & S2-explícito/código & Uma imagem colada acima de 10 MiB ainda ganha miniatura: \texttt{adicionarImagem} cria a URL para todo \texttt{File} sem olhar o tamanho & O critério 11 diz "o de imagem, colada ou por caminho" e "acima de 10 MiB aparece como chip de documento"; o stage 2 só limitou o caminho que passa por \texttt{previa\_de\_caminho}. Reproduzido com \texttt{paste-image} nativo (e94db12)\\
+SYN-020 & 1 & gpt-6.1-sol high & S2-implícito & Oito commits do stage 2 não têm o corpo explicativo que o fluxo exige & Convenção que o \texttt{ticket-flow} já impõe. É uma divergência de processo e não foi o motivo da reabertura (e94db12)\\
+SYN-028 & 1 & sonnet-5.5 high & S2-explícito/código & Quando o timer de 5 s expira, \texttt{janelaDeDesfazer} é zerada antes de o \texttt{apagar\_tudo} voltar, e progresso ou ACK de upload recriam a bolha selecionada, que fica na tela com o backend vazio & O critério 1 diz "o clique esvazia o chat"; a corrida é do código assíncrono que o próprio stage 2 escreveu. Reproduzido com IPC retido. Sem \texttt{/teste}: o ticket mandava o stage 2 não escrever testes (293a2bd)\\
+SYN-028 & 1 & sonnet-5.5 high & S2-explícito/código & Um snapshot atrasado do Desfazer, e da carga inicial, devolve a bolha de um Item que o celular já excluiu & O critério 4 está no ticket, e o stage 2 anotou que o Desfazer refaz o snapshot. Reproduzido duas vezes no Desfazer; a variante da carga inicial foi conferida só no código. O ticket mandava não escrever testes (293a2bd)\\
+SYN-028 & 1 & sonnet-5.5 high & S2-explícito/código & Recarregar depois do Apagar tudo mostra de novo um upload selecionado que ainda está recebendo, porque \texttt{list\_items} não filtra a exclusão diferida & O critério 3 está no ticket, e a exclusão diferida do upload é uma decisão do SYN-019, que o ticket manda ler. Reproduzido no caminho estável. Corrigir pedia só cuidado; o \texttt{proxy} decidiu as costuras de teste, não a correção (293a2bd)\\
+SYN-028 & 2 & sonnet-5.5 high & S2-explícito/código & \texttt{recebidos\_visiveis} lê \texttt{Items::snapshot()} e \texttt{delete\_requested()} com locks separados, e um upload que termina entre as duas leituras volta na recarga & O critério 3 está no ticket; o defeito é do helper novo da rodada 2, não uma omissão da primeira passagem. Não é churn: o conselho da rodada 1 só pedia o filtro, e a corrida está na implementação. O teste vermelho de \texttt{2905b50} confirmou depois (4502b82)\\
+SYN-028 & 2 & sonnet-5.5 high & S2-explícito/código & \texttt{main()} registra \texttt{item} e \texttt{enviado} antes de \texttt{apagado}, com um \texttt{await} entre eles, e um Item que chega e é excluído nesse intervalo fica como bolha residual & O critério 4 está no ticket; é a corrida de inicialização do código que o stage 2 escreveu. Drip-feeding: o código já estava em \texttt{09228ef}, e o revisor admite que foi omissão da primeira passagem. Reproduzido duas vezes (4502b82)\\
+SYN-029 & 1 & sonnet-5.5 xhigh & S2-explícito/código ? & Com o ACK incompleto, \texttt{files.delete(uri, null)} pula a checagem de tamanho e pode apagar um arquivo completo que foi alterado depois & A decisão "Segurança antes de apagar" (só a URI gravada e só com o tamanho do Item; na dúvida, não apaga) está no ticket. O ? porque a mesma prosa manda apagar o download que falha, e o eixo Spec classificou o achado como limpeza sem veto (41da116)\\
+SYN-029 & 1 & sonnet-5.5 xhigh & S2-implícito & Se a fila não consegue persistir a exclusão (\texttt{IOException}), \texttt{commitClear} derruba o app depois de já ter tirado bolhas, \texttt{submitted} e recebidos & Caminho de falha do código que o stage 2 escreveu; os caminhos de texto, composer e câmera já tratam erro de persistência, e o código novo não segue essa convenção (41da116)\\
+SYN-029 & 1 & sonnet-5.5 xhigh & S2-explícito/código & O prazo de 5 s mora no \texttt{ClearedNotice}, é cancelado quando as Configurações abrem e recomeça ao voltar, então a exclusão pode ser adiada sem fim & O critério 3 diz "Desfazer em até 5 s" e "sem desfazer, os arquivos saem". O próprio stage 2 registrou isso como "limite aceito" (3), o que não o tira do contrato. Reproduzido no emulador (41da116)\\
+SYN-029 & 1 & sonnet-5.5 xhigh & S2-explícito/código & Depois de um download interrompido, a URI parcial fica só no recibo \texttt{writing:}; \texttt{dropMessages} não apaga o arquivo e ainda impede a retomada & Os critérios 3 e 4 e a decisão "um arquivo ainda baixando é apagado quando o download termina ou falha" estão no ticket (41da116)\\
+SYN-029 & 1 & sonnet-5.5 xhigh & S2-explícito/código & Uma exclusão que chega entre o registro em \texttt{inFlightFiles} e a criação da bolha sai com ACK, e depois o recebimento cria uma bolha FAILED & O critério 4 e a decisão sobre download em andamento estão no ticket; a corrida é do código que o stage 2 escreveu. O limite (4) do stage 2 tratava de outro caso (41da116)\\
+SYN-029 & 1 & sonnet-5.5 xhigh & S2-explícito/código & A bolha de texto criada em \texttt{addOutgoing} ainda não tem UUID: se o Apagar tudo vence o enfileiramento, o id fica fora da exclusão e \texttt{queueText} envia o texto apagado & O critério 2 pede "ids de protocolo de todas as mensagens apagadas". O stage 2 registrou isso como "limite aceito" (2) (41da116)\\
+SYN-029 & 1 & sonnet-5.5 xhigh & S2-explícito/código ? & O centro do novo lixeira fica sob a barra de status e não responde ao toque no emulador & O critério 3 diz "o toque esvazia o chat", e a correção é só cuidado (\texttt{statusBarsPadding}). O ? porque o cabeçalho sem inset já existia antes do ticket: a ⚙ e o Voltar das Configurações têm o mesmo problema, e o lixeira só o herdou. Achado do QA (41da116)\\
+\bottomrule
+\end{longtable}}
+
+Totais: 17 S2-explícito/código (4 com ?), 0 S2-explícito/teste, 5
+S2-implícito, 0 S1, 0 S3. Todas as reaberturas são do implementador. O
+SYN-028 não tem \texttt{/teste} porque o ticket mandava o stage 2 não escrever
+testes na rodada 1.
+
+\paragraph{O que é do stage 3.} \emph{Drip-feeding} em duas rodadas, as duas
+admitidas pela própria revisão: SYN-019 rodada 2 (a ordem de locks mapa $\to$
+Items já estava em \texttt{e031567}) e SYN-028 rodada 2 (o ouvinte
+\texttt{apagado} registrado tarde já estava em \texttt{09228ef}). \emph{Churn}
+parcial no SYN-019 rodada 2: \texttt{finish\_received\_file}, que consulta
+\texttt{Items} com o mapa travado, nasceu da correção do rename que a rodada 1
+pediu.
+
+\paragraph{Limites ``aceitos'' pelo stage 2.} Dois dos sete achados do SYN-029
+(o prazo de 5\,s pausado nas Configurações e o texto sem UUID que escapa do
+Apagar tudo) estavam escritos no ticket pelo próprio stage 2 como limites
+aceitos. A rubrica os conta como S2-explícito/código: declarar não tira do
+contrato. É a recomendação 5.
+
+\section{Scoreboard}
+
+Saída de \path{sweatshop/scripts/scoreboard.ps1} sobre os quatro repositórios
+desta máquina com \path{.scratch/run-log.md} (SynchroNice, SIGAA-ME,
+PhysiSyst, slip), depois de registrar a atribuição acima. Cumulativo.
+
+\medskip
+\noindent{\scriptsize
+\begin{tabularx}{\linewidth}{@{}X r r r r r r@{}}
+\toprule
+Implementer & Stage runs & To review & Failed & Asked & Median min to review & Cost\\
+\midrule
+fable & 5 & 5 & 0 & 0 & 3m & ?\\
+sonnet & 121 & 75 & 31 & 15 & 7m & \$10.53 (4/121 priced)\\
+gpt-6-luna & 23 & 11 & 10 & 2 & 26m & ?\\
+gpt-6-sol & 6 & 5 & 1 & 0 & 17m & ?\\
+gpt-5.6-sol & 5 & 4 & 1 & 0 & 17m & ?\\
+gpt-6-astra & 18 & 11 & 6 & 1 & 8m & ?\\
+sonnet-5 xhigh & 11 & 6 & 2 & 3 & 8m & \$18.09 (11/11 priced)\\
+gpt-6.1-sol high & 38 & 33 & 0 & 5 & 8m & \$29.32 (38/38 priced)\\
+gpt-6-astra low & 2 & 2 & 0 & 0 & 30m & \$19.03 (2/2 priced)\\
+gpt-6.1-sol max & 3 & 1 & 2 & 0 & 17m & \$1.44 (1/3 priced)\\
+sonnet-5.5 xhigh & 9 & 8 & 1 & 0 & 25m & \$35.54 (9/9 priced)\\
+sonnet-5.5 high & 16 & 15 & 1 & 0 & 7m & \$28.15 (16/16 priced)\\
+opus-5.5 & 35 & 31 & 4 & 0 & 6m & \$0.72 (1/35 priced)\\
+opus-5.5 high & 2 & 2 & 0 & 0 & 9m & \$2.31 (2/2 priced)\\
+gpt-6-astra medium & 4 & 2 & 0 & 2 & 11m & \$8.01 (4/4 priced)\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+\noindent{\scriptsize
+\begin{tabular}{@{}l l r r r r r r r@{}}
+\toprule
+Implementador & Revisor & Reviews & Reabertos & Taxa & Por S2 & Taxa S2 & Sem rótulo & S2 na revisão\\
+\midrule
+fable & fable & 4 & 1 & 25\% & 0 & $\geq$0\% & 1 & 0\\
+? & opus & 4 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+sonnet & opus & 68 & 20 & 29\% & 1 & $\geq$1\% & 19 & 0\\
+gpt-6-luna & gpt-6-sol & 11 & 7 & 64\% & 0 & $\geq$0\% & 7 & 0\\
+gpt-6-sol & gpt-5.6-sol & 5 & 4 & 80\% & 0 & $\geq$0\% & 4 & 0\\
+gpt-5.6-sol & gpt-6-astra & 4 & 3 & 75\% & 0 & $\geq$0\% & 3 & 0\\
+gpt-6-astra & gpt-5.6-sol & 11 & 5 & 45\% & 0 & $\geq$0\% & 5 & 0\\
+sonnet-5 xhigh & opus-5.5 xhigh & 5 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+gpt-6.1-sol high & gpt-6.1-sol max & 32 & 8 & 25\% & 7 & 22\% & 0 & 0\\
+gpt-6-astra low & gpt-6.1-sol max & 2 & 1 & 50\% & 1 & 50\% & 0 & 0\\
+gpt-6.1-sol max & gpt-6.1-sol max & 1 & 1 & 100\% & 1 & 100\% & 0 & 0\\
+sonnet-5.5 xhigh & gpt-6.1-sol max & 7 & 3 & 43\% & 3 & 43\% & 0 & 0\\
+sonnet-5.5 high & gpt-6.1-sol max & 12 & 3 & 25\% & 3 & 25\% & 0 & 0\\
+sonnet & fable & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+opus-5.5 & fable-5.1 & 30 & 1 & 3\% & 0 & $\geq$0\% & 1 & 0\\
+opus-5.5 high & fable-5.1 high & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+opus-5.5 high & opus-5.5 xhigh & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+sonnet-5.5 high & opus-5.5 xhigh & 3 & 0 & 0\% & 0 & 0\% & 0 & 3\\
+sonnet-5.5 xhigh & opus-5.5 xhigh & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+gpt-6-astra medium & gpt-6-astra xhigh & 2 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+\bottomrule
+\end{tabular}}
+
+\medskip
+\noindent{\scriptsize
+\begin{tabularx}{\linewidth}{@{}X r r r r r r@{}}
+\toprule
+Implementer $\to$ Reviewer & Rounds & S2 explicit code & S2 explicit test & S2 implicit & S1 & S3 noise\\
+\midrule
+sonnet $\to$ opus & 1 & 1 & 1 & 0 & 0 & 0\\
+gpt-6.1-sol high $\to$ gpt-6.1-sol max & 9 & 5 & 0 & 9 & 1 & 0\\
+gpt-6-astra low $\to$ gpt-6.1-sol max & 1 & 2 & 0 & 1 & 0 & 0\\
+gpt-6.1-sol max $\to$ gpt-6.1-sol max & 1 & 4 & 0 & 1 & 0 & 0\\
+sonnet-5.5 xhigh $\to$ gpt-6.1-sol max & 3 & 7 & 0 & 3 & 2 & 0\\
+sonnet-5.5 high $\to$ gpt-6.1-sol max & 3 & 5 & 0 & 2 & 3 & 0\\
+sonnet-5.5 high $\to$ opus-5.5 xhigh & 3 & 1 & 2 & 0 & 0 & 0\\
+\bottomrule
+\end{tabularx}}
+
+\paragraph{O que mudou desde o relatório de 30/09.}
+\begin{itemize}
+  \item \textbf{Linhas novas sob \texttt{gpt-6.1-sol max}:} \texttt{sonnet-5.5
+        xhigh} (7 revisões, 43\,\% de reabertura, S2 43\,\%),
+        \texttt{gpt-6-astra low} (2) e \texttt{gpt-6.1-sol max} implementando
+        (1). As três estão abaixo de 10 revisões: anedota.
+  \item \textbf{\texttt{sonnet-5.5 high} $\to$ \texttt{gpt-6.1-sol max}}
+        passou de 2 para 12 revisões e de 50\,\% para 25\,\% de reabertura (S2
+        25\,\%). Ainda perto de anedota.
+  \item \textbf{\texttt{gpt-6.1-sol high} $\to$ \texttt{gpt-6.1-sol max}:} de
+        29 para 32 revisões, reabertura de 28\,\% para 25\,\%, S2 de 24\,\% para
+        22\,\%. Sem reabertura sem rótulo: não é piso. A rodada 1 do BUG-003
+        entra nos achados (9 rodadas) mas não nas revisões, porque o log a
+        gravou como timeout.
+  \item \textbf{Implementadores sob o mesmo revisor} (\texttt{gpt-6.1-sol
+        max}): \texttt{gpt-6.1-sol high} 22\,\% S2 em 32 revisões e
+        \texttt{sonnet-5.5 high} 25\,\% em 12. Iguais com essas amostras. Por
+        estágio, sol high custa \$0,77 e sonnet-5.5 high \$1,76 a preço de
+        lista; as medianas até review são 8 e 7 min.
+  \item \textbf{xhigh não reabriu menos que high} sob o mesmo revisor (43\,\%
+        em 7 contra 25\,\% em 12), embora tenha recebido os tickets duros.
+        Anedota; o par só diz que o esforço maior não comprou a primeira
+        aprovação nos tickets de concorrência.
+\end{itemize}
+
+\section{Observações sobre os modelos}
+
+\subsection*{gpt-6-astra (low), implementação}
+\begin{itemize}
+  \item \textbf{Caro para o que entregou:} 6,7 e 8,5\,M tokens de entrada,
+        \$8,82 e \$10,21 por implementação de um ticket de colar imagem. É o
+        maior custo por implementação do run depois do SYN-029 em xhigh.
+  \item Reabertura com dois achados que estavam no contrato do ticket.
+\end{itemize}
+
+\subsection*{gpt-6.1-sol (high e max), implementação}
+\begin{itemize}
+  \item \textbf{TDD limpo} no BUG-003 e no SYN-020, como no run anterior.
+  \item \textbf{Em max, como hard, não coube nos 45 min:} o SYN-019 estourou
+        duas vezes com trabalho real nas branches; a segunda contou como a
+        segunda tentativa do ticket e o bloqueou.
+  \item \textbf{Deixa processos vivos:} um \texttt{pc.exe} de uma sessão morta
+        pelo limite de uso travou o \texttt{cargo} da sessão seguinte.
+\end{itemize}
+
+\subsection*{sonnet-5.5 (high e xhigh), implementação}
+\begin{itemize}
+  \item \textbf{high é rápido e barato:} 8--17 min, \$0,62--2,26. SYN-027
+        passou de primeira (com prova vermelha só de compilação, que a
+        revisão aceitou).
+  \item \textbf{xhigh prova com revert:} no SYN-028 e no SYN-019 conferiu que
+        cada teste novo falha desfazendo o conserto, e reescreveu um teste que
+        passava no código velho.
+  \item \textbf{Aceita limites sozinho:} no SYN-029 escreveu ``limites
+        aceitos'' que feriam os critérios 2 e 3; a revisão reprovou os dois. Na
+        rodada 2 voltou a declarar dois limites, que a revisão aceitou.
+  \item \textbf{Leu errado o próprio \texttt{.err}:} o aviso
+        \texttt{unrecognized\_model claude-sonnet-5-5}, presente em toda sessão
+        sonnet-5.5, foi relatado como ``o run morreu no lançamento'' no
+        \texttt{.final} do próprio run que funcionou.
+  \item \textbf{Chama o proxy:} no SYN-028 o stage 2 pediu a decisão do plano da
+        reabertura ao proxy antes de codar (\texttt{442dc1a}).
+\end{itemize}
+
+\subsection*{gpt-6.1-sol (max), revisão}
+\begin{itemize}
+  \item \textbf{Reproduz no emulador e no app:} os ❌ de UI do SYN-028 e do
+        SYN-029 vieram reproduzidos pelo kit; a Lixeira foi conferida por
+        SHA-256.
+  \item \textbf{Drip-feeding} no SYN-019 (rodada 2) e no SYN-028 (rodada 2),
+        admitido pela própria revisão nos dois.
+  \item \textbf{Lenta:} 35 min por revisão concluída; duas morreram aos 40 min
+        (BUG-003) e uma chegou aos 60 (SYN-020) insistindo numa captura do
+        Computer Use que expirava.
+  \item \textbf{Recusa do Codex:} ao reproduzir um deadlock no SYN-019, a
+        sessão foi cortada por ``possible cybersecurity risk''.
+\end{itemize}
+
+\section{Integração com o Codex, o Claude e o driver}
+\begin{itemize}
+  \item \textbf{Cota do Codex:} cinco limites de uso (01/10 22:47; 02/10
+        00:45, 06:24, 13:02, 17:35). O driver espera reset com hora
+        (464 min no total), mas leu o reset com data como erro de API e parou.
+  \item \textbf{Tentativas por ticket, não por rodada:} o SYN-019 foi a
+        \texttt{blocked} com um timeout na rodada 1 e outro na rodada 2.
+  \item \textbf{Erro de API num ticket reaberto} deixa a branch com o
+        \texttt{Stage: implementing} commitado; o Preflight recusou o
+        relançamento (``Tickets mid-run: SYN-020'') até o foreman limpar.
+  \item \textbf{Permissões do Claude:} o \texttt{--allowedTools} só tinha
+        \texttt{Bash(powershell:*)}; o Sonnet chama o gate pela ferramenta
+        PowerShell. Dois estágios falharam até \texttt{7972d73}.
+  \item \textbf{Recusa por cibersegurança} não é reconhecida como recusa: o
+        driver a tratou como rede e relançou (funcionou; uma segunda teria
+        parado o run como ``API unreachable twice'').
+  \item \textbf{\texttt{adb} órfão} herdou o pipe do \texttt{codex exec} e
+        segurou a revisão 1 do SYN-021 até o limite.
+  \item \textbf{Kit de QA nesta máquina:} sem emulador no começo; instalado no
+        SDK do D:, com junção do caminho padrão do \texttt{up.ps1}. O
+        \texttt{down.ps1} ainda pede \texttt{-Sdk}. Com o emulador de pé, o D:
+        (HDD) fica em 100\,\% de uso.
+  \item \textbf{Gate:} o Gradle do gate completo reaproveita
+        (\texttt{UP-TO-DATE}) os testes da rodada \texttt{-TestsOnly}.
+\end{itemize}
+
+\section{Recomendações}
+\begin{enumerate}
+  \item \textbf{Driver: zerar as tentativas quando a revisão reabre.} Um
+        timeout por rodada não é o mesmo ticket falhando duas vezes (SYN-019).
+  \item \textbf{Driver: erro de API desfaz o \texttt{implementing}} da branch
+        mantida, para o Preflight não recusar o relançamento (chip aberto no
+        run).
+  \item \textbf{Driver: reconhecer o reset com data} do limite de uso e a recusa
+        por cibersegurança, cada um com seu caminho, em vez de cair em
+        \texttt{NetFail}.
+  \item \textbf{Limites: manter \texttt{-ImplementMinutes 75
+        -ReviewMinutes 60}} nos tickets com QA no emulador; nenhum estágio
+        estourou depois da troca.
+  \item \textbf{ticket-flow: o stage 2 não aceita limite que toca critério.}
+        Vai ao proxy. Dois dos sete achados da rodada 1 do SYN-029 eram limites
+        que o stage 2 declarou aceitos.
+  \item \textbf{Stage 1: ticket de cola de UI sem testes de stage 2} (SYN-028)
+        reabriu duas vezes por corridas; o conserto acabou criando um módulo
+        puro testável. Pedir esse módulo já no ticket.
+  \item \textbf{Escalação:} \texttt{sonnet-5.5 high} e \texttt{gpt-6.1-sol high} empatam sob
+        \texttt{gpt-6.1-sol max} (linhas \texttt{gpt-6.1-sol high $\to$
+        gpt-6.1-sol max}, 32 revisões, S2 22\,\%, e \texttt{sonnet-5.5 high
+        $\to$ gpt-6.1-sol max}, 12 revisões, S2 25\,\%). Escolher pela cota:
+        com o Codex batendo no limite cinco vezes, o stage 2 em Claude tira
+        carga dele. Não pagar xhigh no hard por enquanto: \texttt{sonnet-5.5
+        xhigh $\to$ gpt-6.1-sol max} (7 revisões, anedota) não reabriu menos
+        que high, e o SYN-029 custou \$14,50 de implementação.
+  \item \textbf{Triagem dos flaky fora de ticket:}
+        \path{pc/src-tauri/tests/server.rs:819} (10053 ConnectionAborted),
+        \texttt{ProtocolClientTest} ``arquivo grande aceito sem resposta'' e
+        \path{ListenLoopTest.listenReopensWhileALargeDownloadIsStillInProgress}.
+  \item \textbf{Mergear o PR \#9} antes do próximo run.
+\end{enumerate}
+
+\section{Débito humano}
+Do run (\texttt{grep -rh 'Débito humano:' .scratch/} na sessão, só as linhas
+deste run). Sem aparelho: o humano estava sem o celular, todo QA foi no
+emulador e o passo do Redmi pós-run não rodou.
+\begin{itemize}
+  \item SYN-021 critério 7: colar imagem pelo teclado/menu e ver a bandeja,
+        remover pelo ✕, Voltar com a bandeja cheia, câmera enviando direto.
+  \item BUG-003: arrastar uma bolha enviada para fora da janela (a captura do
+        Computer Use falhou duas vezes).
+  \item SYN-020: drop nativo e arrastar uma bolha de volta à janela.
+  \item SYN-020 critério 8: esconder e reabrir a janela com a bandeja
+        preservada.
+\end{itemize}
+
+\end{document}

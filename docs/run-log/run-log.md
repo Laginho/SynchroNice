@@ -202,3 +202,39 @@
 | 2026-10-01 22:17 | SYN-021 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-01-2019 | 22m | 2.3M in (96% cached), 13k out | $0.761 |
 | 2026-10-01 22:47 | BUG-003 | implement | gpt-6-astra low | 1 | api error, not counted | sweatshop/2026-10-01-2019 | 29m | ? | ? |
 | 2026-10-01 22:47 | BUG-003 | implement | gpt-6-astra low | 1 | api error, not counted | sweatshop/2026-10-01-2019 | 0m | ? | ? |
+| 2026-10-01 23:31 | BUG-003 | implement | gpt-6.1-sol high | 1 | to-review | sweatshop/2026-10-01-2019 | 41m | 9.3M in (98% cached), 28k out | $2.525 |
+| 2026-10-02 00:22 | BUG-003 | review | gpt-6.1-sol max | 1 | review ended at to-review (timeout) | sweatshop/2026-10-01-2019 | 40m | ? | ? |
+| 2026-10-02 00:45 | BUG-003 | review | gpt-6.1-sol max | 1 | api error, not counted | sweatshop/2026-10-01-2019 | 20m | ? | ? |
+| 2026-10-02 04:31 | BUG-003 | review | gpt-6.1-sol max | 1 | review ended at to-review (timeout) | sweatshop/2026-10-01-2019 | 40m | ? | ? |
+| 2026-10-02 05:09 | BUG-003 | implement | gpt-6.1-sol high | 1 | to-review | sweatshop/2026-10-01-2019 | 28m | 6.4M in (98% cached), 22k out | $1.735 |
+| 2026-10-02 05:55 | BUG-003 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-01-2019 | 46m | 9.9M in (98% cached), 45k out | $2.731 |
+| 2026-10-02 06:24 | SYN-019 | implement | gpt-6.1-sol max | 1 | api error, not counted | sweatshop/2026-10-01-2019 | 30m | ? | ? |
+| 2026-10-02 09:37 | SYN-019 | implement | gpt-6.1-sol max | 1 | failed (timeout), will retry | sweatshop/2026-10-01-2019 | 45m | ? | ? |
+| 2026-10-02 09:54 | SYN-019 | implement | gpt-6.1-sol max | 2 | to-review | sweatshop/2026-10-01-2019 | 17m | 4.0M in (94% cached), 19k out | $1.443 |
+| 2026-10-02 10:36 | SYN-019 | review | gpt-6.1-sol max | 2 | reopened | sweatshop/2026-10-01-2019 | 42m | 7.3M in (98% cached), 44k out | $2.163 |
+| 2026-10-02 11:21 | SYN-019 | implement | gpt-6.1-sol max | 2 | failed (timeout), blocked | sweatshop/2026-10-01-2019 | 45m | ? | ? |
+| 2026-10-02 11:53 | SYN-020 | implement | gpt-6.1-sol high | 1 | to-review | sweatshop/2026-10-01-2019 | 32m | 6.9M in (98% cached), 31k out | $1.945 |
+| 2026-10-02 12:53 | SYN-020 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-01-2019 | 60m | ? | ? |
+| 2026-10-02 13:02 | SYN-020 | implement | gpt-6.1-sol high | 1 | api error, not counted | sweatshop/2026-10-01-2019 | 8m | ? | ? |
+| 2026-10-02 14:03 | SYN-019 | implement | sonnet-5.5 xhigh | 3 | failed (exit 0), blocked | sweatshop/2026-10-01-2019 | 2m | 1.4M in (96% cached), 7k out | $0.905 |
+| 2026-10-02 14:13 | SYN-020 | implement | sonnet-5.5 high | 1 | failed (exit 0), will retry | sweatshop/2026-10-01-2019 | 10m | 2.1M in (97% cached), 8k out | $1.011 |
+| 2026-10-02 15:02 | SYN-019 | implement | sonnet-5.5 xhigh | 4 | to-review | sweatshop/2026-10-01-2019 | 17m | 2.8M in (97% cached), 19k out | $1.568 |
+| 2026-10-02 15:20 | SYN-019 | review | gpt-6.1-sol max | 4 | api error, not counted | sweatshop/2026-10-01-2019 | 18m | ? | ? |
+| 2026-10-02 15:54 | SYN-019 | review | gpt-6.1-sol max | 4 | reopened | sweatshop/2026-10-01-2019 | 34m | 7.6M in (98% cached), 39k out | $2.200 |
+| 2026-10-02 16:23 | SYN-019 | implement | sonnet-5.5 xhigh | 4 | to-review | sweatshop/2026-10-01-2019 | 29m | 5.9M in (97% cached), 62k out | $3.863 |
+| 2026-10-02 16:42 | SYN-019 | review | gpt-6.1-sol max | 4 | merged | sweatshop/2026-10-01-2019 | 19m | 5.2M in (97% cached), 23k out | $1.533 |
+| 2026-10-02 16:59 | SYN-027 | implement | sonnet-5.5 high | 1 | to-review | sweatshop/2026-10-01-2019 | 17m | 3.4M in (97% cached), 34k out | $2.263 |
+| 2026-10-02 17:16 | SYN-027 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-01-2019 | 17m | 3.5M in (97% cached), 20k out | $1.068 |
+| 2026-10-02 17:32 | SYN-020 | implement | sonnet-5.5 high | 2 | to-review | sweatshop/2026-10-01-2019 | 16m | 1.2M in (97% cached), 5k out | $0.615 |
+| 2026-10-02 17:35 | SYN-020 | review | gpt-6.1-sol max | 2 | api error, not counted | sweatshop/2026-10-01-2019 | 2m | ? | ? |
+| 2026-10-02 19:39 | SYN-020 | review | gpt-6.1-sol max | 2 | merged | sweatshop/2026-10-01-2019 | 45m | 12.7M in (99% cached), 55k out | $3.440 |
+| 2026-10-02 19:47 | SYN-028 | implement | sonnet-5.5 high | 1 | to-review | sweatshop/2026-10-01-2019 | 8m | 2.7M in (95% cached), 16k out | $1.860 |
+| 2026-10-02 20:20 | SYN-028 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-01-2019 | 32m | 6.4M in (98% cached), 43k out | $1.962 |
+| 2026-10-02 20:35 | SYN-028 | implement | sonnet-5.5 high | 1 | to-review | sweatshop/2026-10-01-2019 | 15m | 3.2M in (96% cached), 25k out | $1.989 |
+| 2026-10-02 20:55 | SYN-028 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-01-2019 | 20m | 4.9M in (98% cached), 23k out | $1.425 |
+| 2026-10-02 21:20 | SYN-028 | implement | sonnet-5.5 xhigh | 1 | to-review | sweatshop/2026-10-01-2019 | 25m | 3.5M in (97% cached), 38k out | $2.260 |
+| 2026-10-02 21:42 | SYN-028 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-01-2019 | 22m | 5.4M in (98% cached), 26k out | $1.574 |
+| 2026-10-02 22:35 | SYN-029 | implement | sonnet-5.5 xhigh | 1 | to-review | sweatshop/2026-10-01-2019 | 52m | 9.8M in (95% cached), 189k out | $9.723 |
+| 2026-10-02 23:22 | SYN-029 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-01-2019 | 48m | 9.3M in (98% cached), 54k out | $2.712 |
+| 2026-10-03 00:04 | SYN-029 | implement | sonnet-5.5 xhigh | 1 | to-review | sweatshop/2026-10-01-2019 | 42m | 14.6M in (98% cached), 89k out | $4.776 |
+| 2026-10-03 00:54 | SYN-029 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-01-2019 | 49m | 14.0M in (99% cached), 46k out | $3.595 |
