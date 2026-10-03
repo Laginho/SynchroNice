@@ -1,5 +1,5 @@
 # SYN-030: Opção "Iniciar com o Windows" na engrenagem do PC
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: human
@@ -119,3 +119,11 @@ automático, como a spec já define para autostart e engrenagem.
   - a guarda de debug e a fatia separada do CLEAN-024 (Q10, humano).
 
   `Review: human` porque o ticket mexe no autostart da máquina do humano.
+
+- Stage 3 (2026-10-03): eixos Standards e Spec concluídos. Nenhuma falha de
+  critério ou regressão no código; separação test-first conferida nos quatro
+  commits. Correção pequena de documentação: os roteiros de
+  `docs/pr-3-review-follow-up.md` e do walkthrough de 2026-09-27 deixam de
+  dizer que abrir o app registra autostart; as specs core e QA descrevem a
+  opção e a permissão de acesso atuais. Nenhum código ou teste foi alterado.
+  Validação pelo kit e gate ainda em curso.
