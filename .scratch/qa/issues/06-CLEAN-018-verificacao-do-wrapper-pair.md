@@ -1,5 +1,5 @@
 # CLEAN-018: Preservar uma verificação executável do wrapper pair
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -56,6 +56,8 @@ de primeira, o commit de teste é o entregável, e o stage 2 registra no
 ticket que não houve vermelho por não haver defeito.
 
 ## Comments
+
+- Stage 2, reabertura (2026-10-03): seam mantida na CLI real de `qa/phone.ps1`, com adb falso. Chamador de produção conferido: `qa/up.ps1`, que fornece strings canônicas via config e IPv4 explícito. Casos degenerados: arrays vazios, arrays com uma string válida e LF final em cada campo. Teste focado `node --test --test-name-pattern='pair validates' qa/phone.test.mjs`: 12 testes, 5 passaram e 7 falharam (os seis novos casos e o pai); todos os casos novos retornaram 0/Starting: Intent em vez de rejeitar o Par. Produção ainda intacta neste commit.
 
 - Standards identificou uma limpeza não bloqueante em `qa/phone.ps1`,
   ação `pair`: validação do config e IPv4, descoberta da rota e escape do

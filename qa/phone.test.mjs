@@ -64,6 +64,16 @@ exit 0
         }
       }
     });
+    for (const field of ['nome_instancia', 'token']) {
+      for (const value of [[], [valid[field]], `${valid[field]}\n`]) {
+        await t.test(`${field}=${JSON.stringify(value)} is rejected before starting an activity`, () => {
+          const result = run({ pair: { ...valid, [field]: value } });
+          assert.equal(result.status, 1, result.stdout + result.stderr);
+          assert.match(result.stderr, /config.json sem Par valido/);
+          assert.deepEqual(result.starts, []);
+        });
+      }
+    }
     await t.test('invalid explicit IPv4 never starts an activity', () => {
       for (const ip of ['10.0.0', '010.0.0.1', '256.1.1.1', '0.0.0.0']) {
         const result = run({ ip });
