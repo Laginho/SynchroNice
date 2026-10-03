@@ -1,9 +1,26 @@
-/** Ids que a janela já sabe excluídos (Apagar tudo aplicado ou exclusão do
- * celular). Os ids de uma Sessão nunca se repetem, então a marca é definitiva:
- * eventos e snapshots atrasados não recriam essas bolhas. */
+/** Exclusões definitivas e seleções que aguardam o resultado de Apagar tudo.
+ * Eventos e snapshots atrasados não recriam essas bolhas; uma seleção que
+ * falhou volta a aparecer, sem desfazer exclusões confirmadas pelo celular. */
 export class Apagados {
   private recebidos = new Set<number>();
   private enviados = new Set<number>();
+  private pendentes = new Set<{ recebidos: Set<number>; enviados: Set<number> }>();
+
+  iniciar(recebidos: readonly number[], enviados: readonly number[]): {
+    confirmar: () => void;
+    cancelar: () => void;
+  } {
+    const selecao = { recebidos: new Set(recebidos), enviados: new Set(enviados) };
+    this.pendentes.add(selecao);
+    return {
+      confirmar: () => {
+        if (this.pendentes.delete(selecao)) {
+          this.marcar([...selecao.recebidos], [...selecao.enviados]);
+        }
+      },
+      cancelar: () => { this.pendentes.delete(selecao); },
+    };
+  }
 
   marcar(recebidos: readonly number[], enviados: readonly number[]): void {
     for (const id of recebidos) this.recebidos.add(id);
@@ -11,19 +28,19 @@ export class Apagados {
   }
 
   recebido(id: number): boolean {
-    return this.recebidos.has(id);
+    return this.recebidos.has(id) || [...this.pendentes].some((selecao) => selecao.recebidos.has(id));
   }
 
   enviado(id: number): boolean {
-    return this.enviados.has(id);
+    return this.enviados.has(id) || [...this.pendentes].some((selecao) => selecao.enviados.has(id));
   }
 
   filtrarRecebidos<T extends { id: number }>(itens: readonly T[]): T[] {
-    return itens.filter((item) => !this.recebidos.has(item.id));
+    return itens.filter((item) => !this.recebido(item.id));
   }
 
   filtrarEnviados<T extends { id: number }>(itens: readonly T[]): T[] {
-    return itens.filter((item) => !this.enviados.has(item.id));
+    return itens.filter((item) => !this.enviado(item.id));
   }
 }
 

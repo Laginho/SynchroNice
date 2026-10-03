@@ -644,6 +644,7 @@ function atualizarLixeira(): void {
   const vazio = recebidas.size + enviadas.size === 0;
   empty.hidden = !vazio;
   document.querySelector<HTMLElement>("#clear-all")!.hidden = vazio;
+  document.querySelector<HTMLButtonElement>("#tentar-apagar")!.hidden = vazio;
 }
 
 /** Apagar tudo (SYN-028): as bolhas saem na hora, mas nada é apagado nem sai
@@ -666,14 +667,23 @@ function fecharJanelaDeDesfazer(): void {
   document.querySelector<HTMLElement>("#aviso-apagar")!.hidden = true;
   const received = [...janela.recebidas.keys()];
   const sent = [...janela.enviadas.keys()];
-  // Marca antes do comando: até ele terminar, o backend ainda emite progresso
-  // e entregas desses Itens, e nenhum evento ou snapshot pode recriá-los.
-  apagados.marcar(received, sent);
-  invoke("apagar_tudo", { received, sent }).catch((e) => console.error(`não foi possível apagar a conversa: ${e}`));
+  // Bloqueia eventos/snapshots até o resultado, sem tornar definitiva uma
+  // exclusão que pode falhar antes de o backend alterar a Sessão.
+  const exclusao = apagados.iniciar(received, sent);
+  invoke("apagar_tudo", { received, sent }).then(
+    () => exclusao.confirmar(),
+    (e) => {
+      exclusao.cancelar();
+      console.error(`não foi possível apagar a conversa: ${e}`);
+      document.querySelector<HTMLElement>("#erro-apagar")!.hidden = false;
+      void restaurarBolhas(janela);
+    },
+  );
 }
 
 function apagarTudo(): void {
   if (recebidas.size + enviadas.size === 0) return;
+  document.querySelector<HTMLElement>("#erro-apagar")!.hidden = true;
   // Segundo clique na janela: a anterior fecha na hora e esta abre outra.
   fecharJanelaDeDesfazer();
   const janela: JanelaDeDesfazer = {
@@ -706,11 +716,25 @@ async function desfazerApagarTudo(): Promise<void> {
   janelaDeDesfazer = null;
   clearTimeout(janela.timer);
   document.querySelector<HTMLElement>("#aviso-apagar")!.hidden = true;
-  // As bolhas voltam onde estavam, depois de um snapshot que as põe em dia com
-  // o que mudou durante a janela (progresso de um arquivo, uma entrega).
-  const ordenadas = [...janela.recebidas.values(), ...janela.enviadas.values()];
-  for (const [id, bolha] of janela.recebidas) recebidas.set(id, bolha);
-  for (const [id, bolha] of janela.enviadas) enviadas.set(id, bolha);
+  await restaurarBolhas(janela);
+}
+
+/** Desfazer ou falha do comando devolve só os sobreviventes da seleção.
+ * A falha de uma janela antiga não fecha o aviso de uma janela mais nova. */
+async function restaurarBolhas(janela: JanelaDeDesfazer): Promise<void> {
+  // As bolhas voltam onde estavam; o snapshot depois as põe em dia com o que
+  // mudou durante a janela (progresso de um arquivo, uma entrega).
+  const ordenadas: HTMLElement[] = [];
+  for (const [id, bolha] of janela.recebidas) {
+    if (apagados.recebido(id) || janelaDeDesfazer?.recebidas.has(id)) continue;
+    recebidas.set(id, bolha);
+    ordenadas.push(bolha);
+  }
+  for (const [id, bolha] of janela.enviadas) {
+    if (apagados.enviado(id) || janelaDeDesfazer?.enviadas.has(id)) continue;
+    enviadas.set(id, bolha);
+    ordenadas.push(bolha);
+  }
   for (const bolha of ordenadas) reinserirBolha(bolha);
   atualizarLixeira();
   const [novosRecebidos, novosEnviados] = await Promise.all([
@@ -1013,6 +1037,7 @@ async function main(): Promise<void> {
   for (const item of apagados.filtrarEnviados(enviados)) renderEnviado(item);
 
   document.querySelector<HTMLElement>("#clear-all")!.addEventListener("click", apagarTudo);
+  document.querySelector<HTMLElement>("#tentar-apagar")!.addEventListener("click", apagarTudo);
   document.querySelector<HTMLElement>("#desfazer")!.addEventListener("click", () => {
     void desfazerApagarTudo();
   });
