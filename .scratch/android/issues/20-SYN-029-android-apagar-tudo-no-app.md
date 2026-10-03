@@ -1,5 +1,5 @@
 # SYN-029: Apagar tudo no app do celular
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-027, SYN-028
 Review: agent
@@ -86,3 +86,4 @@ QA no stage 3: kit no emulador, critérios 3 e 4, conferindo os arquivos com
 ## Comments
 
 - 2026-10-01 Proxy decided: nasceu do fatiamento do SYN-027 a pedido do dono. Veio para cá o app (🗑, Desfazer, apagar no MediaStore/SAF, exclusão vinda do PC; critérios 6 e 7 do original, aqui 3 e 4), com as decisões de app do original; os critérios 1 e 2 são novos, na costura Robolectric do app que já existe, para este ticket não ficar só com QA. Ficaram no SYN-027 o cliente do protocolo e a fila. Blocked by: SYN-027 (exclusão do `/listen`, fila, id devolvido) e SYN-028, porque o critério 4 precisa do 🗑 do PC e o 3 precisa da janela do PC tirando as bolhas. Difficulty: hard: arquivo ainda baixando, MediaStore e SAF com checagens de segurança, a fila sem bolha mexendo na marcação de Entregue, tudo no `MainActivity.kt`, de que o app inteiro depende. Review: agent, porque as docs ficaram no SYN-019.
+- 2026-10-02 Stage 2, commit de testes (`ApagarTudoTest.kt`, 9 testes). A operação do `AppState` que o fim da janela chama chama-se `suspend fun deleteAll(localIds: Set<Long> = todas as bolhas do chat)`: o parâmetro é o conjunto de `localId` da janela, para uma mensagem enviada durante os 5 s ficar de fora. Prova vermelha, duas camadas: (1) sem o método, `gradle test` não compila (`Unresolved reference 'deleteAll'`, 5 usos), o mesmo vermelho do SYN-027 (`29e76b5`); (2) com um stub vazio e temporário de `deleteAll` (não commitado), 81 testes do app rodam e os 9 novos falham, 8 pelo motivo certo (a exclusão do PC nunca recebe ack, o chat não esvazia, o Pendente restaurado ainda é entregue) e `deleteAllOnAnEmptyChatQueuesNothing` passa de propósito: é a guarda do chat vazio, que o código novo não pode quebrar. Lido em volta antes dos testes: `retryPending` conta `queueStore.load().size` como posições de bolha, e uma exclusão na fila (sem bolha, depois de um Pendente enviado na janela) deixa esse Pendente em PENDING (teste `aQueuedDeleteHoldsAQueuePosition...`); o `init` restaura Pendentes como bolhas, que precisam do id de protocolo (teste `deleteAllCoversPendingItemsRestoredAfterTheAppRestarted`).
