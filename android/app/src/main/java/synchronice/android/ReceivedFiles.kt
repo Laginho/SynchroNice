@@ -204,6 +204,22 @@ internal class ReceivedFiles(context: Context) {
         }
     }
 
+    /**
+     * Apaga de vez (minSdk 29: sem lixeira) o arquivo que o app gravou para um Item. Com [size], só se
+     * o conteúdo ainda tem esse tamanho; na dúvida, não apaga. Falha de permissão ou de provedor é
+     * ignorada: o Item sai da Sessão de qualquer jeito.
+     */
+    fun delete(uri: Uri, size: Long?) {
+        try {
+            if (size != null && !hasCompleteContent(uri, size)) return
+            if (uri.authority == MediaStore.AUTHORITY) resolver.delete(uri, null, null)
+            else DocumentsContract.deleteDocument(resolver, uri)
+        } catch (_: SecurityException) {
+        } catch (_: IOException) {
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
     fun publish(uri: Uri) {
         if (uri.authority != MediaStore.AUTHORITY) return
         val updated = resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
