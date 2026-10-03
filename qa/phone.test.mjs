@@ -5,6 +5,110 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+test('pair validates inputs, delivers the QR and rejects activity errors', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-018-pair-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    const config = join(directory, 'config.json');
+    const calls = join(directory, 'calls.jsonl');
+    const valid = { nome_instancia: 'synchronice-a1B2c3D4', token: '0123456789abcdefABCDEF0123456789' };
+    writeFileSync(adb, `
+$command = $args -join ' '
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($args[2] -eq 'shell' -and $args[3] -eq 'am' -and $args[4] -eq 'start') {
+  $line = ConvertTo-Json -InputObject @($args) -Compress
+  [IO.File]::AppendAllText($env:QA_PAIR_CALLS, $line + [Environment]::NewLine)
+  $env:QA_PAIR_RESPONSE
+  exit 0
+}
+exit 0
+`, 'utf8');
+    const run = ({ pair = valid, ip = '192.168.50.7', response = 'Starting: Intent' } = {}) => {
+      writeFileSync(config, JSON.stringify(pair));
+      writeFileSync(calls, '');
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        resolve('qa/phone.ps1'), 'pair', '-Config', config, '-Adb', adb, '-Serial', '127.0.0.1:5555',
+        ...(ip === null ? [] : ['-Ip', ip])], {
+        encoding: 'utf8', timeout: 30000,
+        env: { ...process.env, QA_PAIR_CALLS: calls, QA_PAIR_RESPONSE: response },
+      });
+      assert.ifError(result.error);
+      const starts = readFileSync(calls, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
+      return { ...result, starts };
+    };
+    const assertQr = (result, ip) => {
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(result.starts.length, 1);
+      const args = result.starts[0];
+      assert.deepEqual(args.slice(0, -1), ['-s', '127.0.0.1:5555', 'shell', 'am', 'start',
+        '-W', '-n', 'synchronice.android/.DebugPairActivity', '--es', 'qr']);
+      // The .ps1 fake receives quoting literally; native argv transport is outside this test.
+      const quoted = args.at(-1);
+      assert.equal(quoted[0], "'");
+      assert.equal(quoted.at(-1), "'");
+      const qr = JSON.parse(quoted.slice(1, -1).replaceAll('\\"', '"'));
+      assert.deepEqual(qr, { instance_name: valid.nome_instancia, port: 47820, token: valid.token, ip });
+    };
+    await t.test('invalid or absent Par fields never start an activity', () => {
+      for (const field of ['nome_instancia', 'token']) {
+        const invalid = field === 'nome_instancia'
+          ? [undefined, null, '', 'synchronice-1234567', 'synchronice-123456789', 'synchronice-1234567g', 'SYNCHRONICE-12345678']
+          : [undefined, null, '', 'a'.repeat(31), 'a'.repeat(33), 'g'.repeat(32)];
+        for (const value of invalid) {
+          const result = run({ pair: { ...valid, [field]: value } });
+          assert.equal(result.status, 1, `${field}=${value}: ${result.stdout} ${result.stderr}`);
+          assert.match(result.stderr, /config.json sem Par valido/);
+          assert.deepEqual(result.starts, []);
+        }
+      }
+    });
+    for (const field of ['nome_instancia', 'token']) {
+      for (const value of [[], [valid[field]], `${valid[field]}\n`]) {
+        await t.test(`${field}=${JSON.stringify(value)} is rejected before starting an activity`, () => {
+          const result = run({ pair: { ...valid, [field]: value } });
+          assert.equal(result.status, 1, result.stdout + result.stderr);
+          assert.match(result.stderr, /config.json sem Par valido/);
+          assert.deepEqual(result.starts, []);
+        });
+      }
+    }
+    await t.test('invalid explicit IPv4 never starts an activity', () => {
+      for (const ip of ['10.0.0', '010.0.0.1', '256.1.1.1', '0.0.0.0']) {
+        const result = run({ ip });
+        assert.equal(result.status, 1, `${ip}: ${result.stdout} ${result.stderr}`);
+        assert.match(result.stderr, /IPv4 valido/);
+        assert.deepEqual(result.starts, []);
+      }
+    });
+    await t.test('valid explicit IPv4 and Par reach DebugPairActivity once', () => {
+      assertQr(run(), '192.168.50.7');
+    });
+    await t.test('omitted IPv4 uses the address selected by the local UDP route', () => {
+      const lookup = spawnSync('powershell.exe', ['-NoProfile', '-Command', `
+$socket = [Net.Sockets.UdpClient]::new()
+try {
+  $socket.Connect('8.8.8.8', 80)
+  $socket.Client.LocalEndPoint.Address.ToString()
+} finally { $socket.Dispose() }
+`], { encoding: 'utf8', timeout: 30000 });
+      assert.ifError(lookup.error);
+      assert.equal(lookup.status, 0, lookup.stderr);
+      assert.match(lookup.stdout.trim(), /^\d{1,3}(\.\d{1,3}){3}$/);
+      assertQr(run({ ip: null }), lookup.stdout.trim());
+    });
+    await t.test('am Error and Exception responses fail even with exit code zero', () => {
+      for (const response of ['Error: Activity class does not exist', 'java.lang.SecurityException: denied']) {
+        const result = run({ response });
+        assert.equal(result.starts.length, 1);
+        assert.equal(result.status, 1, result.stdout + result.stderr);
+        assert.match(result.stderr, /pair falhou/);
+      }
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('optional denied preparation warns; requested action, lockscreen and transport errors stay fatal', () => {
   const directory = mkdtempSync(join(tmpdir(), 'syn-024-phone-'));
   try {
