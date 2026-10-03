@@ -127,3 +127,14 @@ automático, como a spec já define para autostart e engrenagem.
   dizer que abrir o app registra autostart; as specs core e QA descrevem a
   opção e a permissão de acesso atuais. Nenhum código ou teste foi alterado.
   Validação pelo kit e gate ainda em curso.
+
+- QA stage 3 (2026-10-03): critério 5 passou no kit: os comandos de leitura,
+  habilitação e desabilitação recusaram no perfil isolado, e o seletor CSS
+  `#start-with-windows:disabled + span` confirmou o checkbox desabilitado.
+  Texto e posição do critério 2 também conferidos no DOM e na captura.
+  Relatório: `.scratch/qa-runs/2026-10-03-syn-030-review.md`. O SDK foi usado
+  pelo destino real de sua junction, sem mudar código; `down` confirmou
+  estado inativo e encerramento do emulador e do PC debug. O wrapper de saída
+  do `up` precisou ser encerrado após emitir seu resultado final.
+
+- Débito humano: SYN-030 critérios 1–4 e 6 — verificar start release sem mudar o Run, estado real do checkbox, habilitar/desabilitar e efeito no próximo login/reabertura, reversão e console.error em falha real, e recusa de habilitação em debug fora do perfil isolado. Texto/posição do critério 2 e isolamento completo do critério 5 já verificados pelo kit; APIs nativas de Computer Use indisponíveis nesta sessão.
