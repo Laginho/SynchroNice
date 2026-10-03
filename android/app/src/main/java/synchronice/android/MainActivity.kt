@@ -227,7 +227,7 @@ internal class AppState(
     /** Copia antes de devolver o callback: a permissão do teclado é temporária. */
     fun pasteUri(uri: Uri): Boolean {
         if (!isForeignContentUri(appContext, uri)) return false
-        stagedPastes.add(copyToStaging(appContext, uri) {
+        stagedPastes.add(stageSource(uri) {
             val mime = appContext.contentResolver.getType(uri)
             val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "bin"
             "imagem-${System.currentTimeMillis()}.$extension"
@@ -235,8 +235,16 @@ internal class AppState(
         return true
     }
 
+    internal fun stageSource(uri: Uri, fallbackName: (() -> String)? = null): File =
+        files.stageSource(uri) { copyToStaging(appContext, uri, fallbackName) }
+
+    internal fun releaseStagedSource(file: File) {
+        file.parentFile?.deleteRecursively()
+        files.releaseStagedSource(file)
+    }
+
     fun removePaste(file: File) {
-        if (stagedPastes.remove(file)) file.parentFile?.deleteRecursively()
+        if (stagedPastes.remove(file)) releaseStagedSource(file)
     }
 
     fun clearPasteTray() {
@@ -476,6 +484,7 @@ internal class AppState(
                 if (currentClient !== protocolClient) throw IOException("Par alterado antes de guardar o arquivo")
                 val stored = currentClient.enqueueFile(file)
                 if (stored) {
+                    files.keepSentSource(file)
                     val pending = queueStore.load().last() as PendingItem.File
                     val message = outgoingFile(0, pending)
                     withContext(Dispatchers.Main.immediate) {

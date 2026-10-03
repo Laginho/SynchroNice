@@ -22,7 +22,7 @@ import java.io.IOException
 import java.util.UUID
 
 /**
- * Recebe o Compartilhar sem abrir o chat; a URI só é usada enquanto a Activity vive. O trabalho
+ * Recebe o Compartilhar sem abrir o chat; a leitura da URI usa a permissão temporária. O trabalho
  * fica no [ShareModel], que sobrevive a girar a tela: a Activity recriada chega com o mesmo
  * Intent, e refazer o lote enfileiraria de novo, com ids novos, o que já tinha entrado.
  */
@@ -51,11 +51,14 @@ internal class ShareModel : ViewModel() {
             try {
                 if (state.pairing != null) {
                     sharedUris(application, incoming).forEach { uri ->
-                        val staging = withContext(Dispatchers.IO) { copyToStaging(application, uri) }
+                        var staging: File? = null
                         try {
-                            state.queueFile(staging)
+                            val copy = withContext(Dispatchers.IO) {
+                                state.stageSource(uri).also { staging = it }
+                            }
+                            state.queueFile(copy)
                         } finally {
-                            staging.parentFile?.deleteRecursively()
+                            staging?.let(state::releaseStagedSource)
                         }
                     }
                     incoming.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() }?.let { text ->

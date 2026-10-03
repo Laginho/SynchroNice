@@ -11,6 +11,7 @@ import android.webkit.MimeTypeMap
 import synchronice.protocolclient.Item
 import synchronice.protocolclient.ProtocolClient
 import java.io.FileNotFoundException
+import java.io.File
 import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
@@ -31,6 +32,25 @@ internal fun safeFileName(raw: String): String =
 internal class ReceivedFiles(context: Context) {
     private val resolver = context.contentResolver
     private val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    /** Originais vivem só nesta Sessão, mesmo depois de a bolha enviada sair. */
+    private val originalsLock = Any()
+    private val stagedSources = mutableMapOf<File, Uri>()
+    private val sentSources = mutableSetOf<Uri>()
+
+    /** A exclusão espera a cópia; enquanto ela estiver na bandeja/lote, o original fica reservado. */
+    fun stageSource(uri: Uri, copy: () -> File): File = synchronized(originalsLock) {
+        copy().also { stagedSources[it] = uri }
+    }
+
+    fun keepSentSource(file: File) = synchronized(originalsLock) {
+        stagedSources[file]?.let { sentSources.add(it) }
+        Unit
+    }
+
+    fun releaseStagedSource(file: File) = synchronized(originalsLock) {
+        stagedSources.remove(file)
+        Unit
+    }
 
     fun folder(): Uri? = preferences.getString("receive-folder", null)?.let(Uri::parse)
 
@@ -209,7 +229,8 @@ internal class ReceivedFiles(context: Context) {
      * o conteúdo ainda tem esse tamanho; na dúvida, não apaga. Falha de permissão ou de provedor é
      * ignorada: o Item sai da Sessão de qualquer jeito.
      */
-    fun delete(uri: Uri, size: Long?) {
+    fun delete(uri: Uri, size: Long?): Unit = synchronized(originalsLock) {
+        if (uri in sentSources || uri in stagedSources.values) return@synchronized
         try {
             if (size != null && !hasCompleteContent(uri, size)) return
             if (uri.authority == MediaStore.AUTHORITY) resolver.delete(uri, null, null)
