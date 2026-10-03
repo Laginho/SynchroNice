@@ -1,5 +1,5 @@
 # CLEAN-018: Preservar uma verificação executável do wrapper pair
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -76,3 +76,5 @@ ticket que não houve vermelho por não haver defeito.
   Achado confirmado: nenhum teste roda o `pair`. Enhancement,
   ready-for-agent (Q2, proxy). O escape na camada nativa fica fora, porque
   o `up.ps1` real o exercita em todo stage 3.
+
+- Stage 2 (2026-10-03): seam exercitada: CLI real de qa/phone.ps1, com config sintético e adb.ps1 falso que captura argv. Chamador conferido: qa/up.ps1 (pair com -Config e -Ip). Cobertos campos ausentes/nulos/vazios/malformados, os quatro IPv4 inválidos, QR válido, rota UDP padrão e respostas Error:/Exception com exit 0. Nenhuma função de produção alterada. Teste focado: 6 testes passaram (pai + 5 subtestes, 21 execuções do wrapper). Não houve vermelho: cobertura de comportamento existente, conforme a exceção explícita deste ticket.
