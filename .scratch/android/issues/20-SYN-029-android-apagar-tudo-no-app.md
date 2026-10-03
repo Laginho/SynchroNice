@@ -1,5 +1,5 @@
 # SYN-029: Apagar tudo no app do celular
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-027, SYN-028
 Review: agent

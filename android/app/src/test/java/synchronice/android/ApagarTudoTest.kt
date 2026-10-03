@@ -15,6 +15,7 @@ import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -22,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -53,6 +55,9 @@ private class FakePc {
     val batches = LinkedBlockingQueue<String>()
     val textStatus = AtomicInteger(201)
     val deleteStatus = AtomicInteger(204)
+    val ackStatus = AtomicInteger(204)
+    /** Segura o ack de um arquivo até o teste soltar: o download já terminou, o PC ainda não confirmou. */
+    @Volatile var ackGate: CountDownLatch? = null
     val textIds = CopyOnWriteArrayList<String>()
     val deletes = CopyOnWriteArrayList<JSONObject>()
     val acks = ConcurrentHashMap<Long, AtAck>()
@@ -84,8 +89,9 @@ private class FakePc {
         server.createContext("/outbox/") { exchange ->
             val parts = exchange.requestURI.path.split('/')
             if (parts[3] == "ack") {
+                ackGate?.await(5, TimeUnit.SECONDS)
                 acks[parts[2].toLong()] = observe()
-                exchange.sendResponseHeaders(204, -1)
+                exchange.sendResponseHeaders(ackStatus.get(), -1)
             } else {
                 downloads.incrementAndGet()
                 fileBody(exchange)
@@ -354,5 +360,176 @@ class ApagarTudoTest {
 
         assertEquals(1, pc.textIds.size, "o Pendente restaurado saiu da fila sem ser entregue")
         assertEquals(listOf(pendingId), pc.deletes.single().strings("do_celular"))
+    }
+
+    /** Apaga o chat com o arquivo já completo e o ack preso; depois o ack falha (500). */
+    private suspend fun CoroutineScope.deleteAllWhileTheAckIsStuck(pc: FakePc, state: AppState, media: MediaFake, afterDelete: () -> Unit) {
+        pc.ackGate = CountDownLatch(1)
+        pc.ackStatus.set(500)
+        pc.batches.put(receivedFile)
+        whileListening(state) {
+            waitUntil { state.messages.singleOrNull()?.uri != null }
+            state.deleteAll()
+            afterDelete()
+            pc.ackGate!!.countDown()
+            waitUntil { pc.acks.containsKey(1L) }
+            withTimeoutOrNull(1_000) { while (media.deleted.isEmpty()) delay(10) }
+        }
+    }
+
+    @Test
+    fun aCompleteFileChangedBeforeAFailedAckIsKeptWhenItsBubbleIsDeleted() = withPc { pc, app ->
+        val media = MediaFake(app)
+        val state = pc.pair(app)
+
+        deleteAllWhileTheAckIsStuck(pc, state, media) { media.files.single().writeText("outro conteúdo") }
+
+        assertTrue(media.deleted.isEmpty(), "o conteúdo completo mudou: na dúvida, não apaga, mesmo sem o ack")
+    }
+
+    @Test
+    fun aCompleteFileWhoseAckFailedIsDeletedWhenItsSizeIsStillTheItems() = withPc { pc, app ->
+        val media = MediaFake(app)
+        val state = pc.pair(app)
+
+        deleteAllWhileTheAckIsStuck(pc, state, media) {}
+
+        assertEquals(1, media.deleted.size)
+    }
+
+    @Test
+    fun deleteAllThatCannotPersistTheDeleteKeepsTheBubblesThePendingItemsAndTheirDeliveryMarks() = withPc { pc, app ->
+        val state = pc.pair(app)
+        pc.batches.put("""{"kind":"text","id":5,"at_ms":0,"text":"cinco"}""")
+        whileListening(state) { waitUntil { state.messages.size == 1 } }
+        pc.textStatus.set(503)
+        state.send("pendente")
+        state.retryPending()
+        val temporary = File(app.filesDir, "pending-items.txt.tmp")
+        assertTrue(temporary.mkdir(), "a fila não consegue gravar o arquivo temporário")
+        try {
+            state.deleteAll()
+
+            assertEquals(listOf("cinco", "pendente"), state.messages.map { it.text })
+            assertTrue(state.connectionError != null, "a falha aparece para a pessoa")
+        } finally {
+            temporary.deleteRecursively()
+        }
+        pc.textStatus.set(201)
+        state.retryPending()
+
+        assertEquals(listOf(Delivery.DELIVERED, Delivery.DELIVERED), state.messages.map { it.delivery }, "o Pendente segue ligado à bolha")
+        assertTrue(pc.deletes.isEmpty(), "nenhuma exclusão foi guardada")
+    }
+
+    @Test
+    fun aTextDeletedBeforeItWasQueuedIsNeverSent() = withPc { pc, app ->
+        val state = pc.pair(app)
+        val id = state.addOutgoing("apagado")
+
+        state.deleteAll()
+        state.queueText(id, "apagado")
+        state.retryPending()
+
+        assertTrue(state.messages.isEmpty())
+        assertTrue(pc.textIds.isEmpty(), "o texto apagado não chega ao PC")
+        assertFalse(state.hasPending())
+    }
+
+    @Test
+    fun anInterruptedDownloadLeavesNoPartialFileOrReceiptWhenItsBubbleIsDeleted() = withPc { pc, app ->
+        val media = MediaFake(app)
+        pc.fileBody = { exchange ->
+            exchange.sendResponseHeaders(200, 4)
+            exchange.responseBody.write("pa".toByteArray())
+            exchange.responseBody.flush()
+            exchange.close()
+        }
+        val state = pc.pair(app)
+        pc.batches.put(receivedFile)
+        whileListening(state) {
+            waitUntil { state.messages.singleOrNull()?.delivery == Delivery.FAILED }
+            val preferences = app.getSharedPreferences("pairing", 0)
+            val receipt = preferences.all.entries.single { it.key.startsWith("received-file:") }.value as String
+            assertTrue(receipt.startsWith("writing:"), "o parcial só está no recibo, a bolha não tem a URI")
+
+            state.deleteAll()
+
+            assertEquals(listOf(Uri.parse(receipt.removePrefix("writing:"))), media.deleted.toList())
+            assertTrue(preferences.all.keys.none { it.startsWith("received-file:") }, "o recibo do parcial saiu")
+        }
+    }
+
+    @Test
+    fun aDeleteBetweenTheAnnouncementAndTheBubbleStopsTheFileFromAppearing() = withPc { pc, app ->
+        MediaFake(app)
+        val state = pc.pair(app)
+        pc.fileBody = { exchange -> exchange.sendResponseHeaders(404, -1) }
+        // Uma só thread: o filho que cria a bolha só roda quando o laço do `listen` cede, e ele só cede
+        // no lote vazio, depois de aplicar a exclusão do arquivo já anunciado.
+        val single = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        val listening = launch { state.listen(state.pairing!!, state.client()!!, single) }
+        try {
+            pc.batches.put(receivedFile)
+            pc.batches.put(deleteLine(9, doPc = "1"))
+            pc.batches.put("")
+            waitUntil { pc.acks.containsKey(9L) }
+
+            withTimeoutOrNull(2_500) { while (state.messages.isEmpty() && pc.downloads.get() == 0) delay(10) }
+
+            assertTrue(state.messages.isEmpty(), "a bolha de um arquivo apagado antes de nascer não nasce")
+            assertEquals(0, pc.downloads.get(), "o arquivo apagado não é baixado")
+        } finally {
+            listening.cancelAndJoin()
+            single.close()
+        }
+    }
+
+    @Test
+    fun theClearWindowEndsOnItsOwnWithoutTheChatOnScreen() = withPc { pc, app ->
+        val state = pc.pair(app)
+        pc.batches.put("""{"kind":"text","id":5,"at_ms":0,"text":"cinco"}""")
+        whileListening(state) { waitUntil { state.messages.size == 1 } }
+
+        state.beginClear(windowMs = 300)
+
+        assertEquals(1, state.messages.size, "nada é apagado durante a janela")
+        assertTrue(state.hidden.isNotEmpty())
+        assertFalse(state.hasPending(), "nada entra na fila durante a janela")
+        waitUntil { state.messages.isEmpty() }
+        state.retryPending()
+        assertTrue(state.window.isEmpty() && state.hidden.isEmpty())
+        assertEquals(listOf(5L), pc.deletes.single().longs("do_pc"))
+    }
+
+    @Test
+    fun undoingTheClearWindowKeepsTheBubblesAndStopsTheClock() = withPc { pc, app ->
+        val state = pc.pair(app)
+        state.addOutgoing("fica")
+
+        state.beginClear(windowMs = 300)
+        state.undoClear()
+        delay(600)
+
+        assertEquals(listOf("fica"), state.messages.map { it.text })
+        assertTrue(state.hidden.isEmpty() && state.window.isEmpty())
+        assertFalse(state.hasPending())
+    }
+
+    @Test
+    fun aSecondClearCommitsTheFirstWindowAndTheOldClockDoesNotCutTheNewOneShort() = withPc { pc, app ->
+        val state = pc.pair(app)
+        pc.batches.put("""{"kind":"text","id":5,"at_ms":0,"text":"cinco"}""")
+        whileListening(state) { waitUntil { state.messages.size == 1 } }
+        state.beginClear(windowMs = 300)
+        state.addOutgoing("seis")
+
+        state.beginClear(windowMs = 10_000)
+        delay(600)
+
+        assertEquals(listOf("seis"), state.messages.map { it.text }, "o relógio velho não apaga a janela nova")
+        state.undoClear()
+        state.retryPending()
+        assertEquals(listOf(5L), pc.deletes.single().longs("do_pc"))
     }
 }
