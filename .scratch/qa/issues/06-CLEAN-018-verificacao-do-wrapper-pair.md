@@ -103,9 +103,10 @@ Verdict: Reopen — critério 1: campos do Par em arrays ou com LF final chegam 
 - Critério 1: ❌ nos dois casos acima. Foram seis reproduções indevidas,
   uma por campo e formato; controles de string inválida retornaram exit 1,
   `config.json sem Par valido` e nenhum lançamento.
-- Critérios 2–5: a inspeção confirma os casos pedidos, asserções do JSON,
-  lookup UDP local e respostas `Error:`/`Exception`; a validação executável
-  e o QA do emulador serão registrados no relatório desta revisão.
+- Critérios 2–5: ✅ no gate desta revisão. Os cinco subtestes do `pair`
+  passaram, incluindo os casos pedidos, asserções do JSON, lookup UDP local
+  e respostas `Error:`/`Exception` (6 testes contando o pai, 21 execuções
+  do wrapper).
 - Chamadores e interações examinados: `qa/up.ps1` passa `-Config` e `-Ip`;
   preparação/transporte adb, bloqueio de tela, guard de config, IPv4,
   lookup UDP e lançamento de `DebugPairActivity`; tipos persistidos pelo PC
@@ -116,3 +117,15 @@ Verdict: Reopen — critério 1: campos do Par em arrays ou com LF final chegam 
   `pair`, dentro dos Primary files. A correção exige testes novos; por isso
   não é um small fix do stage 3. Não há linha de ledger a remover.
 - Evidência: [relatório de revisão](../../qa-runs/2026-10-03-emulator-CLEAN-018-review.md).
+- Gate da revisão: `powershell -ExecutionPolicy Bypass -File .\gate.ps1`,
+  exit 0, `gate: passou`. Rust 83 testes; PC/UI 61; QA 20; fmt, clippy e
+  typecheck passaram. Android `BUILD SUCCESSFUL`, 41 tasks (1 executada,
+  40 up-to-date; testes Android up-to-date).
+- QA do emulador: `up` foi tentado com o SDK padrão e depois com o SDK
+  direto de `android/local.properties`. A primeira chamada não conseguiu
+  executar o adb pelo mount point de `%LOCALAPPDATA%`; a segunda abortou
+  com `infraestrutura: portas do emulador 5554/5555 ocupadas`, antes de
+  compilar/instalar/abrir os apps. O transporte nativo do QR ficou sem
+  verificar nesta revisão. A falha é de infraestrutura, não é outro
+  achado nem motivo de reabertura. `down -Sdk D:\AppData\Local\Android\Sdk`
+  confirmou exit 0, `stopped=true`, `restored=false`; estado isolado inativo.
