@@ -1,5 +1,5 @@
 # CLEAN-018: Preservar uma verificação executável do wrapper pair
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -78,3 +78,5 @@ ticket que não houve vermelho por não haver defeito.
   o `up.ps1` real o exercita em todo stage 3.
 
 - Stage 2 (2026-10-03): seam exercitada: CLI real de qa/phone.ps1, com config sintético e adb.ps1 falso que captura argv. Chamador conferido: qa/up.ps1 (pair com -Config e -Ip). Cobertos campos ausentes/nulos/vazios/malformados, os quatro IPv4 inválidos, QR válido, rota UDP padrão e respostas Error:/Exception com exit 0. Nenhuma função de produção alterada. Teste focado: 6 testes passaram (pai + 5 subtestes, 21 execuções do wrapper). Não houve vermelho: cobertura de comportamento existente, conforme a exceção explícita deste ticket.
+
+- Gate completo (2026-10-03): powershell -ExecutionPolicy Bypass -File .\gate.ps1 — exit 0, gate: passou. Rust: 83 testes; PC/UI: 61; QA: 20 (incluindo os 6 do pair); fmt, clippy e typecheck passaram. Android: BUILD SUCCESSFUL, 41 tasks (1 executada, 40 up-to-date; testes Android up-to-date). Diff final revisado: somente qa/phone.test.mjs e este ticket. Limite mantido: o fake .ps1 não verifica o escape pela camada nativa de argv; esse caminho segue coberto pelo kit real no stage 3. Pronto para revisão independente.
