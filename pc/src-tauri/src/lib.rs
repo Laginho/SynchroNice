@@ -611,6 +611,31 @@ mod tests {
         assert_eq!(ids, vec![enviando.id]);
     }
 
+    #[test]
+    fn snapshot_da_janela_nao_devolve_upload_que_termina_entre_a_lista_e_a_marca() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let texto = items.push_text("fica".into());
+        items.forget(&[enviando.id], vec![], false);
+
+        // O upload selecionado termina justo quando a marca é consultada:
+        // `file_done` tira o Item e a marca ao mesmo tempo.
+        let ids: Vec<u64> = super::visiveis(
+            || items.snapshot(),
+            |id| {
+                if id == enviando.id {
+                    items.file_done(id);
+                }
+                items.delete_requested(id)
+            },
+        )
+        .iter()
+        .map(|item| item.id)
+        .collect();
+
+        assert_eq!(ids, vec![texto.id]);
+    }
+
     use super::executavel;
     use std::path::Path;
 

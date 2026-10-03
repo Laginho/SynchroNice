@@ -1,5 +1,5 @@
 # SYN-028: Apagar tudo na janela do PC
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -77,6 +77,18 @@ mande `POST /items/delete` com o `X-Item-Id` de um Item recebido.
     upload em `Receiving` passado ao `Items::forget` sai do que a janela
     recebe ao abrir, e um Item não selecionado continua. Chama o helper
     direto, sem `State`. Vermelho porque o helper não existe.
+- Segunda reabertura (2026-10-02), provas dos dois ❌ da re-revisão, nas
+  mesmas costuras (sem arquivo novo, sem `items.rs`):
+  - `pc/ui/apagados.test.ts`: `ligarOuvintes(escutar, ouvintes)` com um
+    `listen` falso que só vale depois de um turno e, a cada registro, deixa o
+    backend mandar um Item (recebido e enviado) e excluí-lo logo em seguida:
+    nenhuma bolha pode sobrar, qualquer que seja o ouvinte registrado primeiro;
+    e cada evento chega ao seu tratador. Vermelho porque `ligarOuvintes` não
+    existe em `apagados.ts`.
+  - `mod tests` de `pc/src-tauri/src/lib.rs`: um upload selecionado que termina
+    entre a listagem e a consulta da marca não volta no snapshot da janela
+    (`visiveis(listar, selecionado)`, as duas operações injetadas para fixar
+    o entrelaçamento). Vermelho porque `visiveis` não existe.
 
 ## Comments
 
