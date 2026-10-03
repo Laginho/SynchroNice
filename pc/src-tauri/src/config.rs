@@ -4,15 +4,18 @@ use std::path::{Path, PathBuf};
 
 const FILE_NAME: &str = "config.json";
 
-/// Um perfil de QA guarda todos os dados à parte e não registra autostart.
+/// O perfil isolado não pode ler nem mudar o autostart da máquina.
+pub fn autostart_permitido(perfil_isolado: bool) -> bool {
+    !perfil_isolado
+}
+
+/// Resolve os dados e a permissão de acesso ao autostart, sem registrá-lo.
 pub fn resolve_data_dir(
     default: PathBuf,
     override_dir: Option<std::ffi::OsString>,
 ) -> (PathBuf, bool) {
-    match override_dir {
-        Some(dir) => (PathBuf::from(dir), false),
-        None => (default, true),
-    }
+    let permitido = autostart_permitido(override_dir.is_some());
+    (override_dir.map(PathBuf::from).unwrap_or(default), permitido)
 }
 
 /// Tudo que persiste além da Sessão: a Pasta e o Par (nome de instância e
