@@ -1,5 +1,5 @@
 # CLEAN-018: Preservar uma verificação executável do wrapper pair
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -80,3 +80,39 @@ ticket que não houve vermelho por não haver defeito.
 - Stage 2 (2026-10-03): seam exercitada: CLI real de qa/phone.ps1, com config sintético e adb.ps1 falso que captura argv. Chamador conferido: qa/up.ps1 (pair com -Config e -Ip). Cobertos campos ausentes/nulos/vazios/malformados, os quatro IPv4 inválidos, QR válido, rota UDP padrão e respostas Error:/Exception com exit 0. Nenhuma função de produção alterada. Teste focado: 6 testes passaram (pai + 5 subtestes, 21 execuções do wrapper). Não houve vermelho: cobertura de comportamento existente, conforme a exceção explícita deste ticket.
 
 - Gate completo (2026-10-03): powershell -ExecutionPolicy Bypass -File .\gate.ps1 — exit 0, gate: passou. Rust: 83 testes; PC/UI: 61; QA: 20 (incluindo os 6 do pair); fmt, clippy e typecheck passaram. Android: BUILD SUCCESSFUL, 41 tasks (1 executada, 40 up-to-date; testes Android up-to-date). Diff final revisado: somente qa/phone.test.mjs e este ticket. Limite mantido: o fake .ps1 não verifica o escape pela camada nativa de argv; esse caminho segue coberto pelo kit real no stage 3. Pronto para revisão independente.
+
+#### Review stage 3 (2026-10-03)
+
+Verdict: Reopen — critério 1: campos do Par em arrays ou com LF final chegam ao `am start`.
+
+- Base fixa: `31e1024f99ac417a607e14c5782ec088a39a7ca5`, na sessão
+  `sweatshop/2026-10-03-1608`. Revisados os commits `f302ed7` e `e5c2206`.
+- Standards: 0 violações documentadas e 0 smells acionáveis. O harness
+  chama a CLI real, usa dados sintéticos, captura argv e limpa temporários.
+  Não houve alteração de produção; a exceção explícita de cobertura sem
+  vermelho foi respeitada, e o commit posterior não toca testes.
+- Spec: 2 achados no critério 1, reproduzidos pela CLI real com `adb.ps1`
+  falso. São defeitos preexistentes que a cobertura entregue não detecta:
+  1. `nome_instancia` ou `token` como `[]` ou `[valor_valido]` resulta em
+     exit 0 e um `am start`. `-cnotmatch` filtra coleções; o resultado vazio
+     não rejeita esses campos. O config do PC exige strings e o parser do QR
+     Android não aceita listas.
+  2. Um nome ou token canônico seguido de `\n` também resulta em exit 0 e um
+     `am start`. O anchor `$` permite esse LF final, mas o Android exige
+     correspondência integral com `Regex.matches`.
+- Critério 1: ❌ nos dois casos acima. Foram seis reproduções indevidas,
+  uma por campo e formato; controles de string inválida retornaram exit 1,
+  `config.json sem Par valido` e nenhum lançamento.
+- Critérios 2–5: a inspeção confirma os casos pedidos, asserções do JSON,
+  lookup UDP local e respostas `Error:`/`Exception`; a validação executável
+  e o QA do emulador serão registrados no relatório desta revisão.
+- Chamadores e interações examinados: `qa/up.ps1` passa `-Config` e `-Ip`;
+  preparação/transporte adb, bloqueio de tela, guard de config, IPv4,
+  lookup UDP e lançamento de `DebugPairActivity`; tipos persistidos pelo PC
+  e aceitação do QR no Android. Nenhuma regressão introduzida identificada.
+  Transporte nativo de argv fica fora do fake, conforme o contrato.
+- Trabalho restante do stage 2: preservar testes dos arrays e do LF final,
+  demonstrar vermelho pelo wrapper real e só então corrigir o guard de
+  `pair`, dentro dos Primary files. A correção exige testes novos; por isso
+  não é um small fix do stage 3. Não há linha de ledger a remover.
+- Evidência: [relatório de revisão](../../qa-runs/2026-10-03-emulator-CLEAN-018-review.md).
