@@ -1,5 +1,5 @@
 # SYN-030: Opção "Iniciar com o Windows" na engrenagem do PC
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: human
@@ -138,3 +138,91 @@ automático, como a spec já define para autostart e engrenagem.
   do `up` precisou ser encerrado após emitir seu resultado final.
 
 - Débito humano: SYN-030 critérios 1–4 e 6 — verificar start release sem mudar o Run, estado real do checkbox, habilitar/desabilitar e efeito no próximo login/reabertura, reversão e console.error em falha real, e recusa de habilitação em debug fora do perfil isolado. Texto/posição do critério 2 e isolamento completo do critério 5 já verificados pelo kit; APIs nativas de Computer Use indisponíveis nesta sessão.
+
+#### Resolution (2026-10-03)
+Verdict: Approve
+
+Revisão de `e73aafc` até `ec7fb79`, em dois eixos independentes. Implementação
+aprovada e integrada sem squash na sessão `sweatshop/2026-10-03-1608` pelo
+merge `2125fb9`. O autostart passa a ser uma opção da engrenagem; abrir o app
+preserva o estado existente do Windows.
+
+##### Standards
+
+- Um achado documental, corrigido em `2c6b669`: os roteiros ativos ainda
+  afirmavam que abrir o app registrava autostart. Atualizados
+  `docs/pr-3-review-follow-up.md`, o walkthrough de 2026-09-27 e as specs core
+  e QA para descrever a opção e a permissão do perfil. A correção recebeu
+  nova revisão textual/TeX; nenhum achado pendente ou smell relevante.
+- Separação test-first correta: `7f9eb57` altera somente o teste e o ticket;
+  `12c6e0c` implementa sem tocar testes, e `58beb5a` apenas formata
+  `config.rs`. Os commits seguintes contêm documentação e evidência QA.
+  Todos os arquivos de código pertencem aos Primary files. As correções de
+  docs seguem a exceção explícita do ticket-flow para documentação obsoleta.
+- Glossário, ADRs, capability e configuração persistente coerentes com o
+  contrato. Nomes e funções permanecem simples e restritos à opção.
+
+##### Spec
+
+Nenhum requisito ausente, escopo extra, falha de critério ou regressão
+identificado. Os critérios abaixo foram aprovados pelo fonte; o kit e o
+gate complementam essa revisão. As execuções reais dos critérios 1–4 e 6
+continuam no débito humano expressamente previsto em Verification.
+
+| Critério | Veredito | Evidência |
+| --- | --- | --- |
+| 1 | ✅ | `setup` não chama enable/disable. O setup do plugin instalado configura o gerenciador sem ler ou gravar o registro. |
+| 2 | ✅ | Checkbox com id e texto corretos, abaixo de "Copiar com pontuação", conferido no DOM e na captura. Cada abertura consulta `is_enabled()` pelo comando Rust. Estado real permanece manual. |
+| 3 | ✅ | `definir_autostart` delega a enable/disable do plugin, cujo enable usa o exe atual. O painel consulta novamente na próxima abertura; registro e login reais permanecem manuais. |
+| 4 | ✅ | Falha restaura o valor anterior (`!ligado`) e chama `console.error`; o controle fica bloqueado durante a operação. Falha real de escrita permanece manual. |
+| 5 | ✅ | A permissão do perfil é conferida antes do plugin. No kit, leitura e as duas mudanças devolveram a recusa esperada, e o checkbox permaneceu desabilitado. |
+| 6 | ✅ | `ligado && cfg!(debug_assertions)` devolve erro antes do plugin. Execução em debug fora do perfil isolado permanece manual. |
+| 7 | ✅ | Função pura exercitada por `tests/config.rs`, com perfil padrão, isolado e override definido mas vazio; os caminhos dos chamadores foram preservados. |
+
+Nota para leitura do critério 2: o `is_enabled()` exigido pelo contrato, na
+dependência existente `auto-launch 0.5.0`, também considera
+`StartupApproved\Run`. Uma entrada desativada pelo Gerenciador de Tarefas
+aparece desmarcada; `enable()` restaura a aprovação quando essa chave é
+acessível. A implementação segue os métodos de plugin definidos pelo ticket.
+
+##### Escopo examinado
+
+- Chamadores de `resolve_data_dir`: `run`, `start_server` e `mudar_pasta`.
+  Os dois últimos continuam consumindo só o caminho. Também examinados:
+  estado e registro dos comandos Tauri, capability, fonte do plugin e seu
+  builder, configuração persistente e inicialização da janela.
+- Caminhos de falha e interação: leitura recusada mantém o controle
+  desabilitado; mudança recusada restaura o check; abrir/fechar o painel
+  durante uma operação preserva o bloqueio. Pasta, Desparear, Copiar com
+  pontuação, tela de QR e chat mantêm seus fluxos. O kit confirmou pareamento
+  e presença com o emulador antes de verificar as configurações.
+- Não exercitados: registro real, login do Windows, falhas reais de acesso
+  ao registro, debug não isolado e mudanças externas simultâneas do estado
+  de inicialização. O TeX foi revisado textualmente, sem gerar um novo PDF.
+- Decisões herdadas da triagem: Q12 (proxy, preservar instalação existente),
+  Q13 (proxy, guarda Rust do isolado), Q14 (proxy, atualização dos docs) e
+  Q15 (proxy, checkbox e erro no console) estão refletidas no resultado.
+
+##### Validação e integração
+
+- Red-green conferido: `7f9eb57` chama a função de produção ausente e o log
+  red registra E0425 para `config::autostart_permitido`; `12c6e0c` fornece a
+  função. O gate desta revisão aprovou o mesmo teste, sem alterar testes.
+- Rebase na sessão já atualizado, sem conflito. Gate completo executado em
+  primeiro plano com `RUST_TEST_THREADS=1`: fmt, Clippy, TypeScript,
+  83 testes Rust, 61 da UI e 14 do QA passaram. `gradle check` passou;
+  relatórios XML têm 94 testes do app e 72 do protocolo, zero falhas, erros
+  ou ignorados. As tarefas de teste Android estavam `UP-TO-DATE`.
+  Log: `.scratch/qa-runs/2026-10-03-syn-030-review/gate.log`.
+- QA: `.scratch/qa-runs/2026-10-03-syn-030-review.md`, com critério 5 completo
+  e texto/posição do critério 2. O relatório registra o caminho real do SDK,
+  a limitação do wrapper de saída e a limpeza confirmada por `down`.
+- O build Tauri regravou `Cargo.toml` sem diff de conteúdo; restaurada essa
+  regravação antes do rebase. Diff final conferido: código do ticket,
+  correção documental, relatório, ticket e ledger; nenhum segredo, log ou
+  captura adicionado ao git. A árvore estava limpa antes da integração.
+- `Stage: done`, esta Resolution e a linha do ledger registrados juntos na
+  branch de sessão. O PR da sessão segue com o driver e o merge com o humano.
+
+Totais da revisão: Standards — 1 achado documental resolvido, 0 pendentes;
+Spec — 0 falhas, com a nota de comportamento da dependência registrada acima.
