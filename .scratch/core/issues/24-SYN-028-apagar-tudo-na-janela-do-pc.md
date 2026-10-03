@@ -1,5 +1,5 @@
 # SYN-028: Apagar tudo na janela do PC
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent

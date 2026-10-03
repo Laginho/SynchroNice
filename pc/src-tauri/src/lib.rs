@@ -27,7 +27,7 @@ const SENT_EVENT: &str = "enviado";
 const PRESENCE_EVENT: &str = "presenca";
 
 /// Evento que a janela escuta quando Itens saem da Sessão por uma exclusão
-/// (do celular, ou o Apagar tudo da própria janela): payload `DeletedItems`.
+/// recebida do celular: payload `DeletedItems`.
 const DELETED_EVENT: &str = "apagado";
 
 /// Payload do evento `enviado`: o Item mais se ele já foi confirmado pelo

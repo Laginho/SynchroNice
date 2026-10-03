@@ -725,7 +725,7 @@ async function desfazerApagarTudo(): Promise<void> {
   }
 }
 
-/** Uma exclusão vinda do celular (ou a nossa, já concluída) tira as bolhas
+/** Uma exclusão vinda do celular tira as bolhas
  * sem rastro — também das que estão guardadas na janela de Desfazer. */
 function removerExcluidos(excluidos: { received: number[]; sent: number[] }): void {
   apagados.marcar(excluidos.received, excluidos.sent);
