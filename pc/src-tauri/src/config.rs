@@ -15,7 +15,10 @@ pub fn resolve_data_dir(
     override_dir: Option<std::ffi::OsString>,
 ) -> (PathBuf, bool) {
     let permitido = autostart_permitido(override_dir.is_some());
-    (override_dir.map(PathBuf::from).unwrap_or(default), permitido)
+    (
+        override_dir.map(PathBuf::from).unwrap_or(default),
+        permitido,
+    )
 }
 
 /// Tudo que persiste além da Sessão: a Pasta e o Par (nome de instância e
