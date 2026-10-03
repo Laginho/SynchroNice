@@ -1,5 +1,5 @@
 # CLEAN-019: Destino relatado pela limpeza é o destino real (celular e PC)
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -204,3 +204,13 @@ Verdict: Reopen — critério 7: atalho reciclado é relatado como remoção per
   por validação no Windows real; o achado .lnk foi reproduzido nesse ambiente.
 - Handoff: Stage to-implement na branch clean-019; somente o ❌ acima resta.
   Nenhum merge na sessão e nenhuma entrada CLEAN-019 no ledger.
+
+- Stage 2, correção da reabertura (2026-10-03): seam preservada em
+  `pc.ps1 list-files/track/clean`. O teste cria um atalho real via WScript,
+  registra e limpa pela interface pública, exige o destino Lixeira e
+  preservação do arquivo de destino do atalho. Callers examinados: clean
+  consome track/list-files; somente a identificação da entrada reciclada muda.
+  Ausência, repetição, baseline, hash alterado e drive subst continuam cobertos.
+  Red no Windows real: `node --test qa/pc.test.mjs`, 2 testes, 1 passou e
+  1 falhou: o .txt é relatado corretamente, mas o .lnk dá
+  `remocao permanente` em vez de `Lixeira do Windows`.

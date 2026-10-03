@@ -45,6 +45,25 @@ test('PC cleanup protects previous, unlisted, changed files and unsafe manifests
     assert.equal(readFileSync(previous, 'utf8'), 'previous');
     assert.equal(run('clean').status, 0);
 
+    const shortcut = join(folder, 'synchronice-qa-test-shortcut.lnk');
+    const createShortcut = spawnSync('powershell.exe', ['-NoProfile', '-Command',
+      '$link = (New-Object -ComObject WScript.Shell).CreateShortcut($env:QA_SHORTCUT); ' +
+      '$link.TargetPath = $env:QA_SHORTCUT_TARGET; $link.Save()'], {
+      env: { ...process.env, QA_SHORTCUT: shortcut, QA_SHORTCUT_TARGET: previous },
+      encoding: 'utf8', timeout: 30000,
+    });
+    assert.ifError(createShortcut.error);
+    assert.equal(createShortcut.status, 0, createShortcut.stderr);
+    assert.equal(run('track', shortcut).status, 0);
+    const shortcutCleaned = run('clean');
+    assert.equal(shortcutCleaned.status, 0, shortcutCleaned.stderr);
+    assert.deepEqual(JSON.parse(shortcutCleaned.stdout), [
+      { path: tracked, destination: 'Lixeira do Windows' },
+      { path: shortcut, destination: 'Lixeira do Windows' },
+    ]);
+    assert.equal(existsSync(shortcut), false);
+    assert.equal(readFileSync(previous, 'utf8'), 'previous');
+
     writeFileSync(changed, 'before');
     assert.equal(run('track', changed).status, 0);
     writeFileSync(changed, 'after');
