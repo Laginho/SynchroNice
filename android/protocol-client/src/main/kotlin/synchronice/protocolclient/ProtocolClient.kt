@@ -56,9 +56,8 @@ class ProtocolClient(
      * requisição (ex.: token errado), lança [ProtocolRejectedException] em
      * vez de ficar Pendente, porque recusa não é indisponibilidade.
      */
-    fun sendText(text: String) {
+    fun sendText(text: String): String? =
         send(PendingItem.Text(text)) { id -> trySendText(text, id) }
-    }
 
     /**
      * Manda um Item de arquivo ao PC em stream, chamando [onProgress] com o
@@ -73,15 +72,38 @@ class ProtocolClient(
      * guardar a cópia — disco cheio, permissão negada — sobe para quem
      * chamou, em vez de virar perda silenciosa.
      */
-    fun sendFile(file: File, onProgress: (Int) -> Unit = {}) {
+    fun sendFile(file: File, onProgress: (Int) -> Unit = {}): String? =
         send(PendingItem.File(file.absolutePath, file.name)) { id -> trySendFile(file, file.name, onProgress, id) }
-    }
 
     /** Persiste um Item antes de entregá-lo a um executor em segundo plano. */
-    fun enqueueText(text: String) = enqueue(PendingItem.Text(text))
+    fun enqueueText(text: String): Boolean = enqueueTextItem(text) != null
 
     /** Faz uma cópia interna antes de a URI ou o arquivo de origem desaparecer. */
-    fun enqueueFile(file: File) = enqueue(PendingItem.File(file.absolutePath, file.name))
+    fun enqueueFile(file: File): Boolean = enqueueFileItem(file) != null
+
+    /** Como [enqueueText], devolvendo o id de protocolo (`X-Item-Id`) com que o Item vai sair. */
+    fun enqueueTextItem(text: String): String? = enqueue(PendingItem.Text(text))
+
+    /** Como [enqueueFile], devolvendo o id de protocolo (`X-Item-Id`), ou `null` se o arquivo já tinha sumido. */
+    fun enqueueFileItem(file: File): String? = enqueue(PendingItem.File(file.absolutePath, file.name))
+
+    /**
+     * Apagar tudo no celular: guarda a exclusão no fim da fila (sai como `POST
+     * /items/delete`, em ordem com o resto) e tira da fila os Pendentes que ela
+     * lista em [doCelular]. A exclusão entra antes da limpeza: um crash no meio
+     * deixa Pendentes que o PC apaga logo depois, nunca uma exclusão perdida.
+     */
+    fun enqueueDelete(doPc: List<Long>, doCelular: List<String>) {
+        enqueue(PendingItem.Delete(doPc, doCelular))
+        discardPending(doCelular)
+    }
+
+    /** Tira da fila, sem enfileirar nada, os Pendentes com esses ids (exclusão vinda do PC). */
+    fun discardPending(ids: Collection<String>) {
+        val listed = ids.toSet()
+        queueStore.remove(listed)
+        pending.removeAll { it.id in listed }
+    }
 
     /**
      * Caminho único de envio: drena o Pendente antes, nunca fura a fila; se
@@ -90,14 +112,11 @@ class ProtocolClient(
      * se o PC gravou mas a resposta se perdeu, o reenvio da fila é
      * reconhecido pelo mesmo id em vez de virar outro Item.
      */
-    private fun send(item: PendingItem, attempt: (id: String) -> SendOutcome) {
+    private fun send(item: PendingItem, attempt: (id: String) -> SendOutcome): String? {
         retryPending()
-        if (pending.isNotEmpty()) {
-            enqueue(item)
-            return
-        }
-        when (val outcome = attempt(item.id)) {
-            SendOutcome.Success -> {}
+        if (pending.isNotEmpty()) return enqueue(item)
+        return when (val outcome = attempt(item.id)) {
+            SendOutcome.Success -> item.id
             SendOutcome.Unreachable -> enqueue(item)
             is SendOutcome.Rejected -> throw ProtocolRejectedException(outcome.code)
         }
@@ -130,6 +149,7 @@ class ProtocolClient(
                     next.id,
                     onFileStart,
                 )
+                is PendingItem.Delete -> trySendDelete(next)
             }
             when (outcome) {
                 SendOutcome.Success -> dequeueFirst()
@@ -139,10 +159,10 @@ class ProtocolClient(
         }
     }
 
-    private fun enqueue(item: PendingItem): Boolean {
-        val stored = queueStore.enqueue(item) ?: return false
+    private fun enqueue(item: PendingItem): String? {
+        val stored = queueStore.enqueue(item) ?: return null
         pending.add(stored)
-        return true
+        return stored.id
     }
 
     private fun dequeueFirst() {
@@ -160,6 +180,27 @@ class ProtocolClient(
             val code = connection.responseCode
             when (code) {
                 HttpURLConnection.HTTP_CREATED -> SendOutcome.Success
+                HttpURLConnection.HTTP_UNAVAILABLE -> SendOutcome.Unreachable
+                else -> SendOutcome.Rejected(code)
+            }
+        } catch (_: IOException) {
+            SendOutcome.Unreachable
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun trySendDelete(delete: PendingItem.Delete): SendOutcome {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = open("/items/delete", "POST")
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            val doCelular = delete.doCelular.joinToString(",") { "\"" + it.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" }
+            val body = "{\"do_pc\":[${delete.doPc.joinToString(",")}],\"do_celular\":[$doCelular]}"
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            when (val code = connection.responseCode) {
+                HttpURLConnection.HTTP_NO_CONTENT -> SendOutcome.Success
                 HttpURLConnection.HTTP_UNAVAILABLE -> SendOutcome.Unreachable
                 else -> SendOutcome.Rejected(code)
             }
@@ -343,6 +384,9 @@ class ProtocolClient(
     /** Confirma texto depois de o chamador aceitá-lo na Sessão. Pode repetir após falha de rede. */
     fun acknowledgeText(item: Item.Text) = ack(item.id)
 
+    /** Confirma uma exclusão vinda do PC depois de o chamador aplicá-la. Pode repetir após falha de rede. */
+    fun acknowledgeDelete(item: Item.Delete) = ack(item.id)
+
     private fun ack(id: Long) {
         val connection = open("/outbox/$id/ack", "POST")
         try {
@@ -398,12 +442,15 @@ class ProtocolClient(
     }
 
     private fun parseItem(line: String): Item {
-        val fields = parseFlatJsonObject(line)
-        val id = fields.getValue("id").toLong()
-        val atMs = fields.getValue("at_ms").toLong()
-        return when (val kind = fields.getValue("kind")) {
-            "text" -> Item.Text(id, atMs, fields.getValue("text"))
-            "file" -> Item.FileMeta(id, atMs, fields.getValue("name"), fields.getValue("size").toLong())
+        val fields = parseListenObject(line)
+        fun field(key: String) = fields.getValue(key) as String
+        fun list(key: String) = (fields.getValue(key) as List<*>).map { it as String }
+        val id = field("id").toLong()
+        val atMs = field("at_ms").toLong()
+        return when (val kind = field("kind")) {
+            "text" -> Item.Text(id, atMs, field("text"))
+            "file" -> Item.FileMeta(id, atMs, field("name"), field("size").toLong())
+            "delete" -> Item.Delete(id, atMs, list("do_pc").map { it.toLong() }, list("do_celular"))
             else -> error("kind desconhecido em /listen: $kind")
         }
     }

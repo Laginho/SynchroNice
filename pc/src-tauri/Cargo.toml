@@ -40,6 +40,8 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # Arrastar o arquivo de uma bolha para outro programa (SYN-006): drag nativo
 # do SO a partir do WebView, que a Drag and Drop API da web não faz.
 tauri-plugin-drag = "2"
+# Apagar tudo leva arquivos recebidos à Lixeira do sistema (SYN-019).
+trash = "5.2.9"
 
 [dev-dependencies]
 tempfile = "3"

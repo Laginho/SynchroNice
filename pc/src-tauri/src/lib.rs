@@ -9,7 +9,9 @@ pub mod server;
 use items::{Item, Items};
 use outbox::{OutItem, Outbox};
 use par::Par;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, State, WindowEvent};
@@ -24,6 +26,10 @@ const SENT_EVENT: &str = "enviado";
 /// há uma conexão `/listen` viva, `false` quando ela cai.
 const PRESENCE_EVENT: &str = "presenca";
 
+/// Evento que a janela escuta quando Itens saem da Sessão por uma exclusão
+/// recebida do celular: payload `DeletedItems`.
+const DELETED_EVENT: &str = "apagado";
+
 /// Payload do evento `enviado`: o Item mais se ele já foi confirmado pelo
 /// celular (Entregue) ou ainda está Pendente.
 #[derive(Clone, serde::Serialize)]
@@ -31,6 +37,27 @@ struct Enviado {
     #[serde(flatten)]
     item: OutItem,
     entregue: bool,
+    ordem: usize,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct Recebido {
+    #[serde(flatten)]
+    item: Item,
+    ordem: usize,
+}
+
+/// Desempate de horário entre os dois espaços de ids, conservado no backend
+/// para que recarregar mantenha a ordem em que as bolhas entraram na Sessão.
+#[derive(Clone, Default)]
+struct SessionOrder(Arc<Mutex<HashMap<(bool, u64), usize>>>);
+
+impl SessionOrder {
+    fn of(&self, enviado: bool, id: u64) -> usize {
+        let mut order = self.0.lock().expect("ordem da Sessão sem panic");
+        let next = order.len();
+        *order.entry((enviado, id)).or_insert(next)
+    }
 }
 
 /// Se um Par já estava gravado antes desta abertura do app — só para decidir
@@ -55,10 +82,53 @@ fn pasta_efetiva(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, S
 /// Evento que a janela escuta para desenhar a bolha de um Item novo.
 const ITEM_EVENT: &str = "item";
 
+/// Itens da Sessão sem os que já foram selecionados para exclusão: um upload
+/// em andamento fica em `Items` até terminar, mas a janela não o redesenha.
+fn recebidos_visiveis(items: &Items) -> Vec<Item> {
+    visiveis(|| items.snapshot(), |id| items.delete_requested(id))
+}
+
+/// A lista e a marca de exclusão vêm de locks separados, e o término de um
+/// upload selecionado tira o Item e a marca juntos. Consultar as marcas antes
+/// da lista final garante que quem estava marcado e ainda aparece nela segue
+/// escondido; quem terminou nesse meio tempo já não aparece.
+fn visiveis(listar: impl Fn() -> Vec<Item>, selecionado: impl Fn(u64) -> bool) -> Vec<Item> {
+    let marcados: HashSet<u64> = listar()
+        .iter()
+        .map(|item| item.id)
+        .filter(|&id| selecionado(id))
+        .collect();
+    listar()
+        .into_iter()
+        .filter(|item| !marcados.contains(&item.id))
+        .collect()
+}
+
 /// A Sessão atual, para a janela se alinhar ao abrir (ou reabrir).
 #[tauri::command]
-fn list_items(items: State<'_, Items>) -> Vec<Item> {
-    items.snapshot()
+fn list_items(items: State<'_, Items>, order: State<'_, SessionOrder>) -> Vec<Recebido> {
+    recebidos_visiveis(&items)
+        .into_iter()
+        .map(|item| Recebido {
+            ordem: order.of(false, item.id),
+            item,
+        })
+        .collect()
+}
+
+/// Só enviadas desta Sessão, inclusive as Entregues; nunca restaura o chat
+/// a partir do manifesto persistido de Pendentes.
+#[tauri::command]
+fn list_sent_items(outbox: State<'_, Outbox>, order: State<'_, SessionOrder>) -> Vec<Enviado> {
+    outbox
+        .session_items()
+        .into_iter()
+        .map(|sent| Enviado {
+            ordem: order.of(true, sent.item.id),
+            item: sent.item,
+            entregue: sent.entregue,
+        })
+        .collect()
 }
 
 /// Se a janela deve abrir na tela de QR (Par ainda não existia antes desta
@@ -119,6 +189,24 @@ async fn mudar_pasta(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Fim da janela de Desfazer do Apagar tudo: `received` são ids de `Items`,
+/// `sent` as chaves da lista de enviados.
+#[tauri::command]
+async fn apagar_tudo(
+    app: tauri::AppHandle,
+    received: Vec<u64>,
+    sent: Vec<u64>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<server::Running>()
+            .ok_or_else(|| "servidor HTTP não está disponível".to_string())?
+            .apagar_tudo(&received, &sent)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Caminho do arquivo recebido de um Item que terminou de gravar. A consulta
 /// por id mantém os Itens antigos ligados à Pasta em que chegaram.
 fn caminho_do_arquivo_recebido(app: &tauri::AppHandle, id: u64) -> Result<PathBuf, String> {
@@ -147,6 +235,26 @@ fn caminho_para_arrastar(app: tauri::AppHandle, id: u64) -> Result<String, Strin
         .ok_or_else(|| "o caminho do arquivo não é válido".to_string())
 }
 
+fn caminho_do_arquivo_enviado(outbox: &Outbox, id: u64) -> Result<PathBuf, String> {
+    outbox
+        .session_file_path(id)
+        .filter(|path| path.is_file())
+        .ok_or_else(|| "o arquivo de origem não está mais disponível".to_string())
+}
+
+#[tauri::command]
+fn read_sent_file_bytes(outbox: State<'_, Outbox>, id: u64) -> Result<Vec<u8>, String> {
+    std::fs::read(caminho_do_arquivo_enviado(&outbox, id)?).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn caminho_enviado_para_arrastar(outbox: State<'_, Outbox>, id: u64) -> Result<String, String> {
+    caminho_do_arquivo_enviado(&outbox, id)?
+        .to_str()
+        .map(str::to_string)
+        .ok_or_else(|| "o caminho do arquivo não é válido".to_string())
+}
+
 /// Extensões que o Windows executa ao abrir: um clique na bolha mostra o
 /// arquivo no Explorer em vez de rodar o que veio da rede.
 const EXECUTAVEIS: &[&str] = &[
@@ -165,8 +273,20 @@ fn executavel(caminho: &std::path::Path) -> bool {
 /// mostra no Explorer se for executável.
 #[tauri::command]
 fn abrir_arquivo(app: tauri::AppHandle, id: u64) -> Result<(), String> {
+    abrir_caminho(&app, caminho_do_arquivo_recebido(&app, id)?)
+}
+
+#[tauri::command]
+fn abrir_arquivo_enviado(
+    app: tauri::AppHandle,
+    outbox: State<'_, Outbox>,
+    id: u64,
+) -> Result<(), String> {
+    abrir_caminho(&app, caminho_do_arquivo_enviado(&outbox, id)?)
+}
+
+fn abrir_caminho(app: &tauri::AppHandle, caminho: PathBuf) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let caminho = caminho_do_arquivo_recebido(&app, id)?;
     if executavel(&caminho) {
         app.opener().reveal_item_in_dir(&caminho)
     } else {
@@ -191,14 +311,8 @@ fn send_text(outbox: State<'_, Outbox>, text: String) -> Result<(), String> {
 #[tauri::command]
 fn send_files(outbox: State<'_, Outbox>, paths: Vec<String>) -> Result<(), String> {
     for caminho in paths {
-        let bytes = std::fs::read(&caminho).map_err(|e| e.to_string())?;
-        let nome = std::path::Path::new(&caminho)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("arquivo")
-            .to_string();
         outbox
-            .enqueue_file(nome, &bytes)
+            .enqueue_file_from_path(Path::new(&caminho))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -220,6 +334,47 @@ fn send_bytes(outbox: State<'_, Outbox>, name: String, bytes: Vec<u8>) -> Result
 #[tauri::command]
 fn read_clipboard_file_list() -> Result<Vec<String>, String> {
     clipboard_win::get_clipboard(clipboard_win::formats::FileList).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct PreviaDeCaminho {
+    tamanho: u64,
+    bytes: Option<Vec<u8>>,
+}
+
+/// Prévia somente leitura: nunca usa a fila nem cria cópias de entrega.
+#[tauri::command]
+fn previa_de_caminho(caminho: String) -> Result<PreviaDeCaminho, String> {
+    use std::io::Read;
+    const LIMITE: u64 = 10 * 1024 * 1024;
+    let caminho = Path::new(&caminho);
+    let arquivo = std::fs::File::open(caminho).map_err(|e| e.to_string())?;
+    let metadata = arquivo.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("a origem não é um arquivo".to_string());
+    }
+    let imagem = caminho
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
+                .contains(&ext.to_ascii_lowercase().as_str())
+        });
+    let bytes = if imagem && metadata.len() <= LIMITE {
+        let mut bytes = Vec::new();
+        // Também limita o caso em que o arquivo cresce depois do metadata.
+        arquivo
+            .take(LIMITE + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        (bytes.len() as u64 <= LIMITE).then_some(bytes)
+    } else {
+        None
+    };
+    Ok(PreviaDeCaminho {
+        tamanho: metadata.len(),
+        bytes,
+    })
 }
 
 /// Sobe o servidor HTTP com o token do Par, anuncia o serviço por mDNS, liga
@@ -266,17 +421,31 @@ fn start_server(app: &tauri::AppHandle, items: Items) {
     app.manage(outbox.clone());
 
     let handle = app.clone();
+    let order = app.state::<SessionOrder>().inner().clone();
     items.on_new(move |item| {
-        if let Err(e) = handle.emit(ITEM_EVENT, item) {
+        let payload = Recebido {
+            ordem: order.of(false, item.id),
+            item: item.clone(),
+        };
+        if let Err(e) = handle.emit(ITEM_EVENT, payload) {
             eprintln!("não foi possível avisar a janela do Item {}: {e}", item.id);
         }
     });
 
     let handle = app.clone();
+    items.on_delete(move |deleted| {
+        if let Err(e) = handle.emit(DELETED_EVENT, deleted) {
+            eprintln!("não foi possível avisar a janela da exclusão: {e}");
+        }
+    });
+
+    let handle = app.clone();
+    let order = app.state::<SessionOrder>().inner().clone();
     outbox.on_change(move |item, entregue| {
         let payload = Enviado {
             item: item.clone(),
             entregue,
+            ordem: order.of(true, item.id),
         };
         if let Err(e) = handle.emit(SENT_EVENT, payload) {
             eprintln!("não foi possível avisar a janela do envio {}: {e}", item.id);
@@ -342,18 +511,25 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_drag::init())
         .manage(Items::new())
+        .manage(SessionOrder::default())
         .invoke_handler(tauri::generate_handler![
             list_items,
+            list_sent_items,
             estado_par_inicial,
             parear_de_novo,
             mudar_pasta,
+            apagar_tudo,
             read_file_bytes,
+            read_sent_file_bytes,
             send_text,
             send_files,
             send_bytes,
             read_clipboard_file_list,
+            previa_de_caminho,
             caminho_para_arrastar,
-            abrir_arquivo
+            caminho_enviado_para_arrastar,
+            abrir_arquivo,
+            abrir_arquivo_enviado
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -380,6 +556,98 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn previa_de_caminho_le_tamanho_e_limita_bytes_a_imagens_pequenas() {
+        let dir = tempfile::tempdir().unwrap();
+        let documento = dir.path().join("documento.txt");
+        let imagem = dir.path().join("foto.PNG");
+        let grande = dir.path().join("grande.png");
+        std::fs::write(&documento, b"texto").unwrap();
+        std::fs::write(&imagem, b"imagem").unwrap();
+        let arquivo = std::fs::File::create(&grande).unwrap();
+        arquivo.set_len(10 * 1024 * 1024 + 1).unwrap();
+
+        let previa = super::previa_de_caminho(documento.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 5);
+        assert_eq!(previa.bytes, None);
+        let previa = super::previa_de_caminho(imagem.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 6);
+        assert_eq!(previa.bytes.as_deref(), Some(b"imagem".as_slice()));
+        std::fs::File::create(&imagem)
+            .unwrap()
+            .set_len(10 * 1024 * 1024)
+            .unwrap();
+        let previa = super::previa_de_caminho(imagem.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.bytes.unwrap().len(), 10 * 1024 * 1024);
+        let previa = super::previa_de_caminho(grande.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(previa.tamanho, 10 * 1024 * 1024 + 1);
+        assert_eq!(previa.bytes, None);
+        assert!(super::previa_de_caminho(
+            dir.path().join("sumiu.png").to_string_lossy().into_owned()
+        )
+        .is_err());
+        assert!(super::previa_de_caminho(dir.path().to_string_lossy().into_owned()).is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+
+    #[test]
+    fn snapshot_da_janela_esconde_upload_ja_selecionado_para_exclusao() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let concluido = items.start_file("b.bin".into(), 100);
+        items.file_done(concluido.id);
+        let texto = items.push_text("fica".into());
+
+        items.forget(&[enviando.id, concluido.id], vec![], false);
+
+        let ids: Vec<u64> = super::recebidos_visiveis(&items)
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, vec![texto.id]);
+        assert!(items.delete_requested(enviando.id));
+    }
+
+    #[test]
+    fn snapshot_da_janela_mantem_upload_nao_selecionado() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let outro = items.start_file("b.bin".into(), 100);
+
+        items.forget(&[outro.id], vec![], false);
+
+        let ids: Vec<u64> = super::recebidos_visiveis(&items)
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, vec![enviando.id]);
+    }
+
+    #[test]
+    fn snapshot_da_janela_nao_devolve_upload_que_termina_entre_a_lista_e_a_marca() {
+        let items = super::Items::new();
+        let enviando = items.start_file("a.bin".into(), 100);
+        let texto = items.push_text("fica".into());
+        items.forget(&[enviando.id], vec![], false);
+
+        // O upload selecionado termina justo quando a marca é consultada:
+        // `file_done` tira o Item e a marca ao mesmo tempo.
+        let ids: Vec<u64> = super::visiveis(
+            || items.snapshot(),
+            |id| {
+                if id == enviando.id {
+                    items.file_done(id);
+                }
+                items.delete_requested(id)
+            },
+        )
+        .iter()
+        .map(|item| item.id)
+        .collect();
+
+        assert_eq!(ids, vec![texto.id]);
+    }
+
     use super::executavel;
     use std::path::Path;
 

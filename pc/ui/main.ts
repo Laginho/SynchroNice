@@ -1,15 +1,18 @@
 // A janela do chat. Desenha cada Item recebido como bolha à esquerda ("o
 // outro") e cada Item enviado como bolha à direita ("eu"), e enfileira o que
-// o composer, o drop e o Ctrl+V mandam para o celular (SYN-004).
+// o composer manda para o celular. Drop e Ctrl+V preparam a bandeja (SYN-020).
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { segmentarTexto } from "./copiaveis.ts";
+import { Bandeja, temPrevia } from "./bandeja.ts";
+import { Apagados, ligarOuvintes } from "./apagados.ts";
 
 interface TextItem {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "text";
   text: string;
 }
@@ -17,6 +20,7 @@ interface TextItem {
 interface FileItem {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "file";
   name: string;
   size: number;
@@ -29,6 +33,7 @@ type Item = TextItem | FileItem;
 interface EnviadoTexto {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "text";
   text: string;
   entregue: boolean;
@@ -37,6 +42,7 @@ interface EnviadoTexto {
 interface EnviadoArquivo {
   id: number;
   at_ms: number;
+  ordem: number;
   kind: "file";
   name: string;
   size: number;
@@ -65,6 +71,108 @@ const recebidas = new Map<number, HTMLElement>();
 /** Bolha enviada já desenhada por id — ids do PC, num espaço à parte dos ids
  * de Item recebido, então as duas listas precisam de mapas separados. */
 const enviadas = new Map<number, HTMLElement>();
+
+type OrigemDaBandeja =
+  | { tipo: "caminho"; caminho: string }
+  | { tipo: "imagem"; arquivo: File; nome: string };
+
+interface DadosDoChip {
+  nome: string;
+  tamanho: number | null;
+  previa: string | null;
+}
+
+const bandeja = new Bandeja<OrigemDaBandeja>();
+const chips = new Map<number, DadosDoChip>();
+let adicoesPendentes = Promise.resolve();
+let geracaoDaBandeja = 0;
+
+function renderBandeja(): void {
+  const entradas = bandeja.entradas();
+  const ids = new Set(entradas.map((entrada) => entrada.id));
+  for (const [id, chip] of chips) {
+    if (ids.has(id)) continue;
+    if (chip.previa) URL.revokeObjectURL(chip.previa);
+    chips.delete(id);
+  }
+  const painel = document.querySelector<HTMLElement>("#bandeja")!;
+  painel.hidden = entradas.length === 0;
+  painel.replaceChildren();
+  for (const entrada of entradas) {
+    const dados = chips.get(entrada.id)!;
+    const chip = document.createElement("li");
+    chip.className = "bandeja-chip";
+    chip.classList.toggle("falhou", entrada.falhou);
+    chip.dataset.id = String(entrada.id);
+    if (dados.previa) {
+      const img = document.createElement("img");
+      img.src = dados.previa;
+      img.alt = dados.nome;
+      chip.append(img);
+    }
+    const info = document.createElement("div");
+    info.className = "bandeja-info";
+    const nome = document.createElement("span");
+    nome.className = "bandeja-nome";
+    nome.textContent = dados.nome;
+    nome.title = dados.nome;
+    const meta = document.createElement("span");
+    meta.className = "bandeja-meta";
+    meta.textContent = entrada.falhou
+      ? entrada.origem.tipo === "caminho"
+        ? "origem não encontrada ou indisponível"
+        : "não foi possível enviar"
+      : dados.tamanho === null ? "" : tamanhoLegivel(dados.tamanho);
+    info.append(nome, meta);
+    const remover = document.createElement("button");
+    remover.type = "button";
+    remover.textContent = "✕";
+    remover.setAttribute("aria-label", `Remover ${dados.nome}`);
+    remover.addEventListener("click", () => {
+      bandeja.remover(entrada.id);
+      renderBandeja();
+      document.querySelector<HTMLInputElement>("#composer-input")!.focus();
+    });
+    chip.append(info, remover);
+    painel.append(chip);
+  }
+}
+
+function adicionarCaminhos(caminhos: string[]): void {
+  if (arrastandoDaBolha) return;
+  for (const caminho of caminhos) {
+    const entrada = bandeja.adicionar({ tipo: "caminho", caminho });
+    const dados: DadosDoChip = {
+      nome: caminho.split(/[\\/]/).pop() || caminho,
+      tamanho: null,
+      previa: null,
+    };
+    chips.set(entrada.id, dados);
+    void invoke<{ tamanho: number; bytes: number[] | null }>("previa_de_caminho", { caminho })
+      .then((previa) => {
+        // Remover/limpar/enviar pode ter acontecido enquanto o disco era lido.
+        if (!chips.has(entrada.id)) return;
+        dados.tamanho = previa.tamanho;
+        if (previa.bytes) {
+          dados.previa = URL.createObjectURL(new Blob([new Uint8Array(previa.bytes)]));
+        }
+        renderBandeja();
+      })
+      // Origem ausente na prévia não impede adicioná-la nem tentar enviar.
+      .catch(() => {});
+  }
+  renderBandeja();
+}
+
+function adicionarImagem(arquivo: File, nome: string): void {
+  if (arrastandoDaBolha) return;
+  const entrada = bandeja.adicionar({ tipo: "imagem", arquivo, nome });
+  chips.set(entrada.id, {
+    nome, tamanho: arquivo.size,
+    previa: temPrevia(arquivo.size) ? URL.createObjectURL(arquivo) : null,
+  });
+  renderBandeja();
+}
 
 function hora(atMs: number): string {
   return new Date(atMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -189,12 +297,13 @@ function renderTexto(item: TextItem): HTMLElement {
 }
 
 /** Troca a miniatura por uma imagem real assim que o arquivo termina de chegar. */
-function carregarMiniatura(id: number, nome: string, thumb: HTMLElement): void {
-  invoke<number[]>("read_file_bytes", { id })
+function carregarMiniatura(id: number, nome: string, thumb: HTMLElement, enviada = false): void {
+  invoke<number[]>(enviada ? "read_sent_file_bytes" : "read_file_bytes", { id })
     .then((bytes) => {
       const blob = new Blob([new Uint8Array(bytes)]);
       const img = document.createElement("img");
       img.src = URL.createObjectURL(blob);
+      img.onload = img.onerror = () => URL.revokeObjectURL(img.src);
       img.alt = nome;
       thumb.replaceChildren(img);
     })
@@ -237,7 +346,9 @@ function marcarArquivoSumido(bubble: HTMLElement): void {
   const meta = bubble.querySelector<HTMLElement>(".file-meta");
   if (meta && !bubble.classList.contains("sumiu")) meta.dataset.antes = meta.textContent ?? "";
   bubble.classList.add("sumiu");
-  if (meta) meta.textContent = "o arquivo não está mais na Pasta";
+  if (meta) meta.textContent = bubble.classList.contains("mine")
+    ? "o arquivo de origem não está mais disponível"
+    : "o arquivo não está mais na Pasta";
 }
 
 /** Ligada enquanto um drag saído de uma bolha está no ar (SYN-006). Soltar
@@ -254,15 +365,17 @@ function desmarcarArquivoSumido(bubble: HTMLElement): void {
   if (meta?.dataset.antes !== undefined) meta.textContent = meta.dataset.antes;
 }
 
-/** Arrasta o arquivo de uma bolha recebida para fora da janela, como o
- * arquivo real que está na Pasta (SYN-006). O backend resolve o caminho e
+/** Arrasta o arquivo de uma bolha para fora da janela. O backend resolve o caminho e
  * confere que o arquivo ainda existe; só então o plugin de drag assume o
  * rastreio nativo do mouse, no lugar da Drag and Drop API da web (que só
  * entrega o arquivo dentro da própria janela). */
 async function iniciarDrag(id: number, nome: string, bubble: HTMLElement): Promise<void> {
   let caminho: string;
   try {
-    caminho = await invoke<string>("caminho_para_arrastar", { id });
+    const comando = bubble.classList.contains("mine")
+      ? "caminho_enviado_para_arrastar"
+      : "caminho_para_arrastar";
+    caminho = await invoke<string>(comando, { id });
   } catch (e) {
     // Se o caminho não puder ser resolvido, a bolha deixa de oferecer drag.
     marcarArquivoSumido(bubble);
@@ -296,9 +409,7 @@ async function iniciarDrag(id: number, nome: string, bubble: HTMLElement): Promi
   }
 }
 
-function renderArquivo(item: FileItem): HTMLElement {
-  const bubble = document.createElement("div");
-  bubble.className = "item file";
+function ligarAcoesDeArquivo(bubble: HTMLElement, item: FileItem | EnviadoArquivo): void {
   let arrastou = false;
   // Só uma bolha terminada arrasta: em progresso, `.enviando` ainda está
   // presente (ver `atualizarProgresso`), e não há arquivo com nome final
@@ -352,13 +463,26 @@ function renderArquivo(item: FileItem): HTMLElement {
     ) {
       return;
     }
-    invoke("abrir_arquivo", { id: item.id })
-      .then(() => desmarcarArquivoSumido(bubble))
+    const comando = bubble.classList.contains("mine") ? "abrir_arquivo_enviado" : "abrir_arquivo";
+    invoke(comando, { id: item.id })
+      .then(() => {
+        desmarcarArquivoSumido(bubble);
+        const thumb = bubble.querySelector<HTMLElement>(".file-thumb");
+        if (thumb && !thumb.querySelector("img")) {
+          carregarMiniatura(item.id, item.name, thumb, bubble.classList.contains("mine"));
+        }
+      })
       .catch((e) => {
         marcarArquivoSumido(bubble);
         console.error(`não foi possível abrir ${item.name}: ${e}`);
       });
   });
+}
+
+function renderArquivo(item: FileItem): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = "item file";
+  ligarAcoesDeArquivo(bubble, item);
 
   const ehImagem = IMAGEM.has(extensao(item.name));
   if (ehImagem) {
@@ -393,17 +517,45 @@ function renderArquivo(item: FileItem): HTMLElement {
 }
 
 function renderRecebido(item: Item): void {
+  if (apagados.recebido(item.id) || janelaDeDesfazer?.recebidas.has(item.id)) return;
   const existente = recebidas.get(item.id);
   if (existente) {
     // Só um arquivo em andamento gera evento repetido para o mesmo id.
-    if (item.kind === "file") atualizarProgresso(existente, item);
+    if (item.kind === "file") {
+      // Snapshot e evento podem se cruzar durante a carga inicial. Um estado
+      // antigo de progresso não reabre uma bolha que já terminou.
+      if (item.status === "receiving" && !existente.classList.contains("enviando")) return;
+      if (item.received < Number(existente.dataset.received ?? 0)) return;
+      existente.dataset.received = String(item.received);
+      atualizarProgresso(existente, item);
+    }
     return;
   }
 
   empty.hidden = true;
   const bubble = item.kind === "text" ? renderTexto(item) : renderArquivo(item);
+  if (item.kind === "file") bubble.dataset.received = String(item.received);
   recebidas.set(item.id, bubble);
-  scroll.append(bubble);
+  inserirBolha(bubble, item);
+  atualizarLixeira();
+}
+
+/** Eventos e snapshots usam a mesma ordenação, mesmo quando a bolha nova
+ * chega antes da lista inicial. Os ids de cada lado continuam separados. */
+function inserirBolha(bubble: HTMLElement, item: Item | Enviado): void {
+  bubble.dataset.atMs = String(item.at_ms);
+  bubble.dataset.ordem = String(item.ordem);
+  reinserirBolha(bubble);
+}
+
+function reinserirBolha(bubble: HTMLElement): void {
+  const atMsDaBolha = Number(bubble.dataset.atMs);
+  const ordemDaBolha = Number(bubble.dataset.ordem);
+  const depois = Array.from(scroll.querySelectorAll<HTMLElement>(".item")).find((outra) => {
+    const atMs = Number(outra.dataset.atMs);
+    return atMs > atMsDaBolha || (atMs === atMsDaBolha && Number(outra.dataset.ordem) > ordemDaBolha);
+  });
+  scroll.insertBefore(bubble, depois ?? null);
   bubble.scrollIntoView({ block: "end" });
 }
 
@@ -439,6 +591,14 @@ function renderTextoEnviado(item: EnviadoTexto): HTMLElement {
 function renderArquivoEnviado(item: EnviadoArquivo): HTMLElement {
   const bubble = document.createElement("div");
   bubble.className = "item file mine";
+  ligarAcoesDeArquivo(bubble, item);
+
+  if (IMAGEM.has(extensao(item.name))) {
+    const thumb = document.createElement("div");
+    thumb.className = "file-thumb";
+    bubble.append(thumb);
+    carregarMiniatura(item.id, item.name, thumb, true);
+  }
 
   const info = document.createElement("div");
   info.className = "file-info";
@@ -463,24 +623,147 @@ function renderArquivoEnviado(item: EnviadoArquivo): HTMLElement {
 }
 
 function renderEnviado(item: Enviado): void {
+  if (apagados.enviado(item.id) || janelaDeDesfazer?.enviadas.has(item.id)) return;
   const existente = enviadas.get(item.id);
   if (existente) {
     const rodape = existente.querySelector<HTMLElement>(".rodape")!;
-    atualizarEstadoEnvio(existente, rodape, item.entregue);
+    // Um snapshot Pendente atrasado não desfaz o ACK que chegou por evento.
+    atualizarEstadoEnvio(existente, rodape, item.entregue || !existente.classList.contains("pendente"));
     return;
   }
-
-  // Confirmação de um Item que esta Sessão nunca desenhou: ele foi enfileirado
-  // antes de sair pela bandeja e o celular só o buscou agora. A fila sobrevive
-  // ao reinício, a Sessão não — desenhar a bolha aqui encheria um chat que
-  // precisa abrir vazio.
-  if (item.entregue) return;
 
   empty.hidden = true;
   const bubble = item.kind === "text" ? renderTextoEnviado(item) : renderArquivoEnviado(item);
   enviadas.set(item.id, bubble);
-  scroll.append(bubble);
-  bubble.scrollIntoView({ block: "end" });
+  inserirBolha(bubble, item);
+  atualizarLixeira();
+}
+
+/** O 🗑 só existe com o chat não vazio; vazio, volta o "Nada aqui ainda". */
+function atualizarLixeira(): void {
+  const vazio = recebidas.size + enviadas.size === 0;
+  empty.hidden = !vazio;
+  document.querySelector<HTMLElement>("#clear-all")!.hidden = vazio;
+  document.querySelector<HTMLButtonElement>("#tentar-apagar")!.hidden = vazio;
+}
+
+/** Apagar tudo (SYN-028): as bolhas saem na hora, mas nada é apagado nem sai
+ * pela rede até a janela de Desfazer fechar. Guarda as bolhas esvaziadas. */
+interface JanelaDeDesfazer {
+  recebidas: Map<number, HTMLElement>;
+  enviadas: Map<number, HTMLElement>;
+  timer: number;
+}
+let janelaDeDesfazer: JanelaDeDesfazer | null = null;
+const apagados = new Apagados();
+const JANELA_DE_DESFAZER_MS = 5000;
+
+/** Fecha a janela e só então chama o Apagar tudo, com os Itens que ela esvaziou. */
+function fecharJanelaDeDesfazer(): void {
+  const janela = janelaDeDesfazer;
+  if (!janela) return;
+  janelaDeDesfazer = null;
+  clearTimeout(janela.timer);
+  document.querySelector<HTMLElement>("#aviso-apagar")!.hidden = true;
+  const received = [...janela.recebidas.keys()];
+  const sent = [...janela.enviadas.keys()];
+  // Bloqueia eventos/snapshots até o resultado, sem tornar definitiva uma
+  // exclusão que pode falhar antes de o backend alterar a Sessão.
+  const exclusao = apagados.iniciar(received, sent);
+  invoke("apagar_tudo", { received, sent }).then(
+    () => exclusao.confirmar(),
+    (e) => {
+      exclusao.cancelar();
+      console.error(`não foi possível apagar a conversa: ${e}`);
+      document.querySelector<HTMLElement>("#erro-apagar")!.hidden = false;
+      void restaurarBolhas(janela);
+    },
+  );
+}
+
+function apagarTudo(): void {
+  if (recebidas.size + enviadas.size === 0) return;
+  document.querySelector<HTMLElement>("#erro-apagar")!.hidden = true;
+  // Segundo clique na janela: a anterior fecha na hora e esta abre outra.
+  fecharJanelaDeDesfazer();
+  const janela: JanelaDeDesfazer = {
+    recebidas: new Map(recebidas),
+    enviadas: new Map(enviadas),
+    timer: window.setTimeout(fecharJanelaDeDesfazer, JANELA_DE_DESFAZER_MS),
+  };
+  const bolhas = [...janela.recebidas.values(), ...janela.enviadas.values()];
+  const arquivos = bolhas.filter((bolha) => bolha.classList.contains("file")).length;
+  for (const bolha of bolhas) bolha.remove();
+  recebidas.clear();
+  enviadas.clear();
+  janelaDeDesfazer = janela;
+  atualizarLixeira();
+
+  const aviso = document.querySelector<HTMLElement>("#aviso-apagar")!;
+  const n = bolhas.length;
+  aviso.querySelector<HTMLElement>(".aviso-texto")!.textContent =
+    `Conversa apagada · ${n} ${n === 1 ? "Item" : "Itens"} e ${arquivos} ${arquivos === 1 ? "arquivo" : "arquivos"}`;
+  const barra = aviso.querySelector<HTMLElement>(".aviso-barra")!;
+  barra.style.animation = "none";
+  aviso.hidden = false;
+  void barra.offsetWidth;
+  barra.style.animation = "";
+}
+
+async function desfazerApagarTudo(): Promise<void> {
+  const janela = janelaDeDesfazer;
+  if (!janela) return;
+  janelaDeDesfazer = null;
+  clearTimeout(janela.timer);
+  document.querySelector<HTMLElement>("#aviso-apagar")!.hidden = true;
+  await restaurarBolhas(janela);
+}
+
+/** Desfazer ou falha do comando devolve só os sobreviventes da seleção.
+ * A falha de uma janela antiga não fecha o aviso de uma janela mais nova. */
+async function restaurarBolhas(janela: JanelaDeDesfazer): Promise<void> {
+  // As bolhas voltam onde estavam; o snapshot depois as põe em dia com o que
+  // mudou durante a janela (progresso de um arquivo, uma entrega).
+  const ordenadas: HTMLElement[] = [];
+  for (const [id, bolha] of janela.recebidas) {
+    if (apagados.recebido(id) || janelaDeDesfazer?.recebidas.has(id)) continue;
+    recebidas.set(id, bolha);
+    ordenadas.push(bolha);
+  }
+  for (const [id, bolha] of janela.enviadas) {
+    if (apagados.enviado(id) || janelaDeDesfazer?.enviadas.has(id)) continue;
+    enviadas.set(id, bolha);
+    ordenadas.push(bolha);
+  }
+  for (const bolha of ordenadas) reinserirBolha(bolha);
+  atualizarLixeira();
+  const [novosRecebidos, novosEnviados] = await Promise.all([
+    invoke<Item[]>("list_items").catch((): Item[] => []),
+    invoke<Enviado[]>("list_sent_items").catch((): Enviado[] => []),
+  ]);
+  for (const item of apagados.filtrarRecebidos(novosRecebidos)) {
+    if (janela.recebidas.has(item.id)) renderRecebido(item);
+  }
+  for (const item of apagados.filtrarEnviados(novosEnviados)) {
+    if (janela.enviadas.has(item.id)) renderEnviado(item);
+  }
+}
+
+/** Uma exclusão vinda do celular tira as bolhas
+ * sem rastro — também das que estão guardadas na janela de Desfazer. */
+function removerExcluidos(excluidos: { received: number[]; sent: number[] }): void {
+  apagados.marcar(excluidos.received, excluidos.sent);
+  for (const id of excluidos.received) {
+    recebidas.get(id)?.remove();
+    recebidas.delete(id);
+    janelaDeDesfazer?.recebidas.delete(id);
+  }
+  for (const id of excluidos.sent) {
+    enviadas.get(id)?.remove();
+    enviadas.delete(id);
+    janelaDeDesfazer?.enviadas.delete(id);
+  }
+  atualizarLixeira();
 }
 
 function atualizarPresenca(online: boolean): void {
@@ -539,12 +822,6 @@ function ligarConfiguracoes(): void {
     }
   });
 
-  window.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || panel.hidden) return;
-    fechar();
-    toggle.focus();
-  });
-
   mudarPasta.addEventListener("click", async () => {
     mudarPasta.disabled = true;
     try {
@@ -570,26 +847,78 @@ function ligarConfiguracoes(): void {
   });
 }
 
-/** Enter no composer, ou o botão de enviar: enfileira o texto e limpa o campo. */
+/** Enter e ➤: cada entrada vira um Item, com o texto por último. */
 function ligarComposer(): void {
   const input = document.querySelector<HTMLInputElement>("#composer-input")!;
   const botao = document.querySelector<HTMLButtonElement>(".composer .send")!;
+  let enviando = false;
 
   async function enviar(): Promise<void> {
-    const texto = input.value.trim();
-    if (!texto) return;
-    input.value = "";
+    if (enviando) return;
+    enviando = true;
+    botao.disabled = true;
     try {
-      await invoke("send_text", { text: texto });
-    } catch (e) {
-      console.error(`não foi possível enfileirar o texto: ${e}`);
+      // Uma colagem ainda lendo CF_HDROP entra antes do Enter que veio depois.
+      await adicoesPendentes;
+      const textoOriginal = input.value;
+      const sequencia = bandeja.sequencia(textoOriginal);
+      if (sequencia.some((envio) => envio.tipo === "texto")) input.value = "";
+      for (const envio of sequencia) {
+        if (envio.tipo === "texto") {
+          try {
+            await invoke("send_text", { text: envio.texto });
+          } catch (e) {
+            if (!input.value) input.value = textoOriginal;
+            console.error(`não foi possível enfileirar o texto: ${e}`);
+          }
+          continue;
+        }
+        const { id, origem } = envio.entrada;
+        // Remover ou Esc durante o envio cancela as entradas ainda não enviadas.
+        if (!bandeja.entradas().some((entrada) => entrada.id === id)) continue;
+        try {
+          if (origem.tipo === "caminho") {
+            await invoke("send_files", { paths: [origem.caminho] });
+          } else {
+            const bytes = Array.from(new Uint8Array(await origem.arquivo.arrayBuffer()));
+            await invoke("send_bytes", { name: origem.nome, bytes });
+          }
+          bandeja.concluir(id, true);
+        } catch {
+          bandeja.concluir(id, false);
+        }
+        renderBandeja();
+      }
+    } finally {
+      enviando = false;
+      botao.disabled = false;
     }
   }
 
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") void enviar();
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      void enviar();
+    }
   });
   botao.addEventListener("click", () => void enviar());
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.repeat) return;
+    event.preventDefault();
+    const panel = document.querySelector<HTMLElement>("#settings-panel")!;
+    if (!panel.hidden) {
+      panel.hidden = true;
+      const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.focus();
+      return;
+    }
+    // Invalida também colagens capturadas que ainda aguardam a lista nativa.
+    geracaoDaBandeja++;
+    bandeja.limpar();
+    renderBandeja();
+  });
 }
 
 /** Arrastar um arquivo do Explorer para a janela: um Item por caminho,
@@ -601,8 +930,10 @@ function ligarDrop(): void {
     // Arquivo que saiu de uma bolha e foi solto de volta na janela: quem
     // desistiu do drag não pediu para reenviar ao celular (SYN-006).
     if (arrastandoDaBolha) return;
-    invoke("send_files", { paths: event.payload.paths }).catch((e) => {
-      console.error(`não foi possível enfileirar os arquivos soltos: ${e}`);
+    const caminhos = event.payload.paths;
+    const geracao = geracaoDaBandeja;
+    adicoesPendentes = adicoesPendentes.then(() => {
+      if (geracao === geracaoDaBandeja) adicionarCaminhos(caminhos);
     });
   });
 }
@@ -635,41 +966,40 @@ function imagemDaColagem(event: ClipboardEvent): { arquivo: File; ext: string } 
  * sobra é um print, e ele sai do próprio evento de colagem. */
 function ligarColar(): void {
   window.addEventListener("paste", (event) => {
-    void tratarColagem(event);
+    tratarColagem(event);
   });
 }
 
-async function tratarColagem(event: ClipboardEvent): Promise<void> {
+function tratarColagem(event: ClipboardEvent): void {
+  if (arrastandoDaBolha) return;
   const imagem = imagemDaColagem(event);
   // Colagem de texto puro não tem nem imagem nem arquivo: sai antes de
   // incomodar o lado Rust, e o texto cai no composer como sempre.
   const temArquivos = event.clipboardData?.types.includes("Files") ?? false;
   if (!imagem && !temArquivos) return;
-
-  try {
-    const caminhos = await invoke<string[]>("read_clipboard_file_list");
-    if (caminhos.length > 0) {
-      await invoke("send_files", { paths: caminhos });
-      return;
-    }
-  } catch (e) {
+  event.preventDefault();
+  const geracao = geracaoDaBandeja;
+  // Captura já; processa junto dos drops na ordem em que os eventos chegaram.
+  const leitura = invoke<string[]>("read_clipboard_file_list").catch((e): string[] => {
     console.error(`clipboard sem lista de arquivos, tentando a imagem: ${e}`);
-  }
-
-  if (!imagem) return;
-  try {
-    const bytes = Array.from(new Uint8Array(await imagem.arquivo.arrayBuffer()));
-    await invoke("send_bytes", { name: `imagem-${Date.now()}.${imagem.ext}`, bytes });
-  } catch (e) {
-    console.error(`não foi possível enfileirar a imagem colada: ${e}`);
-  }
+    return [];
+  });
+  adicoesPendentes = adicoesPendentes.then(async () => {
+    const caminhos = await leitura;
+    if (geracao !== geracaoDaBandeja) return;
+    if (caminhos.length > 0) adicionarCaminhos(caminhos);
+    else if (imagem) adicionarImagem(imagem.arquivo, `imagem-${Date.now()}.${imagem.ext}`);
+  });
 }
 
 async function main(): Promise<void> {
   // Escuta antes de listar, para não perder um Item que chegue no meio;
   // `recebidas`/`enviadas` descartam o que vier duas vezes como criação.
-  await listen<Item>("item", (event) => renderRecebido(event.payload));
-  await listen<Enviado>("enviado", (event) => renderEnviado(event.payload));
+  await ligarOuvintes<Item, Enviado, { received: number[]; sent: number[] }>(listen, {
+    item: renderRecebido,
+    enviado: renderEnviado,
+    apagado: removerExcluidos,
+  });
   await listen<boolean>("presenca", (event) => {
     atualizarPresenca(event.payload);
     // O celular só conecta com o token certo: presença é o próprio sinal de
@@ -689,12 +1019,28 @@ async function main(): Promise<void> {
   if (estadoPar.mostrar_qr) mostrarQr(estadoPar.svg);
   else mostrarChat();
 
-  // Só os recebidos da Sessão: a lista de Itens é em memória e morre com o
-  // processo. A fila de saída é persistida e sobrevive, mas não é Sessão —
-  // sair pela bandeja e reabrir tem que mostrar um chat vazio, com os
-  // Pendentes ainda na fila, esperando o celular.
-  for (const item of await invoke<Item[]>("list_items")) renderRecebido(item);
+  // Os dois lados da Sessão vivem no backend até o processo terminar.
+  // Pendentes herdados continuam na fila de entrega, fora desta lista.
+  const [recebidos, enviados] = await Promise.all([
+    invoke<Item[]>("list_items").catch((e): Item[] => {
+      console.error(`não foi possível listar os recebidos: ${e}`);
+      return [];
+    }),
+    // A fila pode falhar antes de ser registrada no backend. Os recebidos
+    // e os controles independentes dela continuam utilizáveis nesse caso.
+    invoke<Enviado[]>("list_sent_items").catch((e): Enviado[] => {
+      console.error(`não foi possível listar os enviados: ${e}`);
+      return [];
+    }),
+  ]);
+  for (const item of apagados.filtrarRecebidos(recebidos)) renderRecebido(item);
+  for (const item of apagados.filtrarEnviados(enviados)) renderEnviado(item);
 
+  document.querySelector<HTMLElement>("#clear-all")!.addEventListener("click", apagarTudo);
+  document.querySelector<HTMLElement>("#tentar-apagar")!.addEventListener("click", apagarTudo);
+  document.querySelector<HTMLElement>("#desfazer")!.addEventListener("click", () => {
+    void desfazerApagarTudo();
+  });
   ligarComposer();
   ligarDrop();
   ligarColar();

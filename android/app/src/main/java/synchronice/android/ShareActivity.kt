@@ -22,7 +22,7 @@ import java.io.IOException
 import java.util.UUID
 
 /**
- * Recebe o Compartilhar sem abrir o chat; a URI só é usada enquanto a Activity vive. O trabalho
+ * Recebe o Compartilhar sem abrir o chat; a leitura da URI usa a permissão temporária. O trabalho
  * fica no [ShareModel], que sobrevive a girar a tela: a Activity recriada chega com o mesmo
  * Intent, e refazer o lote enfileiraria de novo, com ids novos, o que já tinha entrado.
  */
@@ -51,11 +51,14 @@ internal class ShareModel : ViewModel() {
             try {
                 if (state.pairing != null) {
                     sharedUris(application, incoming).forEach { uri ->
-                        val staging = withContext(Dispatchers.IO) { copyToStaging(application, uri) }
+                        var staging: File? = null
                         try {
-                            state.queueFile(staging)
+                            val copy = withContext(Dispatchers.IO) {
+                                state.stageSource(uri).also { staging = it }
+                            }
+                            state.queueFile(copy)
                         } finally {
-                            staging.parentFile?.deleteRecursively()
+                            staging?.let(state::releaseStagedSource)
                         }
                     }
                     incoming.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() }?.let { text ->
@@ -94,17 +97,17 @@ private fun sharedUris(context: Context, incoming: Intent): List<Uri> = when (in
  * prefixo e o filtro deixa passar.
  */
 @Suppress("DEPRECATION")
-private fun isForeignContentUri(context: Context, uri: Uri): Boolean {
+internal fun isForeignContentUri(context: Context, uri: Uri): Boolean {
     if (uri.scheme != "content") return false
     val authority = uri.authority?.substringAfterLast('@') ?: return false
     return context.packageManager.resolveContentProvider(authority, 0)?.packageName != context.packageName
 }
 
-private fun copyToStaging(context: Context, uri: Uri): File {
+internal fun copyToStaging(context: Context, uri: Uri, fallbackName: (() -> String)? = null): File {
     val resolver = context.contentResolver
     val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor: Cursor ->
         if (cursor.moveToFirst()) cursor.getString(0) else null
-    } ?: uri.lastPathSegment ?: "arquivo"
+    }?.takeIf { it.isNotBlank() } ?: fallbackName?.invoke() ?: uri.lastPathSegment ?: "arquivo"
     val directory = File(context.cacheDir, "incoming/${UUID.randomUUID()}").apply { mkdirs() }
     val file = File(directory, safeFileName(name))
     try {

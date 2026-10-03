@@ -54,6 +54,46 @@ body {
   font: 20px/1 system-ui, "Segoe UI", sans-serif;
   cursor: pointer;
 }
+.aviso-apagar {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px 12px;
+  background: var(--bg2);
+  border-top: 1px solid var(--line);
+  color: var(--fg);
+  font-size: 14px;
+}
+.aviso-apagar button {
+  border: 0;
+  background: transparent;
+  color: #7ba7ff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.aviso-apagar button:focus-visible {
+  outline: 2px solid #7ba7ff;
+  outline-offset: 2px;
+}
+.aviso-barra {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: #7ba7ff;
+  transform-origin: left;
+  animation: esvaziar 5s linear forwards;
+}
+@keyframes esvaziar {
+  to {
+    transform: scaleX(0);
+  }
+}
 .settings-toggle:hover,
 .settings-toggle[aria-expanded="true"] {
   background: #363636;
@@ -112,6 +152,7 @@ body {
 }
 .scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
   display: flex;
@@ -140,6 +181,7 @@ body {
 }
 .composer input {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: 0;
   outline: 0;
@@ -164,6 +206,81 @@ body {
   color: #ddd;
   cursor: pointer;
   flex: none;
+}
+
+.composer .send:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+#bandeja {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px;
+  overflow-x: auto;
+  list-style: none;
+  background: var(--bg2);
+  border-top: 1px solid var(--line);
+}
+.bandeja-chip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 240px;
+  padding: 8px;
+  border: 1px solid #555;
+  border-radius: 8px;
+  background: #333;
+}
+.bandeja-chip img {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.bandeja-info {
+  flex: 1;
+  min-width: 0;
+}
+.bandeja-nome,
+.bandeja-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bandeja-nome {
+  white-space: nowrap;
+}
+.bandeja-meta {
+  color: #bbb;
+  font-size: 12px;
+}
+.bandeja-chip.falhou {
+  border-color: #e9a788;
+}
+.bandeja-chip.falhou .bandeja-meta {
+  color: #ffc4a8;
+}
+.bandeja-chip button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.bandeja-chip button:hover {
+  background: #484848;
+}
+.bandeja-chip button:focus-visible,
+.composer .send:focus-visible {
+  outline: 2px solid #7ba7ff;
+  outline-offset: 2px;
 }
 
 /* tela de QR (SYN-005) — sem Par gravado, ou "parear de novo" */
@@ -351,13 +468,15 @@ body {
 .item.file time {
   grid-column: 1 / 3;
 }
-/* Clicar abre, arrastar leva para fora da janela (SYN-006) — só a bolha recebida e terminada:
- * a enviada (`.mine`) não tem arquivo na Pasta para arrastar, e não ganha o
- * `mousedown` de drag. */
-.item.file:not(.mine):not(.enviando):not(.falhou) {
+.item.file .rodape {
+  grid-column: 1 / 3;
+}
+/* Clicar abre, arrastar leva para fora da janela. A enviada já tem arquivo
+ * desde Pendente; a recebida espera terminar de gravar. */
+.item.file:not(.enviando):not(.falhou) {
   cursor: pointer;
 }
-.item.file:not(.mine):not(.enviando):not(.falhou):active {
+.item.file:not(.enviando):not(.falhou):active {
   cursor: grabbing;
 }
 .item.file.sumiu,

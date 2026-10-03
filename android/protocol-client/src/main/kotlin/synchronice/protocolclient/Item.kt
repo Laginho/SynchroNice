@@ -13,4 +13,12 @@ sealed class Item {
         val name: String,
         val size: Long,
     ) : Item()
+
+    /** Exclusão vinda do PC (`kind:"delete"`): controle, nunca vira bolha. Sai da fila com o ack. */
+    data class Delete(
+        override val id: Long,
+        override val atMs: Long,
+        val doPc: List<Long>,
+        val doCelular: List<String>,
+    ) : Item()
 }

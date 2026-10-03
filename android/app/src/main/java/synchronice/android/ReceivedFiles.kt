@@ -11,6 +11,7 @@ import android.webkit.MimeTypeMap
 import synchronice.protocolclient.Item
 import synchronice.protocolclient.ProtocolClient
 import java.io.FileNotFoundException
+import java.io.File
 import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
@@ -29,8 +30,58 @@ internal fun safeFileName(raw: String): String =
         .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "arquivo"
 
 internal class ReceivedFiles(context: Context) {
+    private val appContext = context.applicationContext
     private val resolver = context.contentResolver
     private val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    /** Originais vivem só nesta Sessão, mesmo depois de a bolha enviada sair. */
+    private val originalsLock = Any()
+    private val stagedSources = mutableMapOf<File, Set<Uri>>()
+    private val sentSources = mutableSetOf<Uri>()
+
+    /** A exclusão espera a cópia; enquanto ela estiver na bandeja/lote, o original fica reservado. */
+    fun stageSource(uri: Uri, copy: () -> File): File = synchronized(originalsLock) {
+        val sources = sourceUris(uri)
+        copy().also { stagedSources[it] = sources }
+    }
+
+    fun keepSentSource(file: File) = synchronized(originalsLock) {
+        stagedSources[file]?.let { sentSources.addAll(it) }
+        Unit
+    }
+
+    fun releaseStagedSource(file: File) = synchronized(originalsLock) {
+        stagedSources.remove(file)
+        Unit
+    }
+
+    /** Coleções MediaStore e árvores SAF podem endereçar o mesmo arquivo com URIs diferentes. */
+    private fun normalizedSource(uri: Uri): Uri {
+        if (uri.authority == MediaStore.AUTHORITY) {
+            val row = uri.lastPathSegment?.toLongOrNull()
+            val volume = uri.pathSegments.firstOrNull()
+            if (row != null && volume != null) {
+                return MediaStore.Files.getContentUri(if (volume == "external_primary") "external" else volume, row)
+            }
+        }
+        return try {
+            DocumentsContract.buildDocumentUri(uri.authority, DocumentsContract.getDocumentId(uri))
+        } catch (_: IllegalArgumentException) {
+            uri
+        }
+    }
+
+    private fun sourceUris(uri: Uri): Set<Uri> = buildSet {
+        add(normalizedSource(uri))
+        // A conversão do sistema conhece o arquivo; não deduzimos ids por nome ou formato do documento.
+        if (uri.authority == "com.android.externalstorage.documents" || uri.authority == "com.android.providers.media.documents") {
+            try {
+                MediaStore.getMediaUri(appContext, uri)?.let { add(normalizedSource(it)) }
+            } catch (_: SecurityException) {
+            } catch (_: IllegalArgumentException) {
+            } catch (_: UnsupportedOperationException) {
+            }
+        }
+    }
 
     fun folder(): Uri? = preferences.getString("receive-folder", null)?.let(Uri::parse)
 
@@ -201,6 +252,23 @@ internal class ReceivedFiles(context: Context) {
                 received += count
                 if (received > size) return false
             }
+        }
+    }
+
+    /**
+     * Apaga de vez (minSdk 29: sem lixeira) o arquivo que o app gravou para um Item. Com [size], só se
+     * o conteúdo ainda tem esse tamanho; na dúvida, não apaga. Falha de permissão ou de provedor é
+     * ignorada: o Item sai da Sessão de qualquer jeito.
+     */
+    fun delete(uri: Uri, size: Long?): Unit = synchronized(originalsLock) {
+        if (sourceUris(uri).any { it in sentSources || stagedSources.values.any { sources -> it in sources } }) return@synchronized
+        try {
+            if (size != null && !hasCompleteContent(uri, size)) return
+            if (uri.authority == MediaStore.AUTHORITY) resolver.delete(uri, null, null)
+            else DocumentsContract.deleteDocument(resolver, uri)
+        } catch (_: SecurityException) {
+        } catch (_: IOException) {
+        } catch (_: IllegalArgumentException) {
         }
     }
 

@@ -6,7 +6,7 @@ use pc_lib::par::Par;
 use pc_lib::server;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const TOKEN: &str = "segredo-de-teste";
 
@@ -1481,7 +1481,7 @@ fn escuta_entrega_pendentes_em_ordem_e_confirmacao_os_remove_da_fila() {
         .iter()
         .map(|item| match &item.body {
             OutBody::Text { text } => text.clone(),
-            OutBody::File { .. } => panic!("esperava texto"),
+            _ => panic!("esperava texto"),
         })
         .collect();
     assert_eq!(
@@ -1633,4 +1633,1011 @@ fn rotacionar_troca_o_token_e_o_servidor_recusa_o_antigo_e_aceita_o_novo() {
         "o token antigo deve ser recusado imediatamente, sem reiniciar o servidor"
     );
     assert_eq!(post_texto(&base, Some(&novo), "com o token novo"), 201);
+}
+
+// SYN-019: Apagar tudo, na mesma costura HTTP dos envios.
+#[test]
+fn observador_de_upload_concluido_pode_consultar_o_arquivo_recebido() {
+    let (base, items, _outbox, running, _raiz) = sobe_para_exclusao();
+    let running = std::sync::Arc::new(running);
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    items.on_new(move |item| {
+        if matches!(
+            item.body,
+            ItemBody::File {
+                status: FileStatus::Done,
+                ..
+            }
+        ) {
+            let path = running.caminho_do_arquivo(item.id).unwrap();
+            let _ = done_tx.send(std::fs::read(path).unwrap());
+        }
+    });
+    let (http_tx, http_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let status = post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"imagem");
+        let _ = http_tx.send(status);
+    });
+
+    assert_eq!(
+        done_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("Done permite resolver e ler o arquivo sem deadlock"),
+        b"imagem"
+    );
+    assert_eq!(http_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+}
+
+// Observador preso sob a lista de Itens, a pedir o caminho de um arquivo
+// recebido (`alvo`, ou o próprio Item) assim que a bolha é liberada por `go`.
+// O runtime do servidor tem uma thread só: um observador preso nela também
+// segura as outras requisições HTTP, então quem corre contra ele é a API
+// pública (`Running::apagar_tudo`) e a finalização de upload, que roda em
+// thread de bloqueio.
+fn observador_travado(
+    items: &Items,
+    running: std::sync::Arc<server::Running>,
+    quando: fn(&pc_lib::items::Item) -> bool,
+    alvo: Option<u64>,
+) -> (
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+    std::sync::mpsc::Receiver<Option<std::path::PathBuf>>,
+) {
+    let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let go_rx = std::sync::Mutex::new(go_rx);
+    let (path_tx, path_rx) = std::sync::mpsc::channel();
+    items.on_new(move |item| {
+        if quando(item) {
+            let _ = reached_tx.send(());
+            let _ = go_rx.lock().unwrap().recv_timeout(Duration::from_secs(5));
+            let _ = path_tx.send(running.caminho_do_arquivo(alvo.unwrap_or(item.id)));
+        }
+    });
+    (reached_rx, go_tx, path_rx)
+}
+
+#[test]
+fn observador_de_done_nao_trava_apagar_tudo_concorrente() {
+    let (base, items, _outbox, running, _raiz) = sobe_para_exclusao();
+    let running = std::sync::Arc::new(running);
+    let (reached, go, path) = observador_travado(
+        &items,
+        running.clone(),
+        |item| {
+            matches!(
+                item.body,
+                ItemBody::File {
+                    status: FileStatus::Done,
+                    ..
+                }
+            )
+        },
+        None,
+    );
+    let (upload_tx, upload_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = upload_tx.send(post_arquivo(&base, Some(TOKEN), "foto.png", b"imagem"));
+    });
+    reached
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o observador de Done roda sob a lista de Itens");
+
+    let (delete_tx, delete_rx) = std::sync::mpsc::channel();
+    let apagando = running.clone();
+    std::thread::spawn(move || {
+        let _ = delete_tx.send(apagando.apagar_tudo(&[999], &[999]).is_ok());
+    });
+    // A exclusão já ocupa o que pega primeiro e espera a lista de Itens.
+    std::thread::sleep(Duration::from_millis(300));
+    go.send(()).unwrap();
+
+    assert!(path
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o observador de Done consulta o caminho sem esperar a exclusão")
+        .is_some());
+    assert!(delete_rx.recv_timeout(Duration::from_secs(3)).unwrap());
+    assert_eq!(upload_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+    assert_eq!(
+        items.snapshot().len(),
+        1,
+        "ids desconhecidos não mudam nada"
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn observador_nao_trava_a_finalizacao_de_upload_em_andamento() {
+    let (base, items, _outbox, running, _raiz) = sobe_para_exclusao();
+    let (renamed, resume) = running.pause_after_file_rename_for_tests();
+    let (upload_tx, upload_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = upload_tx.send(post_arquivo(&base, Some(TOKEN), "lento.bin", b"dados"));
+    });
+    renamed
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o upload chegou ao nome final");
+    let lento = items.snapshot()[0].id;
+
+    let running = std::sync::Arc::new(running);
+    let (_reached, go, path) = observador_travado(
+        &items,
+        running.clone(),
+        |item| matches!(item.body, ItemBody::Text { .. }),
+        Some(lento),
+    );
+    go.send(()).unwrap();
+    let publicando = items.clone();
+    std::thread::spawn(move || {
+        publicando.push_text("oi".into());
+    });
+    // O observador já consulta o caminho; a finalização retoma e pede a lista.
+    std::thread::sleep(Duration::from_millis(300));
+    resume.send(()).unwrap();
+
+    path.recv_timeout(Duration::from_secs(3))
+        .expect("o observador consulta o caminho sem esperar a finalização do upload");
+    assert_eq!(upload_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+    assert!(running.caminho_do_arquivo(lento).is_some());
+}
+
+fn post_exclusao(base: &str, token: Option<&str>, body: &str) -> u16 {
+    let bounded = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build(),
+    );
+    let mut req = bounded
+        .post(format!("{base}/items/delete"))
+        .header("Content-Type", "application/json");
+    if let Some(token) = token {
+        req = req.header("Authorization", format!("Bearer {token}"));
+    }
+    req.send(body).unwrap().status().as_u16()
+}
+
+#[test]
+fn exclusao_de_texto_por_id_do_remetente_e_idempotente_sem_reusar_ids_locais() {
+    let (base, items, outbox, _raiz) = sobe();
+    assert_eq!(post_texto_com_id(&base, TOKEN, "primeiro", "apagar"), 201);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "segundo", "conservar"), 201);
+    let id_antigo = items.snapshot()[1].id;
+
+    let desconhecida = r#"{"do_pc":[999],"do_celular":["desconhecido"]}"#;
+    assert_eq!(post_exclusao(&base, Some(TOKEN), desconhecida), 204);
+    assert_eq!(textos(&items), vec!["apagar", "conservar"]);
+
+    let exclusao = r#"{"do_pc":[],"do_celular":["primeiro","primeiro"]}"#;
+    assert_eq!(post_exclusao(&base, Some(TOKEN), exclusao), 204);
+    assert_eq!(post_exclusao(&base, Some(TOKEN), exclusao), 204);
+    assert_eq!(textos(&items), vec!["conservar"]);
+    assert!(
+        outbox.pending().is_empty(),
+        "não devolve a exclusão ao celular"
+    );
+
+    assert_eq!(post_texto_com_id(&base, TOKEN, "terceiro", "novo"), 201);
+    assert!(items.snapshot()[1].id > id_antigo);
+    assert_eq!(post_texto_com_id(&base, TOKEN, "primeiro", "retry"), 201);
+    assert_eq!(
+        textos(&items),
+        vec!["conservar", "novo"],
+        "retry não ressuscita o Item"
+    );
+}
+
+#[test]
+fn exclusao_exige_bearer_e_corpo_com_os_dois_espacos_de_ids() {
+    let (base, items, _outbox, _raiz) = sobe();
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto", "conservar"), 201);
+    let body = r#"{"do_pc":[],"do_celular":["texto"]}"#;
+    assert_eq!(post_exclusao(&base, None, body), 401);
+    assert_eq!(post_exclusao(&base, Some("outro-token"), "inválido"), 401);
+    for invalido in [
+        "inválido",
+        r#"{"do_pc":["1"],"do_celular":[]}"#,
+        r#"{"do_pc":[]}"#,
+    ] {
+        assert_eq!(post_exclusao(&base, Some(TOKEN), invalido), 400);
+    }
+    assert_eq!(textos(&items), vec!["conservar"]);
+}
+
+fn excluir_ids(base: &str, do_pc: &[u64], do_celular: &[&str]) -> u16 {
+    let body = serde_json::json!({ "do_pc": do_pc, "do_celular": do_celular });
+    post_exclusao(base, Some(TOKEN), &body.to_string())
+}
+
+fn sobe_para_exclusao() -> (String, Items, Outbox, server::Running, tempfile::TempDir) {
+    let raiz = tempfile::tempdir().unwrap();
+    let items = Items::new();
+    let outbox = Outbox::new(raiz.path().join("outbox")).unwrap();
+    let running = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        items.clone(),
+        outbox.clone(),
+        Some(raiz.path().join("pasta")),
+    )
+    .unwrap();
+    (
+        format!("http://{}", running.addr),
+        items,
+        outbox,
+        running,
+        raiz,
+    )
+}
+
+#[test]
+fn exclusao_de_arquivo_esquece_o_caminho_sem_apagar_outros_arquivos() {
+    let (base, items, outbox, running, raiz) = sobe_para_exclusao();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"foto"),
+        201
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "outra", "outra.png", b"outra"),
+        201
+    );
+    let removido = items.snapshot()[0].id;
+
+    assert_eq!(excluir_ids(&base, &[], &["foto", "inexistente"]), 204);
+    assert!(!raiz.path().join("pasta/foto.png").exists());
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/outra.png")).unwrap(),
+        b"outra"
+    );
+    assert_eq!(items.snapshot().len(), 1);
+    assert_eq!(running.caminho_do_arquivo(removido), None);
+    assert!(outbox.pending().is_empty());
+    assert_eq!(excluir_ids(&base, &[], &["foto"]), 204);
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"foto"),
+        201
+    );
+    assert!(
+        !raiz.path().join("pasta/foto.png").exists(),
+        "retry não restaura o arquivo"
+    );
+}
+
+#[test]
+fn exclusao_conserva_arquivo_alterado_e_ignora_arquivo_ja_ausente() {
+    let (base, items, _outbox, raiz) = sobe();
+    for id in ["alterado", "ausente"] {
+        assert_eq!(
+            post_arquivo_com_id(&base, TOKEN, id, &format!("{id}.bin"), b"antes"),
+            201
+        );
+    }
+    let alterado = raiz.path().join("pasta/alterado.bin");
+    std::fs::write(&alterado, b"conteudo alterado pelo usuario").unwrap();
+    std::fs::remove_file(raiz.path().join("pasta/ausente.bin")).unwrap();
+    assert_eq!(excluir_ids(&base, &[], &["alterado", "ausente"]), 204);
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read(alterado).unwrap(),
+        b"conteudo alterado pelo usuario"
+    );
+}
+
+#[test]
+fn exclusao_de_item_antigo_nao_apaga_caminho_reutilizado_por_item_novo() {
+    let (base, items, _outbox, raiz) = sobe();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "antigo", "foto.png", b"velh"),
+        201
+    );
+    std::fs::remove_file(raiz.path().join("pasta/foto.png")).unwrap();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "novo", "FOTO.PNG", b"novo"),
+        201
+    );
+
+    assert_eq!(excluir_ids(&base, &[], &["antigo"]), 204);
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/FOTO.PNG")).unwrap(),
+        b"novo"
+    );
+    assert_eq!(items.snapshot().len(), 1);
+    assert_eq!(excluir_ids(&base, &[], &["novo"]), 204);
+    assert!(!raiz.path().join("pasta/FOTO.PNG").exists());
+}
+
+#[test]
+fn exclusao_usa_a_pasta_original_e_nao_reconstroi_sessao_anterior() {
+    let (base, items, _outbox, running, raiz) = sobe_para_exclusao();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "original", "foto.png", b"antes"),
+        201
+    );
+    let nova = raiz.path().join("nova");
+    running.escolher_pasta(raiz.path(), &nova).unwrap();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "nova", "foto.png", b"nova"),
+        201
+    );
+    assert_eq!(excluir_ids(&base, &[], &["original"]), 204);
+    assert!(!raiz.path().join("pasta/foto.png").exists());
+    assert_eq!(std::fs::read(nova.join("foto.png")).unwrap(), b"nova");
+    assert_eq!(items.snapshot().len(), 1);
+
+    let depois = server::spawn(
+        "127.0.0.1:0".parse().unwrap(),
+        TOKEN.to_string(),
+        Items::new(),
+        Outbox::new(raiz.path().join("outra-outbox")).unwrap(),
+        Some(nova.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        excluir_ids(&format!("http://{}", depois.addr), &[], &["nova"]),
+        204
+    );
+    assert_eq!(
+        std::fs::read(nova.join("foto.png")).unwrap(),
+        b"nova",
+        "uma Sessão nova não recupera o vínculo id → arquivo"
+    );
+}
+
+#[test]
+fn exclusao_de_enviados_remove_pendentes_e_entregues_sem_tocar_no_original() {
+    let (base, _items, outbox, raiz) = sobe();
+    let original = raiz.path().join("original.bin");
+    std::fs::write(&original, b"original").unwrap();
+    let arquivo = outbox.enqueue_file_from_path(&original).unwrap();
+    let entregue = outbox.enqueue_text("entregue".into()).unwrap();
+    assert_eq!(
+        requisicao_crua(
+            &base,
+            "POST",
+            &format!("/outbox/{}/ack", entregue.id),
+            Some(TOKEN)
+        )
+        .0,
+        204
+    );
+    let fica = outbox.enqueue_text("conservar".into()).unwrap();
+
+    assert_eq!(
+        excluir_ids(&base, &[arquivo.id, entregue.id, arquivo.id, 999], &[]),
+        204
+    );
+    assert_eq!(
+        outbox
+            .session_items()
+            .iter()
+            .map(|i| i.item.id)
+            .collect::<Vec<_>>(),
+        vec![fica.id]
+    );
+    assert_eq!(std::fs::read(original).unwrap(), b"original");
+    assert_eq!(
+        requisicao_crua(
+            &base,
+            "GET",
+            &format!("/outbox/{}/file", arquivo.id),
+            Some(TOKEN)
+        )
+        .0,
+        404
+    );
+    let (status, body) = requisicao_crua_com_timeout(
+        &base,
+        "GET",
+        "/listen",
+        Some(TOKEN),
+        Some(Duration::from_secs(3)),
+    );
+    assert_eq!(status, 200);
+    let linhas: Vec<OutItem> = String::from_utf8(body)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(linhas, vec![fica]);
+    let recriada = Outbox::new(raiz.path().join("outbox")).unwrap();
+    assert_eq!(
+        recriada.pending(),
+        outbox.pending(),
+        "o descarte da fila persiste"
+    );
+}
+
+fn inicia_upload_parcial(base: &str, items: &Items, id: &str) -> TcpStream {
+    let (tx, rx) = std::sync::mpsc::channel();
+    items.on_new(move |item| {
+        if matches!(
+            item.body,
+            ItemBody::File {
+                received: 4,
+                status: FileStatus::Receiving,
+                ..
+            }
+        ) {
+            let _ = tx.send(());
+        }
+    });
+    let addr = base.strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(stream, "POST /items/file HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {TOKEN}\r\nX-Item-Id: {id}\r\nX-File-Name: curso.bin\r\nContent-Length: 8\r\nConnection: close\r\n\r\n1234").unwrap();
+    rx.recv_timeout(Duration::from_secs(3))
+        .expect("o upload recebeu a primeira metade");
+    stream
+}
+
+#[test]
+fn exclusao_durante_upload_espera_o_fim_e_nao_deixa_arquivo_na_pasta() {
+    let (base, items, _outbox, raiz) = sobe();
+    let mut stream = inicia_upload_parcial(&base, &items, "curso");
+    assert_eq!(excluir_ids(&base, &[], &["curso"]), 204);
+    stream.write_all(b"5678").unwrap();
+    let mut resposta = String::new();
+    stream.read_to_string(&mut resposta).unwrap();
+    assert!(resposta.starts_with("HTTP/1.1 201"), "{resposta}");
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn exclusao_durante_upload_que_falha_descarta_item_e_retry() {
+    let (base, items, _outbox, raiz) = sobe();
+    let stream = inicia_upload_parcial(&base, &items, "cortado");
+    assert_eq!(excluir_ids(&base, &[], &["cortado"]), 204);
+    drop(stream);
+    let limite = Instant::now() + Duration::from_secs(3);
+    while !items.snapshot().is_empty() && Instant::now() < limite {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "cortado", "curso.bin", b"retry"),
+        201
+    );
+    assert!(items.snapshot().is_empty());
+    assert!(!raiz.path().join("pasta/curso.bin").exists());
+}
+
+#[test]
+fn exclusao_de_recebido_reenviado_preserva_o_original_do_enviado() {
+    for (local, entregue) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (base, items, outbox, running, _raiz) = sobe_para_exclusao();
+        assert_eq!(
+            post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"original"),
+            201
+        );
+        let recebido = items.snapshot()[0].id;
+        let original = running.caminho_do_arquivo(recebido).unwrap();
+        let enviado = outbox.enqueue_file_from_path(&original).unwrap();
+        if entregue {
+            assert_eq!(
+                requisicao_crua(
+                    &base,
+                    "POST",
+                    &format!("/outbox/{}/ack", enviado.id),
+                    Some(TOKEN)
+                )
+                .0,
+                204
+            );
+        }
+        if local {
+            running.apagar_tudo(&[recebido], &[enviado.id]).unwrap();
+            assert!(outbox.session_items().is_empty());
+        } else {
+            assert_eq!(excluir_ids(&base, &[], &["foto"]), 204);
+            assert_eq!(outbox.session_items().len(), 1);
+        }
+        assert!(items.snapshot().is_empty());
+        assert_eq!(
+            std::fs::read(original).unwrap(),
+            b"original",
+            "a origem de um enviado, Pendente ou Entregue, continua protegida"
+        );
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn exclusao_de_recebido_antigo_durante_rename_preserva_upload_novo() {
+    let (base, items, _outbox, running, raiz) = sobe_para_exclusao();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "antigo", "foto.png", b"velh"),
+        201
+    );
+    let antigo = items.snapshot()[0].id;
+    let path = raiz.path().join("pasta/foto.png");
+    std::fs::remove_file(&path).unwrap();
+    let (renamed, resume) = running.pause_after_file_rename_for_tests();
+    let upload_base = base.clone();
+    let (upload_tx, upload_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let status = post_arquivo_com_id(&upload_base, TOKEN, "novo", "foto.png", b"novo");
+        let _ = upload_tx.send(status);
+    });
+    renamed
+        .recv_timeout(Duration::from_secs(3))
+        .expect("o upload novo chegou ao nome final");
+    assert_eq!(std::fs::read(&path).unwrap(), b"novo");
+
+    let (delete_tx, delete_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = delete_tx.send(excluir_ids(&base, &[], &["antigo"]));
+    });
+    // A exclusão pode esperar a finalização ou terminar antes dela; ambas
+    // as ordens devem preservar o arquivo do Item novo fora da seleção.
+    let early_delete = delete_rx.recv_timeout(Duration::from_secs(3)).ok();
+    resume.send(()).unwrap();
+    assert_eq!(
+        early_delete.unwrap_or_else(|| delete_rx.recv_timeout(Duration::from_secs(3)).unwrap()),
+        204
+    );
+    assert_eq!(upload_rx.recv_timeout(Duration::from_secs(3)).unwrap(), 201);
+    let restantes = items.snapshot();
+    assert_eq!(restantes.len(), 1);
+    assert_ne!(restantes[0].id, antigo);
+    assert_eq!(restantes[0].sender_id.as_deref(), Some("novo"));
+    assert_eq!(
+        running.caminho_do_arquivo(restantes[0].id),
+        Some(path.clone())
+    );
+    assert_eq!(std::fs::read(path).unwrap(), b"novo");
+}
+
+#[test]
+fn original_reenviado_continua_protegido_apos_excluir_a_enviada() {
+    for (local, entregue) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (base, items, outbox, running, _raiz) = sobe_para_exclusao();
+        assert_eq!(
+            post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"original"),
+            201
+        );
+        let recebido = items.snapshot()[0].id;
+        let original = running.caminho_do_arquivo(recebido).unwrap();
+        let enviado = outbox.enqueue_file_from_path(&original).unwrap();
+        if entregue {
+            assert_eq!(
+                requisicao_crua(
+                    &base,
+                    "POST",
+                    &format!("/outbox/{}/ack", enviado.id),
+                    Some(TOKEN)
+                )
+                .0,
+                204
+            );
+        }
+
+        if local {
+            running.apagar_tudo(&[], &[enviado.id]).unwrap();
+        } else {
+            assert_eq!(excluir_ids(&base, &[enviado.id], &[]), 204);
+        }
+        assert!(outbox.session_items().is_empty());
+        assert_eq!(items.snapshot().len(), 1);
+        assert_eq!(std::fs::read(&original).unwrap(), b"original");
+
+        if local {
+            running.apagar_tudo(&[recebido], &[]).unwrap();
+        } else {
+            assert_eq!(excluir_ids(&base, &[], &["foto"]), 204);
+        }
+        assert!(items.snapshot().is_empty());
+        assert_eq!(
+            std::fs::read(original).unwrap(),
+            b"original",
+            "excluir a bolha enviada não encerra a proteção da origem nesta Sessão"
+        );
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn envio_concorrente_com_exclusao_preserva_original_ou_recusa_origem_ausente() {
+    for (local, durante_upload) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (base, items, outbox, running, raiz) = sobe_para_exclusao();
+        let running = std::sync::Arc::new(running);
+        let stream = if durante_upload {
+            Some(inicia_upload_parcial(&base, &items, "curso"))
+        } else {
+            assert_eq!(
+                post_arquivo_com_id(&base, TOKEN, "curso", "curso.bin", b"12345678"),
+                201
+            );
+            None
+        };
+        let recebido = items.snapshot()[0].id;
+        let original = raiz.path().join("pasta/curso.bin");
+        let (recycling, resume) = running.pause_before_file_recycle_for_tests();
+        if durante_upload {
+            if local {
+                running.apagar_tudo(&[recebido], &[]).unwrap();
+            } else {
+                assert_eq!(excluir_ids(&base, &[], &["curso"]), 204);
+            }
+        }
+        let clearing = running.clone();
+        let (operation_tx, operation_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Some(mut stream) = stream {
+                stream.write_all(b"5678").unwrap();
+                let mut response = String::new();
+                stream.read_to_string(&mut response).unwrap();
+                assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+            } else if local {
+                clearing.apagar_tudo(&[recebido], &[]).unwrap();
+            } else {
+                assert_eq!(excluir_ids(&base, &[], &["curso"]), 204);
+            }
+            let _ = operation_tx.send(());
+        });
+        recycling
+            .recv_timeout(Duration::from_secs(3))
+            .expect("a exclusão chegou à ação no arquivo");
+        assert_eq!(std::fs::read(&original).unwrap(), b"12345678");
+
+        let sending = outbox.clone();
+        let sending_path = original.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (sent_tx, sent_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = started_tx.send(());
+            let _ = sent_tx.send(sending.enqueue_file_from_path(&sending_path));
+        });
+        started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let early_send = sent_rx.recv_timeout(Duration::from_secs(3)).ok();
+        resume.send(()).unwrap();
+        let sent =
+            early_send.unwrap_or_else(|| sent_rx.recv_timeout(Duration::from_secs(3)).unwrap());
+        operation_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(items.snapshot().is_empty());
+        match sent {
+            Ok(item) => {
+                assert_eq!(outbox.session_file_path(item.id), Some(original.clone()));
+                assert_eq!(
+                    std::fs::read(&original).unwrap(),
+                    b"12345678",
+                    "um envio aceito durante a exclusão conserva seu original"
+                );
+                assert_eq!(outbox.file_bytes(item.id).unwrap(), b"12345678");
+            }
+            Err(error) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+                assert!(outbox.session_items().is_empty());
+                assert!(!original.exists(), "a exclusão venceu antes do envio");
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn exclusao_de_print_preserva_original_reenviado_por_alias_windows() {
+    for (local, entregue) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (_base, _items, outbox, running, _raiz) = sobe_para_exclusao();
+        let base = format!("http://{}", running.addr);
+        let print = outbox.enqueue_file("print.png".into(), b"imagem").unwrap();
+        let path = outbox.session_file_path(print.id).unwrap();
+        let alias = std::path::PathBuf::from(path.to_string_lossy().to_uppercase());
+        assert_ne!(path, alias, "o cenário usa grafias diferentes");
+        assert_eq!(path.canonicalize().unwrap(), alias.canonicalize().unwrap());
+        let reenviado = outbox.enqueue_file_from_path(&alias).unwrap();
+        if entregue {
+            assert_eq!(
+                requisicao_crua(
+                    &base,
+                    "POST",
+                    &format!("/outbox/{}/ack", reenviado.id),
+                    Some(TOKEN)
+                )
+                .0,
+                204
+            );
+        }
+
+        if local {
+            running.apagar_tudo(&[], &[print.id]).unwrap();
+        } else {
+            assert_eq!(excluir_ids(&base, &[print.id], &[]), 204);
+        }
+        assert_eq!(outbox.session_items().len(), 1);
+        assert_eq!(outbox.session_items()[0].item.id, reenviado.id);
+        assert_eq!(
+            std::fs::read(outbox.session_file_path(reenviado.id).unwrap()).unwrap(),
+            b"imagem",
+            "a enviada fora da seleção conserva o original, inclusive por alias"
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"imagem");
+    }
+}
+
+fn observa_exclusoes(items: &Items) -> std::sync::mpsc::Receiver<(Vec<u64>, Vec<u64>)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let snapshot = items.clone();
+    items.on_delete(move |deleted| {
+        // O callback pode consultar a lista; não roda sob o lock de Items.
+        let _ = snapshot.snapshot();
+        tx.send((deleted.received.clone(), deleted.sent.clone()))
+            .unwrap();
+    });
+    rx
+}
+
+#[test]
+fn apagar_tudo_local_limpa_so_a_lista_e_controle_nao_vira_bolha() {
+    let (base, items, outbox, running, raiz) = sobe_para_exclusao();
+    assert_eq!(post_texto_com_id(&base, TOKEN, "texto", "apagar"), 201);
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "foto", "foto.png", b"foto"),
+        201
+    );
+    assert_eq!(post_texto_com_id(&base, TOKEN, "fica", "conservar"), 201);
+    let ids_recebidos: Vec<u64> = items.snapshot()[..2].iter().map(|item| item.id).collect();
+    let recebido_fica = items.snapshot()[2].id;
+    let original = raiz.path().join("original.bin");
+    std::fs::write(&original, b"original").unwrap();
+    let arquivo = outbox.enqueue_file_from_path(&original).unwrap();
+    let print = outbox.enqueue_file("print.png".into(), b"print").unwrap();
+    let texto = outbox.enqueue_text("entregue".into()).unwrap();
+    let print_entregue = outbox.enqueue_file("print.png".into(), b"outro").unwrap();
+    let path_print = outbox.session_file_path(print.id).unwrap();
+    let path_entregue = outbox.session_file_path(print_entregue.id).unwrap();
+    for id in [texto.id, print_entregue.id] {
+        assert_eq!(
+            requisicao_crua(&base, "POST", &format!("/outbox/{id}/ack"), Some(TOKEN)).0,
+            204
+        );
+    }
+    let enviado_fica = outbox.enqueue_text("conservar".into()).unwrap();
+    let ids_enviados = vec![arquivo.id, print.id, texto.id, print_entregue.id];
+    let exclusoes = observa_exclusoes(&items);
+    let (tx, eventos) = std::sync::mpsc::channel();
+    outbox.on_change(move |item, entregue| {
+        tx.send((item.id, entregue)).unwrap();
+    });
+    running.apagar_tudo(&ids_recebidos, &ids_enviados).unwrap();
+    assert_eq!(
+        items
+            .snapshot()
+            .iter()
+            .map(|item| item.id)
+            .collect::<Vec<_>>(),
+        vec![recebido_fica]
+    );
+    assert_eq!(
+        outbox
+            .session_items()
+            .iter()
+            .map(|sent| sent.item.id)
+            .collect::<Vec<_>>(),
+        vec![enviado_fica.id]
+    );
+    assert_eq!(std::fs::read(&original).unwrap(), b"original");
+    assert!(!raiz.path().join("pasta/foto.png").exists());
+    assert!(!path_print.exists());
+    assert!(!path_entregue.exists());
+    assert_eq!(
+        requisicao_crua(
+            &base,
+            "GET",
+            &format!("/outbox/{}/file", arquivo.id),
+            Some(TOKEN)
+        )
+        .0,
+        404
+    );
+    assert!(eventos.try_recv().is_err(), "controle não dispara enviado");
+    assert!(
+        exclusoes.try_recv().is_err(),
+        "aviso é da exclusão recebida"
+    );
+    let (status, body) = requisicao_crua_com_timeout(
+        &base,
+        "GET",
+        "/listen",
+        Some(TOKEN),
+        Some(Duration::from_secs(3)),
+    );
+    assert_eq!(status, 200);
+    let lines: Vec<serde_json::Value> = String::from_utf8(body)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["id"], enviado_fica.id);
+    assert_eq!(lines[1]["kind"], "delete");
+    assert_eq!(lines[1]["do_pc"], serde_json::json!(ids_enviados));
+    assert_eq!(lines[1]["do_celular"], serde_json::json!(["texto", "foto"]));
+    assert!(lines[1]["at_ms"].is_u64());
+    assert_eq!(lines[1].as_object().unwrap().len(), 5);
+    let controle = lines[1]["id"].as_u64().unwrap();
+    assert!(controle > enviado_fica.id);
+    let recriada = Outbox::new(raiz.path().join("outbox")).unwrap();
+    assert_eq!(
+        recriada.pending(),
+        outbox.pending(),
+        "controle persiste para entrega offline"
+    );
+    assert!(recriada.session_items().is_empty());
+    for _ in 0..2 {
+        assert_eq!(
+            requisicao_crua(
+                &base,
+                "POST",
+                &format!("/outbox/{controle}/ack"),
+                Some(TOKEN)
+            )
+            .0,
+            204
+        );
+    }
+    assert!(
+        eventos.try_recv().is_err(),
+        "ACK de controle também não vira enviado"
+    );
+    assert_eq!(outbox.pending(), vec![enviado_fica]);
+    running.apagar_tudo(&ids_recebidos, &ids_enviados).unwrap();
+    assert_eq!(
+        outbox.pending().len(),
+        1,
+        "ids já apagados não geram outro controle"
+    );
+}
+
+#[test]
+fn exclusao_recebida_avisa_uma_vez_com_os_dois_espacos_de_ids() {
+    let (base, items, outbox, _raiz) = sobe();
+    assert_eq!(post_texto_com_id(&base, TOKEN, "recebido", "apagar"), 201);
+    let recebido = items.snapshot()[0].id;
+    let enviado = outbox.enqueue_text("apagar".into()).unwrap();
+    assert_eq!(recebido, enviado.id, "as sequências podem colidir");
+    let notices = observa_exclusoes(&items);
+    assert_eq!(
+        excluir_ids(&base, &[enviado.id, enviado.id], &["recebido", "recebido"]),
+        204
+    );
+    assert_eq!(
+        notices.recv_timeout(Duration::from_secs(3)).unwrap(),
+        (vec![recebido], vec![enviado.id])
+    );
+    assert!(items.snapshot().is_empty());
+    assert!(outbox.session_items().is_empty());
+    assert_eq!(
+        excluir_ids(&base, &[enviado.id, 999], &["recebido", "desconhecido"]),
+        204
+    );
+    assert!(
+        notices.try_recv().is_err(),
+        "repetidos/desconhecidos não avisam"
+    );
+}
+
+#[test]
+fn aviso_de_exclusao_espera_todos_os_uploads_terminarem_ou_falharem() {
+    for interromper in [false, true] {
+        let (base, items, outbox, raiz) = sobe();
+        assert_eq!(post_texto_com_id(&base, TOKEN, "texto", "apagar"), 201);
+        let id_texto = items.snapshot()[0].id;
+        let mut stream = inicia_upload_parcial(&base, &items, "curso");
+        let id_arquivo = items.snapshot()[1].id;
+        let enviado = outbox.enqueue_text("apagar".into()).unwrap();
+        let notices = observa_exclusoes(&items);
+        let (tx, updates) = std::sync::mpsc::channel();
+        items.on_new(move |item| {
+            tx.send(item.id).unwrap();
+        });
+        assert_eq!(excluir_ids(&base, &[enviado.id], &["texto", "curso"]), 204);
+        assert!(
+            notices.try_recv().is_err(),
+            "a exclusão ainda não foi aplicada inteira"
+        );
+        assert_eq!(excluir_ids(&base, &[enviado.id], &["curso"]), 204);
+        if interromper {
+            drop(stream);
+        } else {
+            stream.write_all(b"5678").unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+        }
+        assert_eq!(
+            notices.recv_timeout(Duration::from_secs(3)).unwrap(),
+            (vec![id_texto, id_arquivo], vec![enviado.id])
+        );
+        assert!(notices.try_recv().is_err());
+        assert!(
+            updates.try_recv().is_err(),
+            "upload descartado não recria a bolha"
+        );
+        assert!(items.snapshot().is_empty());
+        assert_eq!(
+            std::fs::read_dir(raiz.path().join("pasta"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
+fn apagar_tudo_local_durante_upload_enfileira_o_id_e_espera_o_fim() {
+    let (base, items, outbox, running, raiz) = sobe_para_exclusao();
+    let mut stream = inicia_upload_parcial(&base, &items, "curso");
+    let id = items.snapshot()[0].id;
+    let notices = observa_exclusoes(&items);
+    running.apagar_tudo(&[id], &[]).unwrap();
+    let (status, body) = requisicao_crua_com_timeout(
+        &base,
+        "GET",
+        "/listen",
+        Some(TOKEN),
+        Some(Duration::from_secs(3)),
+    );
+    assert_eq!(status, 200);
+    let control: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(control["kind"], "delete");
+    assert_eq!(control["do_pc"], serde_json::json!([]));
+    assert_eq!(control["do_celular"], serde_json::json!(["curso"]));
+    assert!(outbox.session_items().is_empty());
+    stream.write_all(b"5678").unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(notices.try_recv().is_err());
+}
+
+#[test]
+fn exclusao_de_arquivo_vazio_e_chunked_de_tamanho_desconhecido() {
+    let (base, items, _outbox, raiz) = sobe();
+    assert_eq!(
+        post_arquivo_com_id(&base, TOKEN, "vazio", "vazio.bin", b""),
+        201
+    );
+    let addr = base.strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(stream, "POST /items/file HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {TOKEN}\r\nX-Item-Id: chunked\r\nX-File-Name: chunked.bin\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n0\r\n\r\n").unwrap();
+    let mut resposta = String::new();
+    stream.read_to_string(&mut resposta).unwrap();
+    assert!(resposta.starts_with("HTTP/1.1 201"), "{resposta}");
+    assert_eq!(
+        std::fs::read(raiz.path().join("pasta/chunked.bin")).unwrap(),
+        b"abc"
+    );
+    assert_eq!(excluir_ids(&base, &[], &["vazio", "chunked"]), 204);
+    assert!(items.snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_dir(raiz.path().join("pasta"))
+            .unwrap()
+            .count(),
+        0
+    );
 }
