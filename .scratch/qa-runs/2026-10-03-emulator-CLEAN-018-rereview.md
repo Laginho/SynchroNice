@@ -67,8 +67,19 @@ A primeira execução no sandbox passou Rust **83**, PC/UI **61** e QA
 getsockopt`). É uma limitação do ambiente, não uma falha da implementação.
 Log: `gate.log`.
 
-O gate completo após o QA será repetido com acesso ao ambiente necessário;
-o resultado final será registrado antes de fechar o ticket.
+O gate completo após o QA e o rebase foi repetido com acesso ao ambiente
+necessário e terminou em primeiro plano com **exit 0**, `gate: passou`:
+
+- Rust: **83 testes passaram**, zero falhas; fmt e clippy passaram.
+- PC/UI: typecheck passou e **61 testes passaram**, zero falhas.
+- QA: **26 testes passaram**, zero falhas.
+- Android: `BUILD SUCCESSFUL in 18s`, **41 tasks**, 1 executada e 40
+  up-to-date. `testDebugUnitTest` e `protocol-client:test` ficaram
+  up-to-date; seus XMLs somam **94 + 72 = 166 testes**, zero falhas,
+  erros ou skips.
+
+Log final: `gate-final.log`. A integração na sessão não mudou código
+em relação à branch validada.
 
 ## Revisão e limpeza
 
