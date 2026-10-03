@@ -1,5 +1,5 @@
 # CLEAN-019: Destino relatado pela limpeza é o destino real (celular e PC)
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -101,6 +101,18 @@ permanente.
   deu 9 testes, 0 passando, 9 falhando (inclui o agrupador dos 7 cenários).
   Falhas: query chega em 8 argumentos; confirmação falha perde o destino real;
   Downloads não é tentado; rm silencioso perde tracked; subst relata Lixeira.
+- Stage 2 concluído: query escapada em uma string de shell; confirmação
+  alternativa pela ausência após update; fallback Downloads antes de rm;
+  rm só encerra o rastreamento quando o caminho sumiu. No PC, uma nova
+  entrada na Lixeira, com caminho original e SHA-256 iguais, confirma o
+  destino; sem ela, o relato é `remocao permanente`. Documentação atualizada.
+  Green focado: 10/10 (inclui o teste existente da Lixeira real do Windows).
+  Gate completo em primeiro plano: exit 0, `gate: passou`; Rust 83/83,
+  UI 61/61, QA 34/34. Gradle `check` passou; tarefas de teste UP-TO-DATE,
+  relatórios existentes com app 94/94 e protocol-client 72/72, sem skips.
+  Log local: `.scratch/qa-runs/2026-10-03-clean-019-stage2/gate.log`.
+  Diff conferido: apenas Primary files e este ticket; testes separados do
+  código. Sem QA no aparelho nesta etapa; stage 3 verifica no emulador.
 
 - `qa/phone.ps1:226` passa o extra
   `android:query-arg-match-trashed:i:1` à query de confirmação. O

@@ -83,11 +83,27 @@ try {
                     $file = Get-Item -LiteralPath $target
                     if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
                         (Get-FileHash -LiteralPath $target).Hash -ne $entry.hash) { throw "Arquivo alterado; preservado: $target" }
+                    $shell = New-Object -ComObject Shell.Application
+                    $previousRecycled = @($shell.Namespace(10).Items() | ForEach-Object { $_.Path })
                     [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($target,
                         [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs,
                         [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin,
                         [Microsoft.VisualBasic.FileIO.UICancelOption]::ThrowException)
-                    $destination = 'Lixeira do Windows'
+                    if (Test-Path -LiteralPath $target) { throw "Limpeza nao removeu arquivo; mantido no manifesto: $target" }
+                    $destination = 'remocao permanente'
+                    # SendToRecycleBin can permanently delete on drives without a Recycle Bin.
+                    # Only a new entry with the original path and bytes proves recycling.
+                    foreach ($recycled in $shell.Namespace(10).Items()) {
+                        if ($previousRecycled -contains $recycled.Path) { continue }
+                        $originalFolder = $recycled.ExtendedProperty('System.Recycle.DeletedFrom')
+                        $originalName = $recycled.ExtendedProperty('System.ItemNameDisplay')
+                        if ($originalFolder -and $originalName -and
+                            (Join-Path $originalFolder $originalName) -eq $target -and
+                            (Get-FileHash -LiteralPath $recycled.Path).Hash -eq $entry.hash) {
+                            $destination = 'Lixeira do Windows'
+                            break
+                        }
+                    }
                 }
                 $state.cleanup = @($state.cleanup) + @{ path=$target; destination=$destination }
                 $state.tracked = @($state.tracked | Where-Object { $_.path -ne $entry.path })
