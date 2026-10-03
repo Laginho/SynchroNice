@@ -1,5 +1,5 @@
 # SYN-028: Apagar tudo na janela do PC
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -344,3 +344,98 @@ em teste, nos Primary files, sem `items.rs`:
 - Interface não exercida no app por este stage: o QA dos critérios 3 e 4 com
   respostas retidas fica para o stage 3. Limite conhecido, o mesmo de antes:
   recarregar a janela *dentro* dos 5 s devolve as bolhas, pois nada foi apagado.
+
+#### Resolution (2026-10-02)
+
+Verdict: Approve
+
+Re-revisão dos dois ❌ da última passagem e do diff
+`386f452...66e7a52`, com os eixos Standards e Spec em subagentes
+independentes. Conferidos também os três ❌ originais, o diff completo
+desde `7e866dd`, os commits e as decisões do proxy. Rebase na sessão
+`sweatshop/2026-10-01-2019` sem alterações ou conflitos.
+
+##### Standards
+
+- ✅ Os dois bloqueadores anteriores foram fechados: `visiveis` consulta
+  as marcas antes da segunda listagem; `ligarOuvintes` registra `apagado`
+  antes dos eventos que podem criar bolhas. As lápides e os filtros dos
+  snapshots continuam presentes. Nenhum bloqueador funcional ou smell
+  acionável adicional.
+- ✅ Primary files e test-first preservados: `2905b50` contém testes e
+  a transição para `implementing`; `66e7a52` contém produção/ticket,
+  sem alterar testes. O ciclo `d4d3d47` → `386f452` também separa testes
+  e produção; a primeira passagem tinha dispensa expressa. `items.rs`
+  e a operação do SYN-019 permanecem intactos.
+- ✅ Uma correção documental pequena, omissão das revisões anteriores:
+  comentários em `lib.rs` e `main.ts` atribuíam o evento `apagado`
+  também à operação local, que usa `notify=false`. Corrigidos em
+  `21e27ec`, sem comportamento ou teste novo. Build de QA posterior
+  compilou os comentários corrigidos.
+
+##### Spec
+
+- ✅ **Critério 3:** a segunda listagem não conserva a cópia de um
+  upload que terminou e perdeu a marca de exclusão durante a consulta.
+  O upload ainda marcado é filtrado; os não selecionados permanecem.
+  Teste determinístico do helper verde e reload real do upload
+  selecionado sem bolha, inclusive após sua conclusão.
+- ✅ **Critério 4:** registrar `apagado` primeiro elimina o intervalo
+  em que uma bolha podia nascer sem ouvinte para removê-la. QA reteve
+  cada um dos três registros reais, duas vezes por registro, criando
+  e excluindo um recebido e um enviado: listas e DOM vazios após a
+  liberação. Snapshots atrasados inicial e do Desfazer também passaram.
+- ✅ Os três ❌ originais permanecem corrigidos. Progresso real após
+  os 5 s, com o IPC de exclusão retido, não recria a bolha; reload de
+  upload selecionado fica vazio; snapshots anteriores à exclusão
+  recebida são filtrados. Critérios 1, 2 e 5 passaram, incluindo
+  Desfazer, contagens, chegada durante a janela e segundo clique.
+  Nenhum requisito numerado ausente ou escopo indevido identificado.
+
+**Arquivos:** `apagados.ts` concentra lápides e ordem dos ouvintes;
+`main.ts` liga esses mecanismos ao botão, aviso e renderização;
+`lib.rs` expõe comando, evento e snapshot visível. HTML/CSS implementam
+o botão e o Desfazer; `apagados.test.ts`, testes de `lib.rs` e `gate.ps1`
+mantêm as regressões no gate. Nesta revisão, somente os dois comentários
+de produção e os registros de QA/fechamento foram alterados.
+
+**Prova vermelho→verde:** registros do stage 2 conferidos: `2905b50`
+falhou com `E0425` para `visiveis` e export ausente de `ligarOuvintes`.
+O mutante com uma listagem falhou no teste Rust (7 passaram, 1 falhou);
+o mutante com a ordem antiga falhou no teste da UI (59 passaram, 1 falhou).
+As correções foram restauradas, e o gate atual passou sem alterar testes.
+Extratos em `stage2-red-green.log` no RunDir do QA.
+
+**Validação:** gate completo em primeiro plano, exit 0, `gate: passou`.
+Rust **83/83** (8 unitários + 7 config + 5 outbox + 63 HTTP);
+UI **60/60**; kit **14/14**; fmt, Clippy e TypeScript verdes.
+Android `check` verde; XMLs `UP-TO-DATE` com **71** testes do app e
+**72** do cliente, zero falhas, erros ou pulos. O gate precedeu a
+correção documental; o build de QA posterior compilou APK e PC debug
+da branch final. Diff final conferido: sem mudança de teste no stage 3,
+segredos, artefatos gerados ou alteração de produção fora do escopo.
+
+**QA:** [relatório da revisão final](../../qa-runs/2026-10-02-syn-028-final-review.md),
+**16/16** cenários por HTTP/CDP reais. A corrida interna do Rust foi
+verificada pelo teste determinístico e pela inspeção; o executável
+cobriu o reload do upload selecionado. Capturas do aviso e do chat vazio
+inspecionadas. Pasta vazia; três arquivos na Lixeira, com origem e
+SHA-256 conferidos; dez arquivos anteriores do emulador preservados;
+`clean` e `down` concluídos. Sem débito humano neste recorte.
+Limite conhecido: recarregar durante os 5 s restaura a conversa, pois
+a exclusão ainda não foi aplicada.
+
+**Decisões do proxy conferidas:** (1) `2026-10-01 Proxy decided`
+mantém o fatiamento: backend/protocolo/Lixeira no SYN-019, cola/janela
+aqui, critérios 2 e 4 explícitos, dependência SYN-019 e `Review: agent`;
+(2) `2026-10-02 Proxy decided (após a revisão abaixo)` autoriza lápides
+em módulo puro, testes próprios, caminho no gate e helper de `list_items`,
+sem alterar `items.rs`. Ambas foram respeitadas. Nenhum critério ou
+decisão foi reescrito nesta revisão.
+
+Integrado à sessão em `b52194d`, sem squash. Resolução, ledger e
+`Stage: done` registrados juntos na branch da sessão. O PR da sessão
+e seu merge seguem com o foreman e o humano.
+
+Resumo por eixo: Standards, uma observação documental corrigida e
+zero bloqueadores pendentes; Spec, zero achados pendentes.
