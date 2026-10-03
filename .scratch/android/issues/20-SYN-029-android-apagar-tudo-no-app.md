@@ -1,5 +1,5 @@
 # SYN-029: Apagar tudo no app do celular
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-027, SYN-028
 Review: agent
@@ -221,3 +221,107 @@ de layout, além da confirmação do prazo. `Stage: to-implement` e os dois
 relatórios ficam no mesmo commit de reabertura na branch `syn-029`, sem
 merge, push ou PR individual; não havia
 linha SYN-029 no ledger a retirar.
+
+#### Resolution (2026-10-03)
+
+Verdict: Approve
+
+Re-revisão dos ❌ de 2026-10-02 e de todo o delta `41da116...3abd916`,
+com Standards e Spec em subagentes independentes. Base da sessão
+`aa4650b`; commits e costuras da primeira passada também conferidos.
+O stage 3 não alterou produção nem testes; acrescentou o relatório de QA
+`d12fa2e`. Todos os achados anteriores foram resolvidos, sem achado novo
+em código já revisado.
+
+##### Standards
+
+- ✅ **Segurança do arquivo completo com ACK falho:**
+  `MainActivity.kt:809,846,852,890` acompanha `complete` separadamente de
+  `acknowledged`, conservando a proteção de tamanho no descarte. Os dois
+  testes de ACK preso/falho verificam tanto preservar conteúdo alterado
+  quanto apagar o intacto. Atende Engineering Workflow, quality gate 1/3.
+- ✅ **Falha de persistência recuperável:** `MainActivity.kt:605-615`
+  enfileira a exclusão antes de remover bolhas, Pendentes ou recebidos e
+  trata `IOException`. `commitClear:645-647` devolve as bolhas à tela
+  quando a gravação falha. O teste cobre a fila e a marcação posterior de
+  Entregue, além da conversa preservada. Atende quality gate 1/3.
+- ✅ **Escopo e test-first:** `6065582` e `d03dd74` contêm somente testes
+  e metadados; `aadb8c2`, `22e453e` e `596207e` não alteram testes.
+  Produção restrita aos Primary files `MainActivity.kt` e
+  `ReceivedFiles.kt`, sem alterar `protocol-client`. As correções são
+  proporcionais aos ❌; nenhum smell adicional justifica refatoração.
+
+Nenhum bloqueador de Standards. O limite de falha na segunda gravação de
+`enqueueDelete` continua registrado: nesse ponto a intenção de exclusão
+já está persistida. Não foi encontrada regressão adicional confirmada.
+
+##### Spec
+
+- ✅ **Critério 3, “Desfazer em até 5 s”:** relógio no `AppState`
+  (`MainActivity.kt:620-648`), independente da composição do chat.
+  Testes de expiração, Desfazer e segunda janela; QA confirma expiração
+  com Configurações aberta e Desfazer normal aos 4.785 ms.
+- ✅ **Critérios 3/4, “os arquivos recebidos saem de lá”:**
+  `MainActivity.kt:575-589` acha a URI do parcial em `writing:`, apaga o
+  parcial e remove o recibo. Teste de download interrompido exercita o
+  `AppState` real.
+- ✅ **Critério 4, “tira as bolhas do celular”:**
+  `MainActivity.kt:572,779` alcança o arquivo anunciado antes da criação
+  da bolha e impede a bolha/download posteriores. Teste controla esse
+  intervalo com dispatcher de uma thread.
+- ✅ **Critério 2, ids das mensagens apagadas:**
+  `MainActivity.kt:454` impede o enfileiramento posterior do texto cuja
+  bolha já foi apagada, sob a mesma trava da exclusão; teste verifica que
+  ele nunca chega ao PC. Critérios 1/2 seguem cobertos pelos testes de
+  aplicação antes do ACK, ids desconhecidos, fila restaurada e exclusão
+  com os dois espaços de ids.
+- ✅ **Critério 3, toque no 🗑:** `statusBarsPadding()` em
+  `MainActivity.kt:1059,1182`; QA confirma os centros do 🗑 e do Voltar
+  fora da barra do sistema. Critérios 3/4 também passam para contagens,
+  expiração, exclusão pelo PC e fechamento do visualizador.
+
+Nenhum bloqueador de Spec ou escopo indevido. A única linha
+`Proxy decided`, de 2026-10-01, mantém app aqui, protocolo/fila no SYN-027
+e docs no SYN-019; contrato respeitado. Nenhuma decisão ou critério foi
+reescrito nesta revisão.
+
+##### Provas e validação
+
+Conferidos os commits de testes e os registros finais reais do stage 2
+em `.scratch/run-log/`. `6065582`: sem `deleteAll`, falha de compilação;
+com stub vazio, 9 dos 81 testes falham e a guarda de chat vazio passa;
+com implementação, 81/81 verdes. `d03dd74`: sem `beginClear`/`undoClear`,
+falha de compilação; com stubs vazios, 7 dos 9 testes novos falham pelos
+motivos corrigidos e dois passam como guardas; implementação, app 90/90,
+`ApagarTudoTest` 19/19. Esta revisão não repetiu o vermelho nem escreveu
+testes de correção.
+
+Gate completo em primeiro plano, após confirmar a branch atualizada
+sobre a sessão: exit 0, `gate: passou`. Rust 83 (8+7+5+63), PC/UI 60 e
+kit QA 14 sem falhas; fmt, Clippy e TypeScript verdes. Gradle `check`
+verde; testes `UP-TO-DATE`, XML conferidos: app 90 e cliente 72, zero
+falhas, erros ou pulos. Nenhuma mudança posterior de produção.
+
+QA dos critérios 3/4: [segunda revisão no emulador](../../qa-runs/2026-10-03-syn-029-review.md).
+Toques centrais, Desfazer, expiração, exclusão pelo PC, visualizador e
+prazo em Configurações ✅. Capturas com escala normal confirmam a barra
+encolhendo. Primeira subida falhou por infraestrutura e a retentativa
+passou; ajustes do roteiro estão no relatório. Quatro recebidos
+rastreados já ausentes, dez arquivos anteriores preservados, quatro
+fontes locais intactas por SHA-256; `down` concluído.
+
+##### Decisão e limites
+
+Arquivos de produção/teste entregues: `MainActivity.kt`,
+`ReceivedFiles.kt` e `ApagarTudoTest.kt`. Integração sem squash na sessão
+`sweatshop/2026-10-01-2019`, merge `5af0eb8`; `Stage: done` e a linha do
+ledger ficam juntos no commit de fechamento. O PR de sessão permanece
+sob responsabilidade do foreman e seu merge, do humano.
+
+SAF, permissão perdida em aparelho real e “Guardar fotos tiradas” não
+foram exercitados; as corridas adicionais têm prova JVM, sem reprodução
+forçada no emulador. O recibo SAF `creating:` sem URI e a falha na segunda
+gravação da fila continuam limites explícitos. Nenhum débito humano novo
+para os passos verificados pelo kit.
+
+Totais por eixo: Standards 0 bloqueadores; Spec 0 bloqueadores; QA 0 ❌.
