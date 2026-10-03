@@ -1,5 +1,5 @@
 # SYN-028: Apagar tudo na janela do PC
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: SYN-019
 Review: agent
@@ -313,3 +313,34 @@ a retirar. Resumo por eixo: Standards, **1 bloqueador** (snapshot
 inconsistente); Spec, **2 achados** (snapshot e exclusão perdida na
 abertura). São dois problemas distintos; o de snapshot consta dos
 dois eixos.
+
+#### Stage 2, segunda reabertura (2026-10-02)
+
+Provas vermelhas em `2905b50` (test-only; `E0425` para `visiveis` e
+`SyntaxError` por `ligarOuvintes` ausente de `apagados.ts`). Correção sem tocar
+em teste, nos Primary files, sem `items.rs`:
+
+- `lib.rs`: `recebidos_visiveis` passa por `visiveis(listar, selecionado)`, que
+  consulta a marca de exclusão dos ids de uma primeira listagem e só então lista
+  de novo, devolvendo a segunda sem os marcados. Quem foi marcado e ainda existe
+  na segunda listagem continua escondido; quem terminou entre as duas já não
+  está nela (ids não se repetem, e `finish_delete` tira o Item e a marca juntos).
+  Fecha o ❌ de critério 3. Item selecionado depois da consulta, por exclusão
+  concorrente do celular, aparece e sai pelo `apagado` quando o upload termina,
+  como já era.
+- `apagados.ts` + `main.ts`: `ligarOuvintes` registra `apagado` antes de `item`
+  e `enviado` (cada `listen` é assíncrono), e `main()` passa a usá-lo. Um Item
+  que chega e é excluído entre dois registros não cria bolha sem ouvinte para
+  removê-la; o que chegou antes do registro de `item` vem no snapshot, já
+  filtrado pelas lápides. Fecha o ❌ de critério 4. É o código de ligação dos
+  eventos de exclusão, por isso mora no módulo das lápides.
+- Mutantes: com `visiveis` voltando a uma listagem só, o teste do Rust cai; com
+  a ordem antiga de registro (`item`, `enviado`, `apagado`), o primeiro teste de
+  `ligarOuvintes` cai. Restaurados. Gate completo verde: Rust 8 unitários + 7
+  config + 5 outbox + 63 HTTP = 83; UI 60/60; QA 14/14; fmt, Clippy e `tsc`.
+- Visto de passagem, sem ação: `server.rs:649-651` tem o mesmo par
+  listar-e-consultar, mas roda sob o lock `file_ops` que serializa a conclusão
+  do upload (comentário em `636-638`), então não corre.
+- Interface não exercida no app por este stage: o QA dos critérios 3 e 4 com
+  respostas retidas fica para o stage 3. Limite conhecido, o mesmo de antes:
+  recarregar a janela *dentro* dos 5 s devolve as bolhas, pois nada foi apagado.

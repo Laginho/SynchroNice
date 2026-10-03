@@ -26,3 +26,24 @@ export class Apagados {
     return itens.filter((item) => !this.enviados.has(item.id));
   }
 }
+
+export type Escutar = (
+  evento: string,
+  tratar: (event: { payload: unknown }) => void,
+) => Promise<unknown>;
+
+/** Registra "apagado" antes de "item" e "enviado": cada registro é assíncrono, e
+ * um Item que chega e é excluído entre dois deles não pode deixar uma bolha que
+ * ninguém remove. */
+export async function ligarOuvintes<R, E, X>(
+  escutar: Escutar,
+  ouvintes: {
+    apagado: (excluidos: X) => void;
+    item: (recebido: R) => void;
+    enviado: (enviado: E) => void;
+  },
+): Promise<void> {
+  await escutar("apagado", (event) => ouvintes.apagado(event.payload as X));
+  await escutar("item", (event) => ouvintes.item(event.payload as R));
+  await escutar("enviado", (event) => ouvintes.enviado(event.payload as E));
+}

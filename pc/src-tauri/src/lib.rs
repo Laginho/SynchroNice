@@ -9,7 +9,7 @@ pub mod server;
 use items::{Item, Items};
 use outbox::{OutItem, Outbox};
 use par::Par;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
@@ -85,10 +85,22 @@ const ITEM_EVENT: &str = "item";
 /// Itens da Sessão sem os que já foram selecionados para exclusão: um upload
 /// em andamento fica em `Items` até terminar, mas a janela não o redesenha.
 fn recebidos_visiveis(items: &Items) -> Vec<Item> {
-    items
-        .snapshot()
+    visiveis(|| items.snapshot(), |id| items.delete_requested(id))
+}
+
+/// A lista e a marca de exclusão vêm de locks separados, e o término de um
+/// upload selecionado tira o Item e a marca juntos. Consultar as marcas antes
+/// da lista final garante que quem estava marcado e ainda aparece nela segue
+/// escondido; quem terminou nesse meio tempo já não aparece.
+fn visiveis(listar: impl Fn() -> Vec<Item>, selecionado: impl Fn(u64) -> bool) -> Vec<Item> {
+    let marcados: HashSet<u64> = listar()
+        .iter()
+        .map(|item| item.id)
+        .filter(|&id| selecionado(id))
+        .collect();
+    listar()
         .into_iter()
-        .filter(|item| !items.delete_requested(item.id))
+        .filter(|item| !marcados.contains(&item.id))
         .collect()
 }
 

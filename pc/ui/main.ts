@@ -7,7 +7,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { segmentarTexto } from "./copiaveis.ts";
 import { Bandeja, temPrevia } from "./bandeja.ts";
-import { Apagados } from "./apagados.ts";
+import { Apagados, ligarOuvintes } from "./apagados.ts";
 
 interface TextItem {
   id: number;
@@ -971,11 +971,11 @@ function tratarColagem(event: ClipboardEvent): void {
 async function main(): Promise<void> {
   // Escuta antes de listar, para não perder um Item que chegue no meio;
   // `recebidas`/`enviadas` descartam o que vier duas vezes como criação.
-  await listen<Item>("item", (event) => renderRecebido(event.payload));
-  await listen<Enviado>("enviado", (event) => renderEnviado(event.payload));
-  await listen<{ received: number[]; sent: number[] }>("apagado", (event) =>
-    removerExcluidos(event.payload),
-  );
+  await ligarOuvintes<Item, Enviado, { received: number[]; sent: number[] }>(listen, {
+    item: renderRecebido,
+    enviado: renderEnviado,
+    apagado: removerExcluidos,
+  });
   await listen<boolean>("presenca", (event) => {
     atualizarPresenca(event.payload);
     // O celular só conecta com o token certo: presença é o próprio sinal de
