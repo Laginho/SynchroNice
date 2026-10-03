@@ -14,6 +14,7 @@ import android.webkit.MimeTypeMap
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -42,6 +43,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -87,8 +89,11 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -195,6 +200,11 @@ internal class AppState(
     var hidden by mutableStateOf(emptySet<Long>())
     /** As bolhas esvaziadas pela janela de Desfazer aberta (vazio = nenhuma janela). */
     var window by mutableStateOf(emptySet<Long>())
+    /** Quando a janela aberta acaba (`SystemClock.elapsedRealtime`): o aviso retoma a barra daqui ao voltar da ⚙. */
+    var windowEnd = 0L
+        private set
+    private val windowScope = CoroutineScope(SupervisorJob())
+    private var windowClock: Job? = null
     private val stagedPastes = mutableStateListOf<File>()
     val pasteTray: List<File> get() = stagedPastes
     val composer = TextFieldState()
@@ -338,6 +348,7 @@ internal class AppState(
         receivedFiles.clear()
         inFlightFiles.clear()
         deletedFiles.clear()
+        windowClock?.cancel()
         hidden = emptySet()
         window = emptySet()
         protocolClient = null
@@ -385,6 +396,7 @@ internal class AppState(
                             receivedFiles.clear()
                             inFlightFiles.clear()
                             deletedFiles.clear()
+                            windowClock?.cancel()
                             hidden = emptySet()
                             window = emptySet()
                         }
@@ -435,18 +447,21 @@ internal class AppState(
     suspend fun queueText(id: Long, text: String) {
         val currentClient = client() ?: return
         try {
-            withContext(Dispatchers.IO) {
+            val queued = withContext(Dispatchers.IO) {
                 outboundMutex.withLock {
                     if (currentClient !== protocolClient) throw IOException("Par alterado antes de guardar a mensagem")
+                    // Apagar tudo chegou antes do enfileiramento: a bolha saiu, o texto não sai pela rede.
+                    if (withContext(Dispatchers.Main.immediate) { messages.none { it.localId == id } }) return@withLock false
                     val sentId = currentClient.enqueueTextItem(text)
                     withContext(Dispatchers.Main.immediate) {
                         val index = messages.indexOfFirst { it.localId == id }
                         if (index >= 0) messages[index] = messages[index].copy(sentId = sentId)
                         submitted.addLast(id)
                     }
+                    true
                 }
             }
-            scheduleDelivery(appContext)
+            if (queued) scheduleDelivery(appContext)
         } catch (error: Exception) {
             if (error is CancellationException) throw error
             setDelivery(id, Delivery.FAILED)
@@ -542,9 +557,11 @@ internal class AppState(
     /**
      * Tira da Sessão as bolhas escolhidas por [selected] e apaga os arquivos que o app gravou para
      * elas; o que ainda está baixando é apagado quando o download termina ou falha (ver
-     * [receiveFile]). Devolve as bolhas tiradas.
+     * [receiveFile]). [announced] são ids de arquivos de uma exclusão do PC: os que o `listen` já
+     * anunciou, mas ainda sem bolha, também são marcados, para a bolha nunca nascer. Devolve as bolhas tiradas.
      */
-    private suspend fun dropMessages(selected: (ChatMessage) -> Boolean): List<ChatMessage> {
+    private suspend fun dropMessages(announced: Set<Long> = emptySet(), selected: (ChatMessage) -> Boolean): List<ChatMessage> {
+        val token = pairing?.token
         val (dropped, finished) = withContext(Dispatchers.Main.immediate) {
             val gone = messages.filter(selected)
             val ids = gone.map { it.localId }.toSet()
@@ -552,32 +569,90 @@ internal class AppState(
             submitted.removeAll { it in ids }
             val received = gone.filter { !it.outgoing && it.file != null }
             received.forEach { deletedFiles.add(it.file!!.id) }
+            announced.filterTo(deletedFiles) { it in inFlightFiles }
             gone to received.filter { it.file!!.id !in downloading }
         }
-        finished.forEach { message -> message.uri?.let { files.delete(it, message.file!!.size) } }
+        finished.forEach { message ->
+            val item = message.file!!
+            val key = "received-file:$token:${item.id}"
+            val receipt = pairingPreferences.getString(key, null)
+            // Completo (a bolha ou o recibo guardam a URI final): só com o tamanho do Item. O parcial
+            // interrompido só está no recibo `writing:` e não tem tamanho para conferir.
+            val saved = message.uri?.let { it to item.size } ?: when {
+                receipt == null -> null
+                receipt.startsWith("writing:") -> Uri.parse(receipt.removePrefix("writing:")) to null
+                receipt.startsWith("renaming:") -> Uri.parse(receipt.removePrefix("renaming:")) to item.size
+                receipt.startsWith("content:") -> Uri.parse(receipt) to item.size
+                else -> null
+            }
+            saved?.let { (uri, size) -> files.delete(uri, size) }
+            if (receipt != null) pairingPreferences.edit().remove(key).apply()
+        }
         return dropped
     }
 
-    /** O fim da janela de Desfazer: [localIds] são as bolhas que ela esvaziou. */
+    /**
+     * O fim da janela de Desfazer: [localIds] são as bolhas que ela esvaziou. A exclusão é guardada na
+     * fila antes de qualquer bolha, Pendente ou arquivo sair: se o disco falhar, nada se perdeu e a
+     * conversa volta à tela.
+     */
     suspend fun deleteAll(localIds: Set<Long> = messages.map { it.localId }.toSet()) {
         val currentClient = client() ?: return
-        val queued = withContext(Dispatchers.IO + NonCancellable) {
-            outboundMutex.withLock {
-                if (currentClient !== protocolClient) return@withLock false
-                val dropped = dropMessages { it.localId in localIds }
-                if (dropped.isEmpty()) return@withLock false
-                currentClient.enqueueDelete(dropped.mapNotNull { it.receivedId }, dropped.mapNotNull { it.sentId })
-                true
+        val queued = try {
+            withContext(Dispatchers.IO + NonCancellable) {
+                outboundMutex.withLock {
+                    if (currentClient !== protocolClient) return@withLock false
+                    val gone = withContext(Dispatchers.Main.immediate) { messages.filter { it.localId in localIds } }
+                    if (gone.isEmpty()) return@withLock false
+                    currentClient.enqueueDelete(gone.mapNotNull { it.receivedId }, gone.mapNotNull { it.sentId })
+                    dropMessages { it.localId in localIds }
+                    true
+                }
             }
+        } catch (error: IOException) {
+            connectionError = "Não foi possível apagar a conversa: ${error.message ?: "erro de disco"}"
+            false
         }
         if (queued) scheduleDelivery(appContext)
+    }
+
+    /** Abre a janela de Desfazer: esvazia o chat na tela e só apaga de verdade quando [windowMs] passa. */
+    fun beginClear(windowMs: Long = CLEAR_WINDOW_MS.toLong()) {
+        windowClock?.cancel()
+        if (window.isNotEmpty()) commitClear()
+        val ids = messages.filter { it.localId !in hidden }.map { it.localId }.toSet()
+        if (ids.isEmpty()) return
+        window = ids
+        hidden = hidden + ids
+        windowEnd = SystemClock.elapsedRealtime() + windowMs
+        // O relógio é do AppState, não da tela: abrir a ⚙ não o pausa nem o cancela.
+        windowClock = windowScope.launch(Dispatchers.Main.immediate) {
+            delay(windowMs)
+            commitClear()
+        }
+    }
+
+    fun undoClear() {
+        windowClock?.cancel()
+        hidden = hidden - window
+        window = emptySet()
+    }
+
+    private fun commitClear() {
+        windowClock?.cancel()
+        val ids = window
+        window = emptySet()
+        windowScope.launch(Dispatchers.Main.immediate) {
+            deleteAll(ids)
+            hidden = hidden - ids
+        }
     }
 
     /** Uma exclusão vinda do PC: o ack só sai depois de a bolha, o arquivo e o Pendente listados saírem. */
     private suspend fun applyDelete(client: ProtocolClient, delete: Item.Delete) {
         outboundMutex.withLock {
             if (client !== protocolClient) return@withLock
-            dropMessages { it.receivedId in delete.doPc || it.sentId in delete.doCelular }
+            dropMessages(delete.doPc.toSet()) { it.receivedId in delete.doPc || it.sentId in delete.doCelular }
             client.discardPending(delete.doCelular)
             client.acknowledgeDelete(delete)
         }
@@ -700,6 +775,8 @@ internal class AppState(
 
     suspend fun receiveFile(item: Item.FileMeta, currentClient: ProtocolClient) = withContext(Dispatchers.Main.immediate) {
         if (currentClient !== protocolClient) return@withContext
+        // A exclusão chegou entre o anúncio e este ponto: a bolha não nasce e nada é baixado.
+        if (item.id in deletedFiles) return@withContext
         val receiptKey = "received-file:${pairing!!.token}:${item.id}"
         val receipt = pairingPreferences.getString(receiptKey, null)
         val incompleteUri = receipt?.takeIf { it.startsWith("writing:") }?.removePrefix("writing:")?.let(Uri::parse)
@@ -728,6 +805,8 @@ internal class AppState(
         val savedUri = messages.firstOrNull { it.localId == id }?.uri
         // Onde o app gravou: a bolha pode sair antes do fim, e o arquivo ainda precisa ser achado.
         var location: Uri? = savedUri ?: renamingUri ?: incompleteUri
+        // O conteúdo está completo (com ou sem o ack aceito): só então o tamanho do Item vale como proteção.
+        var complete = savedUri != null || renamingUri != null
         update { it.copy(delivery = Delivery.PENDING, progress = 0) }
         downloading.add(item.id)
         try {
@@ -764,11 +843,13 @@ internal class AppState(
                         }
                     }, onRenaming = { uri ->
                         location = uri
+                        complete = true
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
                             saveReceipt("renaming:$uri")
                         }
                     }, onSaved = { uri ->
                         location = uri
+                        complete = true
                         kotlinx.coroutines.runBlocking(Dispatchers.Main.immediate) {
                             saveReceipt(uri.toString())
                             update { it.copy(uri = uri) }
@@ -803,10 +884,10 @@ internal class AppState(
         } finally {
             downloading.remove(item.id)
             if (item.id in deletedFiles) {
-                // A bolha saiu durante o download: o arquivo vai junto. Parcial não tem o tamanho do Item.
+                // A bolha saiu durante o download: o arquivo vai junto. Só o parcial não tem o tamanho do Item.
                 pairingPreferences.edit().remove(receiptKey).apply()
                 location?.let { uri ->
-                    withContext(Dispatchers.IO + NonCancellable) { files.delete(uri, if (acknowledged) item.size else null) }
+                    withContext(Dispatchers.IO + NonCancellable) { files.delete(uri, if (complete) item.size else null) }
                 }
             }
         }
@@ -975,27 +1056,14 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
     LaunchedEffect(visibleIds, viewedImage) {
         if (viewedImage?.let { it.localId !in visibleIds } == true) viewedImage = null
     }
-    fun commitClear() {
-        val ids = state.window
-        state.window = emptySet()
-        scope.launch {
-            state.deleteAll(ids)
-            state.hidden = state.hidden - ids
-        }
-    }
-
-    Column(Modifier.fillMaxSize().imePadding().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().imePadding().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("SynchroNice", style = MaterialTheme.typography.titleLarge)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(if (state.online) "Na rede" else "Fora da rede", modifier = Modifier.testTag("presence"), color = if (state.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                 if (messages.isNotEmpty()) {
                     TextButton(
-                        onClick = {
-                            if (state.window.isNotEmpty()) commitClear()
-                            state.window = visibleIds.toSet()
-                            state.hidden = state.hidden + state.window
-                        },
+                        onClick = { state.beginClear() },
                         modifier = Modifier.testTag("clear-all").semantics { contentDescription = "Apagar tudo" },
                     ) { Text("🗑", style = MaterialTheme.typography.titleLarge) }
                 }
@@ -1041,11 +1109,8 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
                 ClearedNotice(
                     items = cleared.size,
                     files = cleared.count { it.file != null },
-                    onUndo = {
-                        state.hidden = state.hidden - state.window
-                        state.window = emptySet()
-                    },
-                    onExpire = ::commitClear,
+                    windowEnd = state.windowEnd,
+                    onUndo = state::undoClear,
                 )
             }
         }
@@ -1076,17 +1141,16 @@ private fun ChatScreen(state: AppState, onSettings: () -> Unit, onCamera: () -> 
 
 private const val CLEAR_WINDOW_MS = 5_000
 
-/** O aviso do Apagar tudo: nada é apagado nem sai pela rede enquanto a barra esvazia. */
+/**
+ * O aviso do Apagar tudo: nada é apagado nem sai pela rede enquanto a barra esvazia. Só desenha o
+ * prazo; quem o conta é o [AppState] (`beginClear`), que segue contando com o chat fora da tela.
+ */
 @Composable
-private fun ClearedNotice(items: Int, files: Int, onUndo: () -> Unit, onExpire: () -> Unit) {
-    var target by remember { mutableStateOf(1f) }
-    val remaining by animateFloatAsState(target, tween(CLEAR_WINDOW_MS, easing = LinearEasing), label = "clear-window")
-    // O prazo é o delay, não a animação: com a escala de animação em zero a barra some, mas o Desfazer fica.
-    LaunchedEffect(Unit) {
-        target = 0f
-        delay(CLEAR_WINDOW_MS.toLong())
-        onExpire()
-    }
+private fun ClearedNotice(items: Int, files: Int, windowEnd: Long, onUndo: () -> Unit) {
+    val left = remember { (windowEnd - SystemClock.elapsedRealtime()).coerceIn(0L, CLEAR_WINDOW_MS.toLong()) }
+    var target by remember { mutableStateOf(left / CLEAR_WINDOW_MS.toFloat()) }
+    val remaining by animateFloatAsState(target, tween(left.toInt(), easing = LinearEasing), label = "clear-window")
+    LaunchedEffect(Unit) { target = 0f }
     Card(Modifier.fillMaxWidth().padding(vertical = 8.dp).testTag("clear-notice")) {
         Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -1115,7 +1179,7 @@ private fun SettingsScreen(state: AppState, onBack: () -> Unit) {
             }
         }
     }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
         TextButton(onClick = onBack, modifier = Modifier.testTag("settings-back")) { Text("Voltar") }
         Text("Configurações", style = MaterialTheme.typography.headlineSmall)
         Text(folder?.lastPathSegment ?: "Download/SynchroNice", modifier = Modifier.padding(top = 16.dp))
