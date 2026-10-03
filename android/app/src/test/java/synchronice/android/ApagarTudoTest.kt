@@ -10,6 +10,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.Looper
+import android.os.Bundle
 import android.provider.OpenableColumns
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.sun.net.httpserver.HttpExchange
@@ -18,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -43,6 +45,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import synchronice.protocolclient.Item
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -123,6 +126,7 @@ private class FakePc {
 private class MediaFake(app: Application) {
     val files = CopyOnWriteArrayList<File>()
     val deleted = CopyOnWriteArrayList<Uri>()
+    val documentAliases = ConcurrentHashMap<Uri, Uri>()
     @Volatile var deleteError: RuntimeException? = null
 
     init {
@@ -130,6 +134,11 @@ private class MediaFake(app: Application) {
             private fun backing(uri: Uri) = files[uri.lastPathSegment!!.toInt() - 1]
 
             override fun onCreate() = true
+            @Suppress("DEPRECATION")
+            override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+                check(method == "get_media_uri")
+                return Bundle().apply { putParcelable("uri", documentAliases[extras!!.getParcelable<Uri>("uri")]) }
+            }
             override fun insert(uri: Uri, values: ContentValues?): Uri {
                 files.add(File(app.cacheDir, "apagar-tudo-${files.size}-${System.nanoTime()}.bin"))
                 return Uri.withAppendedPath(uri, files.size.toString())
@@ -148,6 +157,23 @@ private class MediaFake(app: Application) {
             }
             override fun getType(uri: Uri) = "application/octet-stream"
         }.apply { attachInfo(app, ProviderInfo().apply { authority = "media" }) })
+    }
+
+    /** O seletor do sistema entrega uma URI de documento para o mesmo arquivo do MediaStore. */
+    fun documentAlias(app: Application, mediaUri: Uri): Uri {
+        val uri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2FSynchroNice%2Fa.bin")
+        documentAliases[uri] = mediaUri
+        ShadowContentResolver.registerProviderInternal(uri.authority!!, object : ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
+                MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME)).apply { addRow(arrayOf("a.bin")) }
+            override fun openFile(uri: Uri, mode: String) = ParcelFileDescriptor.open(files.single(), ParcelFileDescriptor.MODE_READ_ONLY)
+            override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+            override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
+            override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
+            override fun getType(uri: Uri) = "application/octet-stream"
+        }.apply { attachInfo(app, ProviderInfo().apply { authority = uri.authority }) })
+        return uri
     }
 }
 
@@ -195,6 +221,15 @@ class ApagarTudoTest {
 
     private suspend fun AppState.waitForDownloadedFile() =
         waitUntil { messages.singleOrNull()?.let { it.uri != null && it.delivery == Delivery.DELIVERED } == true }
+
+    private suspend fun share(uri: Uri) {
+        val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uri)
+        val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).create().get()
+        waitUntil {
+            shadowOf(Looper.getMainLooper()).idle()
+            activity.isFinishing
+        }
+    }
 
     @Test
     fun aDeleteFromThePcRemovesTheListedBubblesIgnoresUnknownIdsAndAcksAfterApplying() = withPc { pc, app ->
@@ -304,12 +339,7 @@ class ApagarTudoTest {
         whileListening(state) {
             state.waitForDownloadedFile()
             val source = state.messages.single().uri!!
-            val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, source)
-            val activity = Robolectric.buildActivity(ShareActivity::class.java, intent).create().get()
-            waitUntil {
-                shadowOf(Looper.getMainLooper()).idle()
-                activity.isFinishing
-            }
+            share(source)
             state.retryPending()
             assertEquals(listOf("payl"), pc.uploads.toList(), "o arquivo recebido foi enviado de volta")
             val sent = state.messages.single { it.outgoing }.sentId!!
@@ -322,6 +352,70 @@ class ApagarTudoTest {
 
             assertTrue(state.messages.isEmpty())
             assertTrue(media.deleted.isEmpty(), "o original enviado fica protegido durante toda a Sessão")
+        }
+    }
+
+    @Test
+    fun aReceivedFilePastedThroughItsMediaStoreAliasIsPreservedByLocalClear() = withPc { pc, app ->
+        val media = MediaFake(app)
+        val state = pc.pair(app)
+        pc.batches.put(receivedFile)
+        whileListening(state) {
+            state.waitForDownloadedFile()
+            val row = state.messages.single().uri!!.lastPathSegment
+            assertTrue(state.pasteUri(Uri.parse("content://media/external_primary/file/$row")))
+            state.sendComposer()
+            state.retryPending()
+            assertEquals(listOf("payl"), pc.uploads.toList())
+
+            state.deleteAll()
+
+            assertTrue(state.messages.isEmpty())
+            assertTrue(media.deleted.isEmpty(), "Colar por outra coleção/volume ainda envia o mesmo original")
+        }
+    }
+
+    @Test
+    fun aReceivedFileSharedThroughTheSystemDocumentPickerIsPreservedByClear() = withPc { pc, app ->
+        val media = MediaFake(app)
+        val state = pc.pair(app, (app as SynchroNiceApplication).state)
+        pc.batches.put(receivedFile)
+        whileListening(state) {
+            state.waitForDownloadedFile()
+            share(media.documentAlias(app, state.messages.single().uri!!))
+            state.retryPending()
+            assertEquals(listOf("payl"), pc.uploads.toList())
+
+            pc.batches.put(deleteLine(9, doPc = "1"))
+            waitUntil { pc.acks.containsKey(9L) }
+
+            assertEquals(1, state.messages.size)
+            assertTrue(media.deleted.isEmpty(), "a URI do seletor e a do recebimento identificam o mesmo original")
+        }
+    }
+
+    @Test
+    fun anOriginalSentWhileItsReceiveAckIsPendingSurvivesTheLateDownloadCleanup() = withPc { pc, app ->
+        val media = MediaFake(app)
+        val state = pc.pair(app)
+        pc.ackGate = CountDownLatch(1)
+        pc.ackStatus.set(500)
+        val receiving = async { runCatching { state.receiveFile(Item.FileMeta(1, 0, "a.bin", 4), state.client()!!) } }
+        try {
+            waitUntil { state.messages.singleOrNull()?.uri != null }
+            assertTrue(state.pasteUri(state.messages.single().uri!!))
+            state.sendComposer()
+            state.retryPending()
+            assertEquals(listOf("payl"), pc.uploads.toList())
+            state.deleteAll()
+            pc.ackGate!!.countDown()
+
+            assertTrue(withTimeout(5_000) { receiving.await() }.isFailure, "o ACK falhou depois da exclusão")
+            assertTrue(state.messages.isEmpty())
+            assertTrue(media.deleted.isEmpty(), "o finally do recebimento também preserva o original enviado")
+        } finally {
+            pc.ackGate!!.countDown()
+            receiving.cancelAndJoin()
         }
     }
 
