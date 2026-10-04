@@ -241,7 +241,11 @@ try {
 wait_wifi() {
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
         state=$(dumpsys wifi) || return 1
-        if printf '%s\n' "$state" | grep -qx "Wi-Fi is $1"; then return 0; fi
+        # Feed the dump through stdin: external printf cannot take a large argument.
+        if grep -qx "Wi-Fi is $1" <<QA_WIFI_STATE
+$state
+QA_WIFI_STATE
+        then return 0; fi
         sleep 1
     done
     echo "Error: Wi-Fi did not become $1"

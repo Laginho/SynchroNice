@@ -54,6 +54,21 @@ aparelho:
 
 ## Comments
 
+- Stage 2 (2026-10-04): callers examinados: desligamento e `restore` no
+  script gerado, ambos via `wait_wifi`; consumo dos marcadores pelo wrapper
+  após reconectar. Casos cobertos: estado atrasado/desconhecido, recusa
+  silenciosa, erro de dumpsys, sinais INT/TERM e retries da restauração.
+- Vermelho no commit de testes `093aa7c`: execução focada do cenário de
+  estado (`node --test --test-name-pattern='wifi-off confirms'
+  qa/phone.test.mjs`) teve 13 subcenários passando e `large-dump` falhando
+  com `Argument list too long` (Node: 15 testes, 13 pass, 2 fail incluindo
+  o teste pai). `status-denied` manteve clock 0. O gate `-TestsOnly`
+  confirmou a mesma falha, mas também sofreu restrições do sandbox:
+  `Access denied` nos testes do PC e rede negada no Gradle.
+- Implementação: here-document entrega a variável de estado ao stdin do
+  `grep`; nenhum argumento grande nem arquivo temporário adicional.
+  A captura de `dumpsys` mantém o retorno imediato se o comando falhar.
+
 - Stage 3 do CLEAN-023 (2026-10-03): no AVD `SynchroNice_API37`, shell
   `/system/bin/sh` mksh R59, a CLI real chegou ao `svc wifi disable`, mas
   `printf '%s\n' "$state"` falhou com `Argument list too long`. O wrapper
