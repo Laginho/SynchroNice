@@ -1,5 +1,5 @@
 # CLEAN-023: `wifi-off` sempre restaura o Wi-Fi
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -55,6 +55,15 @@ git-bash com `svc`, `dumpsys` e `sleep` falsos:
   (critérios 3 e 4).
 
 ## Comments
+
+- Stage 2 (2026-10-03): seam aprovada: `phone.ps1 wifi-off`, com adb falso
+  executando o script capturado em Git Bash. Callers examinados: launcher nohup,
+  reconexão e leitura do log no PC; `restore` só é chamado pelo EXIT e
+  `wait_wifi` pela desativação/restauração. Cobertos sinais durante sleep,
+  falhas transitórias/permanentes de enable e os nove cenários existentes.
+  Red: `node --test --test-name-pattern='wifi-off confirms' qa/phone.test.mjs`
+  teve 9 passes e 5 falhas (quatro cenários novos + o teste pai): TERM saiu
+  com 3840, INT com 0; os dois cenários de retry fizeram só uma tentativa.
 
 - O script no aparelho em `qa/phone.ps1:225-229` só faz `trap restore EXIT`,
   e o `svc wifi enable` é tentado uma vez. Um TERM/INT/HUP, ou um enable que
