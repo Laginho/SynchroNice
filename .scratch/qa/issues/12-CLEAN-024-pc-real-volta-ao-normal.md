@@ -1,5 +1,5 @@
 # CLEAN-024: O PC real volta ao normal depois do pós-run no Redmi
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-030, CLEAN-020
 Review: agent
@@ -39,12 +39,15 @@ O conserto:
 
 1. Depois de `pc.ps1 start` sem `-Isolated`, o arquivo de estado existe com o
    PID e o exe abertos.
-2. `down.ps1`, sem `emulator.json` ativo e com esse registro apontando para um
+2. `down.ps1`, com ou sem `emulator.json` ativo e com esse registro apontando para um
    processo vivo, mata o processo e relança o mesmo exe sem
    `--remote-debugging-port` e sem `SYNCHRONICE_DATA_DIR`, e apaga o
-   registro.
+   registro. O exe real restaurado também fica preservado quando é o debug
+   (CLEAN-029).
 3. Com o registro apontando para um processo que já morreu, ou para outro
-   exe, o `down` não mata nem lança nada, e apaga o registro.
+   exe, o `down` não mata nem lança nada, e apaga o registro. Isso vale para
+   um registro sem restauração pendente: uma intenção já iniciada pelo kit
+   sobrevive à falha de relançamento e pode ser retomada (CLEAN-028).
 4. Sem registro, o `down` se comporta como hoje.
 5. `docs/agents/qa.md` diz que o `down` do fim do run também devolve o PC
    real ao normal depois do pós-run no Redmi.
@@ -82,3 +85,93 @@ não isolado, porque ele mata todo `pc`, inclusive o PC real do humano.
   de gravar o Run ao iniciar, e a recusa por exe (a1) sai. Fica só a
   devolução do PC real ao normal pelo `down` (b2). Bloqueado pelo SYN-030
   e pelo CLEAN-020, que cria o `down.test.mjs` e os parâmetros de exe.
+
+- Stage 2: seam aprovada `qa/down.ps1`, com stubs executáveis e estado injetado
+  via `-RealPcStatePath`. Callers inspecionados: `qa/up.ps1` (cleanup de erro)
+  e instruções do foreman/revisão. Casos: emulador ausente/inativo/ativo,
+  PID morto, exe divergente e repetição; nenhum start real é executado.
+- Prova red-green (2026-10-04): `node --test qa/down.test.mjs` antes da
+  implementação: 9 passes e 6 falhas (5 casos novos mais o teste pai).
+  Após `886b7e0`: 15 passes, 0 falhas. A primeira tentativa no sandbox
+  encontrou WMI negado; as duas provas acima foram executadas com permissão
+  para WMI. Testes isolados em stubs temporários, sem tocar no PC do usuário.
+- Estado fixo: `.scratch/qa-runs/real-pc/state.json`, em pasta ignorada pelo
+  Git. A gravação precede a espera pelo CDP; `down` usa a mesma rotina WMI
+  para limpar ambiente e relançar o exe, com ou sem emulador ativo.
+- Gate completo: `gate: passou`; fmt, Clippy, TypeScript, 83 testes Rust,
+  61 testes UI e 78 testes QA sem falhas; Gradle `check` com `BUILD SUCCESSFUL`
+  (tarefas de testes Android em cache). Log local ignorado:
+  `.scratch/qa-runs/clean-024-stage2/gate.log`. O shell externo retornou 1
+  ao redirecionar stderr nativo como `NativeCommandError`; o gate interno
+  concluiu todos os passos e registrou sucesso. Diff final revisado, restrito
+  aos Primary files e ao ticket; nenhum teste alterado no commit de código.
+
+#### Resolution (2026-10-04)
+
+Verdict: Approve
+
+- Revisão contra `6593287c2dbf7a4a4c936d52828351ddeb9773e5`, base da sessão
+  `sweatshop/2026-10-03-1608`. Rebase atualizado e integração sem squash no
+  merge `bde863a`. A revisão corrigiu somente a ordem dos comentários do
+  ticket e acrescentou evidências; nenhuma correção de produção ou testes.
+- Arquivos: `qa/pc.ps1`, `qa/down.ps1`, `qa/down.test.mjs` e
+  `docs/agents/qa.md`, mais ticket, relatório, ledger e achados para triagem.
+  O build Tauri alterou apenas os finais de linha de `Cargo.toml`; essa
+  alteração gerada foi desfeita antes da integração.
+
+##### Standards
+
+Nenhum bloqueio de código, escopo ou test-first. `7269ebf` contém os testes;
+`886b7e0` não altera testes; `96ffc9e` registra o gate verde e o handoff.
+Quatro notas processuais estão detalhadas no relatório: corpos ausentes nos
+commits, handoff em commit separado do último código, runner direto na prova
+red do stage 2 e ordem dos comentários. A última foi corrigida em `5f3f1e9`.
+Há uma observação de nome (`noOp` no harness), sem efeito funcional.
+
+##### Spec
+
+Zero falhas dos critérios numerados, zero escopo extra.
+
+1. ✅ Start não isolado grava PID e exe em estado fixo independente do RunDir,
+   antes da espera pelo CDP; conferido por leitura, conforme o contrato.
+2. ✅ Sem emulador ativo, processo correspondente é encerrado e o mesmo exe
+   relançado com ambiente sem isolamento/CDP; registro consumido. Testes
+   confirmam novo PID, uma única trace e repetição sem duplicação.
+3. ✅ PID morto ou exe divergente não provoca parada nem relançamento;
+   registro consumido e processos não correspondentes preservados.
+4. ✅ Sem registro, os nove cenários anteriores passam, incluindo os quatro
+   erros do emulador, casos ausente/inativo e repetição. O kit real também
+   encerrou PC isolado e emulador, com repetição bem-sucedida.
+5. ✅ Documentação descreve a devolução do PC real ao normal no fim do
+   pós-run no Redmi, inclusive sem emulador ativo.
+
+- Chamadores, falhas e interações examinados: rollback de `qa/up.ps1`,
+  pós-run e uso direto documentados, start isolado/não isolado, falha do
+  launcher/CDP, estado ausente/inativo/ativo, PID morto/exe divergente,
+  ambiente, repetição, erros de adb/AVD/kill/timeout e autostart do SYN-030.
+  Concorrência e corrupção de estado não foram exercitadas. Start não
+  isolado foi revisado por leitura para preservar o PC do usuário.
+- Red repetido nesta revisão com produção da base: saída 1, 15 testes,
+  9 passaram e 6 falharam (cinco casos novos e o pai). Falhas pela falta de
+  restauração ou de consumo do registro. Green pelo gate completo em
+  primeiro plano: saída 0, `gate: passou`, Rust 83/83, interface 61/61 e
+  QA 78/78, incluindo 15/15 do `down`. Fmt, Clippy e TypeScript passaram;
+  Gradle `check` com `BUILD SUCCESSFUL`, testes Android em cache.
+- [QA e revisão completa](../../qa-runs/2026-10-04-emulator-CLEAN-024-review.md):
+  `up -Sdk D:/AppData/Local/Android/Sdk` saiu 0 com presença confirmada;
+  `presence` retornou 200. `down` e repetição saíram 0; PID isolado
+  encerrado, emulador desconectado e `active: false`. O PC real estava
+  fechado; a restauração foi comprovada pelos executáveis Windows
+  temporários previstos na costura. Nenhum débito humano novo.
+- Dois requisitos adicionais, reproduzidos com cmdlets simulados, seguem
+  para triagem: [CLEAN-028](16-CLEAN-028-down-recupera-falha-na-restauracao.md)
+  (retomada após falha de WMI) e
+  [CLEAN-029](17-CLEAN-029-down-preserva-exe-real-de-debug.md)
+  (registro de exe debug com emulador ativo). O primeiro precisa distinguir
+  restauração pendente do PID morto que o critério 3 manda ignorar; o
+  segundo amplia a situação da prosa que o critério 2 não inclui e mantém
+  o mesmo encerramento do debug da rotina anterior. Não reabrem os critérios
+  deste ticket.
+- Totais: Standards 4 notas processuais, 1 observação de nome, 0 bloqueios;
+  Spec 0 falhas dos critérios e 2 observações para triagem. `Stage: done`,
+  Resolution e ledger registrados juntos na sessão.

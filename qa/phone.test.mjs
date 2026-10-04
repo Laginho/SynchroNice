@@ -4,6 +4,510 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+
+test('type preserves quotes through native argv and the device shell', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-025-type-'));
+  try {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    assert.equal(git.status, 0, git.stderr);
+    const bash = resolve(git.stdout.trim(), '../../../bin/bash.exe');
+    const adb = join(directory, 'adb.ps1');
+    const capture = join(directory, 'capture.cjs');
+    const commandFile = join(directory, 'command');
+    writeFileSync(capture, `require('node:fs').writeFileSync(process.env.QA_TYPE_COMMAND, process.argv[2]);`);
+    writeFileSync(adb, `
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($args[2] -eq 'get-state') { 'device'; exit 0 }
+if ($args[2] -eq 'shell' -and $args[3] -like 'input text *') {
+  # Cross the real PS 5.1 native boundary with exactly the argument intended for adb.
+  & node $env:QA_TYPE_CAPTURE $args[3]
+  exit $LASTEXITCODE
+}
+exit 0
+`);
+    for (const [value, expected] of [['say "hi"', 'say%s"hi"'], ['plain text', 'plain%stext'],
+      ["it's fine", "it's%sfine"], ['"$HOME; echo nope"', '"$HOME;%secho%snope"']]) {
+      await t.test(value, () => {
+        writeFileSync(commandFile, '');
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), 'type', '-Text', value, '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000,
+          env: { ...process.env, QA_TYPE_CAPTURE: capture, QA_TYPE_COMMAND: commandFile },
+        });
+        assert.ifError(result.error);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        const command = readFileSync(commandFile, 'utf8');
+        if (value === 'say "hi"') assert.equal(command, `input text 'say%s"hi"'`);
+        const shell = spawnSync(bash, ['-c', `input() { printf '%s\\n' "$@"; }; ${command}`],
+          { encoding: 'utf8', timeout: 30000 });
+        assert.ifError(shell.error);
+        assert.equal(shell.status, 0, shell.stderr);
+        assert.deepEqual(shell.stdout.trimEnd().split(/\r?\n/), ['text', expected]);
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('tap preserves quoted and plain selectors through native node argv', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-025-tap-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    const calls = join(directory, 'calls');
+    writeFileSync(adb, `
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($args[2] -eq 'get-state') { 'device'; exit 0 }
+if ($args[2] -eq 'exec-out') {
+  $env:QA_TAP_XML
+  exit 0
+}
+if ($args[3] -eq 'input' -and $args[4] -eq 'tap') {
+  [IO.File]::WriteAllText($env:QA_TAP_CALLS, ($args -join ' '))
+}
+exit 0
+`);
+    const originalXml = '<hierarchy><node text="say &quot;hi&quot;" bounds="[10,20][50,80]"/><node text="plain" bounds="[100,200][140,260]"/></hierarchy>';
+    for (const [name, value, point, xml] of [
+      ['entity-escaped quotes', 'say "hi"', '30 50', originalXml],
+      ['plain text', 'plain', '120 230', originalXml],
+      ['uiautomator single-quoted attribute', 'say "hi"', '502 1401',
+        `<hierarchy><node text='say "hi"' bounds='[215,1328][789,1475]'/></hierarchy>`],
+      ['apostrophe inside double-quoted attribute', "it's fine", '30 50',
+        `<hierarchy><node text="it's fine" bounds="[10,20][50,80]"/></hierarchy>`],
+    ]) {
+      await t.test(name, () => {
+        writeFileSync(calls, '');
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), 'tap', '-By', 'text', '-Value', value,
+          '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_TAP_CALLS: calls, QA_TAP_XML: xml },
+        });
+        assert.ifError(result.error);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        assert.equal(readFileSync(calls, 'utf8'), `-s 127.0.0.1:5555 shell input tap ${point}`);
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('automatic discovery ignores loopback and keeps wireless phone selection', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-022-discovery-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    const calls = join(directory, 'calls');
+    writeFileSync(adb, `
+if ($args[0] -eq 'devices') { $env:QA_DEVICES -split [char]10; exit 0 }
+if ($args[0] -eq 'mdns') { $env:QA_SERVICES -split [char]10; exit 0 }
+Add-Content -LiteralPath $env:QA_CALLS -Value ($args -join ' ')
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($args[2] -eq 'get-state') { 'device'; exit 0 }
+if (($args -join ' ') -match 'dumpsys window policy') { 'mShowingLockscreen=false' }
+exit 0
+`);
+    const phone = '192.168.0.50:41234';
+    const loopbacks = ['127.0.0.1:5555', '127.42.3.4:5555', 'localhost:5555', '[::1]:5555'];
+    const scenarios = loopbacks.map(endpoint => ({ name: `reject ${endpoint}`, devices: `${endpoint} device` }));
+    scenarios.push(
+      { name: 'phone after emulator', devices: `127.0.0.1:5555 device\n${phone} device`, selected: phone },
+      { name: 'mdns phone after loopback', devices: '127.0.0.1:5555 device',
+        services: `local _adb-tls-connect._tcp localhost:5555\nphone _adb-tls-connect._tcp ${phone}`, selected: phone },
+      { name: 'mdns loopback only', services: loopbacks.map(endpoint => `local _adb-tls-connect._tcp ${endpoint}`).join('\n') },
+      { name: 'explicit loopback', serial: '127.0.0.1:5555', selected: '127.0.0.1:5555' },
+      { name: 'USB emulator and offline ignored', devices: `emulator-5554 device\nUSB123 device\n${phone} offline` },
+      { name: 'wireless service name preserved', devices: 'adb-phone._adb-tls-connect._tcp device', selected: 'adb-phone._adb-tls-connect._tcp' },
+    );
+    for (const scenario of scenarios) {
+      await t.test(scenario.name, () => {
+        writeFileSync(calls, '');
+        const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve('qa/phone.ps1'), 'open', '-Adb', adb];
+        if (scenario.serial) args.push('-Serial', scenario.serial);
+        const result = spawnSync('powershell.exe', args, {
+          encoding: 'utf8', timeout: 30000,
+          env: { ...process.env, SYNCHRONICE_ADB_SERIAL: '', QA_CALLS: calls,
+            QA_DEVICES: scenario.devices ?? '', QA_SERVICES: scenario.services ?? '' },
+        });
+        assert.ifError(result.error);
+        const recorded = readFileSync(calls, 'utf8').trim();
+        assert.equal(result.status, scenario.selected ? 0 : 1, result.stdout + result.stderr);
+        if (scenario.selected) {
+          const commands = recorded.split(/\r?\n/);
+          assert.equal(commands[0], `connect ${scenario.selected}`);
+          assert.ok(commands.slice(1).every(command => command.startsWith(`-s ${scenario.selected} `)), recorded);
+          assert.ok(commands.some(command => command.includes('am start')), recorded);
+        } else {
+          assert.match(result.stderr, /sem aparelho/);
+          assert.equal(recorded, '', 'no connection or device action is allowed');
+        }
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('phone paths ignore case when protecting, tracking and cleaning files', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-021-phone-'));
+  const prefix = '/storage/emulated/0/Download/SynchroNice/';
+  try {
+    const adb = join(directory, 'adb.ps1');
+    writeFileSync(adb, `
+$command = $args -join ' '
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'getprop ro.serialno') { 'QA-phone'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($command -match 'find /storage/emulated/0/Download/SynchroNice') {
+  Get-ChildItem -LiteralPath $env:QA_FAKE_STORAGE -File | ForEach-Object {
+    '/storage/emulated/0/Download/SynchroNice/' + $_.Name
+  }
+  exit 0
+}
+if ($command -match "'/storage/emulated/0/Download/SynchroNice/([^'/]+)'") {
+  $target = Join-Path $env:QA_FAKE_STORAGE $Matches[1]
+  if ($command.Contains('if [ -f')) { if (Test-Path -LiteralPath $target) { 'exists' }; exit 0 }
+  if ($command -match 'sha256sum') { (Get-FileHash -LiteralPath $target).Hash + '  file'; exit 0 }
+  if ($command -match 'rm -f --') { Remove-Item -LiteralPath $target; exit 0 }
+}
+if ($command -match 'content query') { 'No result found.'; exit 0 }
+exit 0
+`);
+    for (const scenario of ['track-baseline', 'clean-baseline', 'dedupe', 'interrupted-clean']) {
+      await t.test(scenario, () => {
+        const storage = join(directory, scenario);
+        const runDir = join(directory, `${scenario}-run`);
+        mkdirSync(storage);
+        const manifest = join(runDir, 'phone-files.json');
+        const readState = () => JSON.parse(readFileSync(manifest, 'utf8').replace(/^\uFEFF/, ''));
+        const saveState = state => writeFileSync(manifest, JSON.stringify(state));
+        const run = (action, name = 'foto.jpg') => {
+          const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            resolve('qa/phone.ps1'), action, '-Path', prefix + name, '-RunDir', runDir,
+            '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+            encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_FAKE_STORAGE: storage },
+          });
+          assert.ifError(result.error);
+          return result;
+        };
+        const succeeds = result => assert.equal(result.status, 0, result.stdout + result.stderr);
+        const photo = join(storage, 'Foto.jpg');
+        if (scenario.endsWith('baseline')) writeFileSync(photo, 'previous photo');
+        succeeds(run('list-files'));
+        if (scenario.endsWith('baseline')) {
+          assert.deepEqual(readState().baseline, [prefix + 'Foto.jpg']);
+          if (scenario === 'track-baseline') {
+            const refused = run('track');
+            assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+            assert.match(refused.stderr, /So registre arquivos novos desta execucao/);
+            assert.deepEqual(readState().tracked, []);
+          } else {
+            const state = readState();
+            // Supply the real hash so a missing baseline guard would actually delete the photo.
+            state.tracked = [{ path: prefix + 'foto.jpg', hash: createHash('sha256').update('previous photo').digest('hex') }];
+            saveState(state);
+            const refused = run('clean');
+            assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+            assert.match(refused.stderr, /Manifesto inseguro/);
+            assert.deepEqual(readState().tracked, state.tracked);
+          }
+          assert.equal(readFileSync(photo, 'utf8'), 'previous photo');
+          return;
+        }
+        writeFileSync(photo, 'new QA photo');
+        succeeds(run('track', 'Foto.jpg'));
+        if (scenario === 'dedupe') {
+          succeeds(run('track'));
+          assert.equal(readState().tracked.length, 1);
+          succeeds(run('clean'));
+          assert.deepEqual(readState().tracked, []);
+          assert.equal(existsSync(photo), false);
+          succeeds(run('clean'));
+        } else {
+          const state = readState();
+          const changed = { path: prefix + 'changed.jpg', hash: state.tracked[0].hash };
+          writeFileSync(join(storage, 'changed.jpg'), 'user changed this file');
+          // A legacy duplicate must disappear in the first persisted cleanup, even if
+          // a later modified file interrupts the loop before reaching that duplicate.
+          state.tracked.push(changed, { ...state.tracked[0], path: prefix + 'foto.jpg' });
+          saveState(state);
+          const cleaned = run('clean');
+          assert.equal(cleaned.status, 1, cleaned.stdout + cleaned.stderr);
+          assert.match(cleaned.stderr, /Arquivo alterado; preservado/);
+          assert.equal(existsSync(photo), false);
+          assert.deepEqual(readState().tracked, [changed]);
+          assert.equal(readFileSync(join(storage, 'changed.jpg'), 'utf8'), 'user changed this file');
+        }
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('cleanup reports the actual MediaStore or rm destination and retains failures', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-019-phone-'));
+  try {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    assert.equal(git.status, 0, git.stderr);
+    const bash = resolve(git.stdout.trim(), '../../../bin/bash.exe');
+    const adb = join(directory, 'adb.ps1');
+    const source = join(directory, 'fixture.pdf');
+    writeFileSync(source, 'QA cleanup payload');
+    writeFileSync(join(directory, 'content'), `#!/bin/sh
+printf '%s\\n' "$@" > "$QA_CLEAN_STORAGE/query-argv"
+echo 'Row: 0 is_trashed=1, is_pending=0, _data=/storage/emulated/0/Pictures/SynchroNiceQA/.trashed-123-fixture.pdf'
+`);
+    writeFileSync(adb, `
+$command = $args -join ' '
+$target = Join-Path $env:QA_CLEAN_STORAGE 'payload'
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'getprop ro.serialno') { 'QA-phone'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($command -match 'set -C') { [IO.File]::WriteAllText($target, ''); exit 0 }
+if ($args[2] -eq 'push') { Copy-Item -LiteralPath $args[3] -Destination $target; exit 0 }
+if ($command.Contains('if [ -f')) { if (Test-Path -LiteralPath $target) { 'exists' }; exit 0 }
+if ($command -match 'sha256sum') {
+  if ($command -match '/\\.trashed-') { $target = Join-Path $env:QA_CLEAN_STORAGE '.trashed-payload' }
+  if ($command -match '/\\.pending-') { $target = Join-Path $env:QA_CLEAN_STORAGE '.pending-payload' }
+  (Get-FileHash -LiteralPath $target).Hash + '  payload'; exit 0
+}
+if ($command -match 'content query.*--where') {
+  'Row: 0 _id=42, _data=/storage/emulated/0/Pictures/SynchroNiceQA/fixture.pdf'; exit 0
+}
+if ($command -match 'content update') {
+  [IO.File]::AppendAllText((Join-Path $env:QA_CLEAN_STORAGE 'updates'), $command + "\n")
+  if ((Test-Path -LiteralPath $target) -and $env:QA_CLEAN_SCENARIO -notin 'rm','rm-fails' -and
+      ($env:QA_CLEAN_SCENARIO -ne 'downloads' -or $command -match '/downloads/42')) {
+    $moved = '.trashed-payload'
+    if ($env:QA_CLEAN_SCENARIO -eq 'pending') { $moved = '.pending-payload' }
+    Move-Item -LiteralPath $target -Destination (Join-Path $env:QA_CLEAN_STORAGE $moved)
+  }
+  if ($env:QA_CLEAN_SCENARIO -eq 'confirmed' -and (Test-Path -LiteralPath (Join-Path $env:QA_CLEAN_STORAGE '.pending-payload'))) {
+    Move-Item -LiteralPath (Join-Path $env:QA_CLEAN_STORAGE '.pending-payload') -Destination (Join-Path $env:QA_CLEAN_STORAGE '.trashed-payload')
+  }
+  'Updated 1 rows.'; exit 0
+}
+if ($command -match 'content query') {
+  if ($env:QA_CLEAN_SCENARIO -eq 'query-error') { '[ERROR] Binding not well formed'; exit 0 }
+  if ($env:QA_CLEAN_SCENARIO -eq 'query-exit') { 'query failed'; exit 1 }
+  if ($env:QA_CLEAN_SCENARIO -eq 'query-empty') { 'No result found.'; exit 0 }
+  if ($env:QA_CLEAN_SCENARIO -eq 'wrong-path') {
+    'Row: 0 is_trashed=1, is_pending=0, _data=/storage/emulated/0/Pictures/SynchroNiceQA/unrelated.pdf'; exit 0
+  }
+  if ($env:QA_CLEAN_SCENARIO -eq 'pending' -or (Test-Path -LiteralPath (Join-Path $env:QA_CLEAN_STORAGE '.pending-payload'))) {
+    'Row: 0 is_trashed=0, is_pending=1, _data=/storage/emulated/0/Pictures/SynchroNiceQA/.pending-123-fixture.pdf'; exit 0
+  }
+  if (Test-Path -LiteralPath $target) { 'Row: 0 is_trashed=0, is_pending=0, _data=/storage/emulated/0/Pictures/SynchroNiceQA/fixture.pdf'; exit 0 }
+  # Execute exactly the shell text adb would join, not a reconstructed query.
+  [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'query.sh'), ($args[3..($args.Count-1)] -join ' '))
+  [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'shell-argc'), [string]($args.Count-3))
+  & $env:QA_CLEAN_BASH -c 'cd "$QA_CLEAN_TOOLS" && PATH="$PWD:$PATH" sh "$QA_CLEAN_STORAGE/query.sh"'
+  exit $LASTEXITCODE
+}
+if ($command -match 'rm -f --') {
+  [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'rm-called'), '')
+  if ($env:QA_CLEAN_SCENARIO -ne 'rm-fails') { Remove-Item -LiteralPath $target -ErrorAction SilentlyContinue }
+  exit 0
+}
+exit 0
+`);
+    for (const scenario of ['confirmed', 'query-error', 'query-exit', 'query-empty', 'pending', 'downloads', 'rm', 'rm-fails']) {
+      await t.test(scenario, () => {
+        const storage = join(directory, scenario);
+        mkdirSync(storage);
+        const runDir = join(storage, 'run');
+        const run = (action, response = scenario) => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), action, '-Path', source, '-RunDir', runDir,
+          '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env,
+            QA_CLEAN_STORAGE: storage.replaceAll('\\', '/'), QA_CLEAN_SCENARIO: response,
+            QA_CLEAN_BASH: bash, QA_CLEAN_TOOLS: directory.replaceAll('\\', '/') },
+        });
+        const pushed = run('push');
+        assert.equal(pushed.status, 0, pushed.stdout + pushed.stderr);
+        const cleaned = run('clean');
+        assert.ifError(cleaned.error);
+        const unconfirmed = ['query-error', 'query-exit', 'query-empty', 'pending'].includes(scenario);
+        assert.equal(cleaned.status, scenario === 'rm-fails' || unconfirmed ? 1 : 0, cleaned.stdout + cleaned.stderr);
+        const readState = () => JSON.parse(readFileSync(join(runDir, 'phone-files.json'), 'utf8').replace(/^\uFEFF/, ''));
+        const state = readState();
+        if (scenario === 'rm-fails') {
+          assert.equal(state.tracked.length, 1);
+          assert.equal(state.cleanup.length, 0);
+          assert.equal(existsSync(join(storage, 'payload')), true);
+          const unrelated = join(storage, 'unrelated.pdf');
+          writeFileSync(unrelated, 'QA cleanup payload');
+          const updates = readFileSync(join(storage, 'updates'), 'utf8');
+          const refused = run('clean', 'wrong-path');
+          assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+          assert.equal(readFileSync(join(storage, 'updates'), 'utf8'), updates,
+            'a cached URI must be checked before updating, even while the original remains present');
+          assert.deepEqual(readState(), state);
+          assert.equal(readFileSync(join(storage, 'payload'), 'utf8'), 'QA cleanup payload');
+          assert.equal(readFileSync(unrelated, 'utf8'), 'QA cleanup payload');
+          return;
+        }
+        if (unconfirmed) {
+          // A missing source is also produced by MediaStore pending renames.
+          // CLEAN-019's old expectation inferred trash from absence; it lost both
+          // the true destination and the retry record when confirmation failed.
+          assert.equal(state.cleanup.length, 0);
+          assert.equal(state.tracked.length, 1);
+          assert.equal(state.tracked[0].path, '/storage/emulated/0/Pictures/SynchroNiceQA/fixture.pdf');
+          assert.equal(state.tracked[0].hash.toLowerCase(), createHash('sha256').update('QA cleanup payload').digest('hex'));
+          assert.equal(existsSync(join(storage, 'rm-called')), false);
+          const moved = join(storage, scenario === 'pending' ? '.pending-payload' : '.trashed-payload');
+          assert.equal(readFileSync(moved, 'utf8'), 'QA cleanup payload');
+          const retried = run('clean');
+          assert.equal(retried.status, 1, retried.stdout + retried.stderr);
+          assert.deepEqual(readState(), state, 'retry cannot forget an unconfirmed move as already absent');
+          const unrelated = join(storage, 'unrelated.pdf');
+          writeFileSync(unrelated, 'QA cleanup payload');
+          assert.equal(run('clean', 'wrong-path').status, 1, 'same bytes at an unrelated path are insufficient identity');
+          assert.deepEqual(readState(), state);
+          assert.equal(readFileSync(unrelated, 'utf8'), 'QA cleanup payload');
+          writeFileSync(moved, 'changed bytes');
+          assert.equal(run('clean', 'confirmed').status, 1, 'changed derivative must stay tracked and untouched');
+          assert.deepEqual(readState(), state);
+          assert.equal(readFileSync(moved, 'utf8'), 'changed bytes');
+          writeFileSync(moved, 'QA cleanup payload');
+          const recovered = run('clean', 'confirmed');
+          assert.equal(recovered.status, 0, recovered.stdout + recovered.stderr);
+          assert.equal(JSON.parse(recovered.stdout)[0].destination, 'Lixeira do MediaStore');
+          assert.deepEqual(readState().tracked, []);
+          assert.equal(readFileSync(join(storage, '.trashed-payload'), 'utf8'), 'QA cleanup payload');
+          assert.equal(readFileSync(unrelated, 'utf8'), 'QA cleanup payload');
+          assert.equal(existsSync(join(storage, 'rm-called')), false);
+          return;
+        }
+        assert.equal(state.tracked.length, 0);
+        assert.equal(existsSync(join(storage, 'payload')), false);
+        if (scenario === 'confirmed') {
+          assert.ok(existsSync(join(storage, 'query-argv')), `shell did not run content: ${cleaned.stderr}`);
+        }
+        assert.equal(JSON.parse(cleaned.stdout)[0].destination,
+          scenario === 'rm' ? 'rm (MediaStore indisponivel)' : 'Lixeira do MediaStore');
+        assert.equal(existsSync(join(storage, 'rm-called')), scenario === 'rm');
+        assert.equal(existsSync(join(storage, '.trashed-payload')), scenario !== 'rm');
+        if (scenario === 'downloads' || scenario === 'rm') {
+          assert.match(readFileSync(join(storage, 'updates'), 'utf8'), /\/downloads\/42/);
+        }
+        if (scenario === 'confirmed') {
+          assert.equal(readFileSync(join(storage, 'shell-argc'), 'utf8'), '1');
+          const argv = readFileSync(join(storage, 'query-argv'), 'utf8').trim().split(/\r?\n/);
+          const extra = argv[argv.indexOf('--extra') + 1];
+          // Content.java splits at unescaped colons and then unescapes the key.
+          assert.deepEqual(extra.split(/(?<!\\):/).map(field => field.replaceAll('\\:', ':')),
+            ['android:query-arg-match-trashed', 'i', '1']);
+          const extras = argv.flatMap((arg, index) => arg === '--extra' ? [argv[index + 1]] : []);
+          assert.ok(extras.some(value => value.split(/(?<!\\):/).map(field => field.replaceAll('\\:', ':')).join('|')
+            === 'android:query-arg-match-pending|i|1'), 'confirmation must include pending rows');
+        }
+        assert.equal(run('clean').status, 0);
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('pair validates inputs, delivers the QR and rejects activity errors', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-018-pair-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    const config = join(directory, 'config.json');
+    const calls = join(directory, 'calls.jsonl');
+    const valid = { nome_instancia: 'synchronice-a1B2c3D4', token: '0123456789abcdefABCDEF0123456789' };
+    writeFileSync(adb, `
+$command = $args -join ' '
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($args[2] -eq 'shell' -and $args[3] -eq 'am' -and $args[4] -eq 'start') {
+  $line = ConvertTo-Json -InputObject @($args) -Compress
+  [IO.File]::AppendAllText($env:QA_PAIR_CALLS, $line + [Environment]::NewLine)
+  $env:QA_PAIR_RESPONSE
+  exit 0
+}
+exit 0
+`, 'utf8');
+    const run = ({ pair = valid, ip = '192.168.50.7', response = 'Starting: Intent' } = {}) => {
+      writeFileSync(config, JSON.stringify(pair));
+      writeFileSync(calls, '');
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        resolve('qa/phone.ps1'), 'pair', '-Config', config, '-Adb', adb, '-Serial', '127.0.0.1:5555',
+        ...(ip === null ? [] : ['-Ip', ip])], {
+        encoding: 'utf8', timeout: 30000,
+        env: { ...process.env, QA_PAIR_CALLS: calls, QA_PAIR_RESPONSE: response },
+      });
+      assert.ifError(result.error);
+      const starts = readFileSync(calls, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
+      return { ...result, starts };
+    };
+    const assertQr = (result, ip) => {
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(result.starts.length, 1);
+      const args = result.starts[0];
+      assert.deepEqual(args.slice(0, -1), ['-s', '127.0.0.1:5555', 'shell', 'am', 'start',
+        '-W', '-n', 'synchronice.android/.DebugPairActivity', '--es', 'qr']);
+      // The .ps1 fake receives quoting literally; native argv transport is outside this test.
+      const quoted = args.at(-1);
+      assert.equal(quoted[0], "'");
+      assert.equal(quoted.at(-1), "'");
+      const qr = JSON.parse(quoted.slice(1, -1).replaceAll('\\"', '"'));
+      assert.deepEqual(qr, { instance_name: valid.nome_instancia, port: 47820, token: valid.token, ip });
+    };
+    await t.test('invalid or absent Par fields never start an activity', () => {
+      for (const field of ['nome_instancia', 'token']) {
+        const invalid = field === 'nome_instancia'
+          ? [undefined, null, '', 'synchronice-1234567', 'synchronice-123456789', 'synchronice-1234567g', 'SYNCHRONICE-12345678']
+          : [undefined, null, '', 'a'.repeat(31), 'a'.repeat(33), 'g'.repeat(32)];
+        for (const value of invalid) {
+          const result = run({ pair: { ...valid, [field]: value } });
+          assert.equal(result.status, 1, `${field}=${value}: ${result.stdout} ${result.stderr}`);
+          assert.match(result.stderr, /config.json sem Par valido/);
+          assert.deepEqual(result.starts, []);
+        }
+      }
+    });
+    for (const field of ['nome_instancia', 'token']) {
+      for (const value of [[], [valid[field]], `${valid[field]}\n`]) {
+        await t.test(`${field}=${JSON.stringify(value)} is rejected before starting an activity`, () => {
+          const result = run({ pair: { ...valid, [field]: value } });
+          assert.equal(result.status, 1, result.stdout + result.stderr);
+          assert.match(result.stderr, /config.json sem Par valido/);
+          assert.deepEqual(result.starts, []);
+        });
+      }
+    }
+    await t.test('invalid explicit IPv4 never starts an activity', () => {
+      for (const ip of ['10.0.0', '010.0.0.1', '256.1.1.1', '0.0.0.0']) {
+        const result = run({ ip });
+        assert.equal(result.status, 1, `${ip}: ${result.stdout} ${result.stderr}`);
+        assert.match(result.stderr, /IPv4 valido/);
+        assert.deepEqual(result.starts, []);
+      }
+    });
+    await t.test('valid explicit IPv4 and Par reach DebugPairActivity once', () => {
+      assertQr(run(), '192.168.50.7');
+    });
+    await t.test('omitted IPv4 uses the address selected by the local UDP route', () => {
+      const lookup = spawnSync('powershell.exe', ['-NoProfile', '-Command', `
+$socket = [Net.Sockets.UdpClient]::new()
+try {
+  $socket.Connect('8.8.8.8', 80)
+  $socket.Client.LocalEndPoint.Address.ToString()
+} finally { $socket.Dispose() }
+`], { encoding: 'utf8', timeout: 30000 });
+      assert.ifError(lookup.error);
+      assert.equal(lookup.status, 0, lookup.stderr);
+      assert.match(lookup.stdout.trim(), /^\d{1,3}(\.\d{1,3}){3}$/);
+      assertQr(run({ ip: null }), lookup.stdout.trim());
+    });
+    await t.test('am Error and Exception responses fail even with exit code zero', () => {
+      for (const response of ['Error: Activity class does not exist', 'java.lang.SecurityException: denied']) {
+        const result = run({ response });
+        assert.equal(result.starts.length, 1);
+        assert.equal(result.status, 1, result.stdout + result.stderr);
+        assert.match(result.stderr, /pair falhou/);
+      }
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('optional denied preparation warns; requested action, lockscreen and transport errors stay fatal', () => {
   const directory = mkdtempSync(join(tmpdir(), 'syn-024-phone-'));
@@ -157,7 +661,7 @@ exit 0
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('wifi-off confirms device state even when svc silently refuses a transition', () => {
+test('wifi-off confirms device state even when svc silently refuses a transition', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'syn-024-wifi-state-'));
   try {
     const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
@@ -167,6 +671,15 @@ test('wifi-off confirms device state even when svc silently refuses a transition
     const adb = join(directory, 'adb.ps1');
     writeFileSync(join(directory, 'svc'), `#!/bin/sh
 echo "$*" >> "$QA_WIFI_DIRECTORY/calls"
+if [ "$2" = enable ]; then
+  count=$(cat "$QA_WIFI_DIRECTORY/enable-count")
+  count=$((count + 1))
+  echo "$count" > "$QA_WIFI_DIRECTORY/enable-count"
+  case "$QA_FAKE_SCENARIO" in
+    enable-retry) if [ "$count" -le 2 ]; then exit 1; fi ;;
+    enable-failed) exit 1 ;;
+  esac
+fi
 case "$QA_FAKE_SCENARIO:$2" in
   disable-refused:disable|restore-refused:enable) exit 0 ;;
 esac
@@ -218,6 +731,14 @@ echo 'Other status details'
     writeFileSync(join(directory, 'sleep'), `#!/bin/sh
 clock=$(( $(cat "$QA_WIFI_DIRECTORY/clock") + $1 ))
 echo "$clock" > "$QA_WIFI_DIRECTORY/clock"
+case "$QA_FAKE_SCENARIO" in
+  signal-TERM|signal-INT)
+    if [ "$(cat "$QA_WIFI_DIRECTORY/state")" = disabled ]; then
+      kill -s "\${QA_FAKE_SCENARIO#signal-}" "$PPID" || exit 1
+      /usr/bin/sleep 0.05
+    fi
+    ;;
+esac
 if [ "$(cat "$QA_WIFI_DIRECTORY/state")" = disabling ] && [ "$clock" -ge "$(cat "$QA_WIFI_DIRECTORY/deadline")" ]; then
   echo disabled > "$QA_WIFI_DIRECTORY/state"
   echo "$clock" > "$QA_WIFI_DIRECTORY/outage-start"
@@ -234,6 +755,7 @@ if ($args[2] -eq 'push') {
 }
 if ($command -match 'nohup') {
   $output = & $env:QA_WIFI_BASH -c 'cd "$QA_WIFI_DIRECTORY" && PATH="$PWD:$PATH" sh captured.sh' 2>&1
+  [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'script-exit'), [string]$LASTEXITCODE)
   # nohup launch succeeds; the device-side result is read after reconnecting.
   [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'log'), ($output -join "\n"))
   exit 0
@@ -250,32 +772,45 @@ if ($command -match 'shell cat .*wifi.*log') {
 }
 exit 0
 `);
-    for (const scenario of ['delayed', 'stuck-disabling', 'disable-refused', 'restore-refused', 'status-denied', 'dump-denied', 'unknown', 'success', 'log-pending']) {
-      writeFileSync(join(directory, 'state'), 'enabled\n');
-      writeFileSync(join(directory, 'calls'), '');
-      writeFileSync(join(directory, 'clock'), '0\n');
-      writeFileSync(join(directory, 'outage-seconds'), '0\n');
-      if (scenario === 'log-pending') writeFileSync(join(directory, 'pending'), '');
-      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-        resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
-        encoding: 'utf8', timeout: 30000, env: { ...process.env,
-          QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
+    for (const scenario of ['signal-TERM', 'signal-INT', 'enable-retry', 'enable-failed', 'delayed', 'stuck-disabling', 'disable-refused', 'restore-refused', 'status-denied', 'dump-denied', 'unknown', 'success', 'log-pending']) {
+      await t.test(scenario, () => {
+        writeFileSync(join(directory, 'state'), 'enabled\n');
+        writeFileSync(join(directory, 'calls'), '');
+        writeFileSync(join(directory, 'enable-count'), '0\n');
+        writeFileSync(join(directory, 'clock'), '0\n');
+        writeFileSync(join(directory, 'outage-seconds'), '0\n');
+        if (scenario === 'log-pending') writeFileSync(join(directory, 'pending'), '');
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env,
+            QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
+        });
+        assert.ifError(result.error);
+        const success = ['signal-TERM', 'signal-INT', 'enable-retry', 'delayed', 'success', 'log-pending'].includes(scenario);
+        const log = readFileSync(join(directory, 'log'), 'utf8');
+        if (scenario.startsWith('signal-')) {
+          assert.equal(readFileSync(join(directory, 'script-exit'), 'utf8'), '1', 'signal must terminate the script through exit');
+          assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), '1');
+          assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length, 1, log);
+        }
+        if (scenario.startsWith('enable-')) {
+          assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), scenario === 'enable-retry' ? '3' : '5');
+          assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length ?? 0, success ? 1 : 0, log);
+        }
+        assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
+        assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
+        if (success) {
+          const output = JSON.parse(result.stdout);
+          assert.equal(output.reconnected, true);
+          assert.match(output.log, /^QA_WIFI_DISABLED$/m);
+          assert.match(output.log, /^QA_WIFI_RESTORED$/m);
+          assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
+          assert.equal(readFileSync(join(directory, 'outage-seconds'), 'utf8').trim(), '1',
+            'the network must be fully disabled for the requested second before restoration');
+        } else {
+          assert.match(result.stderr, /Wi-Fi nao confirmou/);
+        }
       });
-      assert.ifError(result.error);
-      const success = ['delayed', 'success', 'log-pending'].includes(scenario);
-      assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
-      assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
-      if (success) {
-        const output = JSON.parse(result.stdout);
-        assert.equal(output.reconnected, true);
-        assert.match(output.log, /^QA_WIFI_DISABLED$/m);
-        assert.match(output.log, /^QA_WIFI_RESTORED$/m);
-        assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
-        assert.equal(readFileSync(join(directory, 'outage-seconds'), 'utf8').trim(), '1',
-          'the network must be fully disabled for the requested second before restoration');
-      } else {
-        assert.match(result.stderr, /Wi-Fi nao confirmou/);
-      }
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

@@ -40,3 +40,10 @@
   no `/audit`. Passo verificado pelo kit não vira `Débito humano:`. O que o kit
   apaga vai para a Lixeira. Nada muda nas skills globais: as regras ficam no
   `AGENTS.md` e em `docs/agents/qa.md`.
+- 2026-10-04 — **Emulador suficiente para os merges durante o desenvolvimento.**
+  Ao autorizar o merge do PR #10, o autor aceitou a validação no emulador
+  enquanto não surgirem problemas que indiquem sua insuficiência. O QA mais
+  rigoroso, incluindo aparelho físico e verificações manuais ainda não
+  realizadas, fica para o release. Os débitos existentes permanecem
+  registrados para essa revisão; aceitar o merge não significa considerá-los
+  verificados. O gate automatizado continua obrigatório.

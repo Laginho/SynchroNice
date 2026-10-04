@@ -65,6 +65,9 @@ impl SessionOrder {
 /// porque `Par::load_or_create` sempre devolve um (cria na primeira vez).
 struct ParJaExistia(bool);
 
+/// Permissão do perfil, resolvida antes de qualquer comando da janela.
+struct AutostartPermitido(bool);
+
 /// Devolvido ao abrir a janela: se ela deve abrir na tela de QR, e o QR do
 /// Par atual, para o caso de precisar mostrá-lo.
 #[derive(serde::Serialize)]
@@ -161,6 +164,38 @@ fn parear_de_novo(par: State<'_, Par>, outbox: State<'_, Outbox>) -> Result<Stri
         &par.token(),
         qr::ip_da_lan(),
     ))
+}
+
+#[tauri::command]
+fn autostart_ligado(
+    app: tauri::AppHandle,
+    permitido: State<'_, AutostartPermitido>,
+) -> Result<bool, String> {
+    if !permitido.0 {
+        return Err("autostart indisponível no perfil isolado".into());
+    }
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn definir_autostart(
+    app: tauri::AppHandle,
+    permitido: State<'_, AutostartPermitido>,
+    ligado: bool,
+) -> Result<(), String> {
+    if !permitido.0 {
+        return Err("autostart indisponível no perfil isolado".into());
+    }
+    if ligado && cfg!(debug_assertions) {
+        return Err("um build de debug não pode iniciar com o Windows".into());
+    }
+    let autostart = app.autolaunch();
+    if ligado {
+        autostart.enable()
+    } else {
+        autostart.disable()
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Abre o seletor nativo e aplica a nova Pasta ao servidor sem reiniciá-lo.
@@ -500,7 +535,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let (_, autostart) =
+    let (_, autostart_permitido) =
         config::resolve_data_dir(PathBuf::new(), std::env::var_os("SYNCHRONICE_DATA_DIR"));
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -512,12 +547,15 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .manage(Items::new())
         .manage(SessionOrder::default())
+        .manage(AutostartPermitido(autostart_permitido))
         .invoke_handler(tauri::generate_handler![
             list_items,
             list_sent_items,
             estado_par_inicial,
             parear_de_novo,
             mudar_pasta,
+            autostart_ligado,
+            definir_autostart,
             apagar_tudo,
             read_file_bytes,
             read_sent_file_bytes,
@@ -534,13 +572,6 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
             start_server(&handle, app.state::<Items>().inner().clone());
-            // Idempotente, e fora do primeiro uso: um perfil que já tem Pasta
-            // gravada também precisa estar no autostart.
-            if autostart {
-                if let Err(e) = handle.autolaunch().enable() {
-                    eprintln!("não foi possível registrar no autostart: {e}");
-                }
-            }
             setup_tray(&handle)?;
             Ok(())
         })

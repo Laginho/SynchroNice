@@ -785,7 +785,7 @@ function mostrarChat(): void {
   document.querySelector<HTMLElement>("#frame")!.hidden = false;
 }
 
-/** Abre as configurações da Pasta e do Par no cabeçalho da janela. */
+/** Abre as configurações no cabeçalho da janela. */
 function ligarConfiguracoes(): void {
   const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
   const panel = document.querySelector<HTMLElement>("#settings-panel")!;
@@ -793,6 +793,37 @@ function ligarConfiguracoes(): void {
   const desparear = document.querySelector<HTMLButtonElement>("#unpair")!;
   const copiarComPontuacaoInput = document.querySelector<HTMLInputElement>("#copy-with-punctuation")!;
   copiarComPontuacaoInput.checked = copiarComPontuacao;
+  const iniciarComWindows = document.querySelector<HTMLInputElement>("#start-with-windows")!;
+  let autostartOcupado = false;
+
+  async function atualizarAutostart(): Promise<void> {
+    if (autostartOcupado) return;
+    autostartOcupado = true;
+    iniciarComWindows.disabled = true;
+    try {
+      iniciarComWindows.checked = await invoke<boolean>("autostart_ligado");
+      iniciarComWindows.disabled = false;
+    } catch (e) {
+      console.error(`não foi possível ler o autostart: ${e}`);
+    } finally {
+      autostartOcupado = false;
+    }
+  }
+
+  iniciarComWindows.addEventListener("change", async () => {
+    const ligado = iniciarComWindows.checked;
+    autostartOcupado = true;
+    iniciarComWindows.disabled = true;
+    try {
+      await invoke("definir_autostart", { ligado });
+    } catch (e) {
+      iniciarComWindows.checked = !ligado;
+      console.error(`não foi possível mudar o autostart: ${e}`);
+    } finally {
+      autostartOcupado = false;
+      iniciarComWindows.disabled = false;
+    }
+  });
 
   copiarComPontuacaoInput.addEventListener("change", () => {
     copiarComPontuacao = copiarComPontuacaoInput.checked;
@@ -808,6 +839,7 @@ function ligarConfiguracoes(): void {
     const abrir = panel.hidden;
     panel.hidden = !abrir;
     toggle.setAttribute("aria-expanded", String(abrir));
+    if (abrir) void atualizarAutostart();
   });
 
   document.addEventListener("click", (event) => {

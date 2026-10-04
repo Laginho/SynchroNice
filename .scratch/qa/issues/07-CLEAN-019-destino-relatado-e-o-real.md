@@ -1,5 +1,5 @@
 # CLEAN-019: Destino relatado pela limpeza é o destino real (celular e PC)
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -31,7 +31,9 @@ acontece, nos dois lados.
 - Quando a confirmação falha, o catch roda `rm` no caminho antigo e relata
   `rm (MediaStore indisponivel)`, mesmo que o update já tenha movido o arquivo
   para `.trashed-*`. O destino relatado passa a ser o que aconteceu:
-  - arquivo fora do caminho original depois do update: Lixeira do MediaStore;
+  - confirmação positiva de `is_trashed=1`: Lixeira do MediaStore;
+  - arquivo fora do caminho original sem confirmação: erro e rastreamento
+    preservado para nova tentativa (correção CLEAN-031);
   - o `rm` rodou e o arquivo sumiu: rm;
   - o arquivo continua lá depois do `rm`: erro, e o arquivo fica rastreado.
 - No AVD de 2026-10-02, um PDF em `Download/SynchroNice` não foi para a
@@ -57,8 +59,9 @@ permanente.
 2. Update aceito e confirmação `is_trashed=1`: destino
    `Lixeira do MediaStore`, sem `rm`.
 3. Update aceito, mas a confirmação falha (erro do `content` ou resposta sem
-   `is_trashed=1`), e o arquivo já saiu do caminho original: destino
-   `Lixeira do MediaStore`, sem `rm`.
+   `is_trashed=1`), e o arquivo já saiu do caminho original: erro, sem relato
+   de Lixeira e com URI/rastreamento preservados para nova tentativa.
+   CLEAN-031 substitui a hipótese anterior de que ausência provava reciclagem.
 4. O update pela URI de arquivo não leva o item à Lixeira, e pela URI de
    Downloads leva: destino `Lixeira do MediaStore`, sem `rm`.
 5. Nenhuma das URIs leva à Lixeira, e o `rm` remove o arquivo: destino
@@ -129,3 +132,174 @@ permanente.
   fallback pela URI de Downloads. Absorve o item (d) do CLEAN-025, a
   Lixeira do Windows relatada sempre (Q9, humano). `hard` (Q17, proxy): o
   escape atravessa PS, adb e sh, e são dois lados.
+
+- Stage 2 (2026-10-03): seams exercitadas pelos wrappers `phone.ps1 clean`
+  (push real do wrapper, adb falso e query executada por sh) e `pc.ps1 clean`
+  (Pasta real e drive subst). Callers examinados: `clean` consome o manifesto
+  de `push`/`track`; `Media-Uri` também atende `share`, que permanece intacto.
+  Regressões cobertas pelos testes existentes: lista vazia/repetição, arquivos
+  alterados ou anteriores e uploads interrompidos. Red: comando focado
+  `node --test --test-name-pattern='cleanup reports|PC accepts' qa/phone.test.mjs qa/pc.test.mjs`
+  deu 9 testes, 0 passando, 9 falhando (inclui o agrupador dos 7 cenários).
+  Falhas: query chega em 8 argumentos; confirmação falha perde o destino real;
+  Downloads não é tentado; rm silencioso perde tracked; subst relata Lixeira.
+- Stage 2 concluído: query escapada em uma string de shell; confirmação
+  alternativa pela ausência após update; fallback Downloads antes de rm;
+  rm só encerra o rastreamento quando o caminho sumiu. No PC, uma nova
+  entrada na Lixeira, com caminho original e SHA-256 iguais, confirma o
+  destino; sem ela, o relato é `remocao permanente`. Documentação atualizada.
+  Green focado: 10/10 (inclui o teste existente da Lixeira real do Windows).
+  Gate completo em primeiro plano: exit 0, `gate: passou`; Rust 83/83,
+  UI 61/61, QA 34/34. Gradle `check` passou; tarefas de teste UP-TO-DATE,
+  relatórios existentes com app 94/94 e protocol-client 72/72, sem skips.
+  Log local: `.scratch/qa-runs/2026-10-03-clean-019-stage2/gate.log`.
+  Diff conferido: apenas Primary files e este ticket; testes separados do
+  código. Sem QA no aparelho nesta etapa; stage 3 verifica no emulador.
+
+#### Review (2026-10-03)
+
+Verdict: Reopen — critério 7: atalho reciclado é relatado como remoção permanente.
+
+- Standards: uma violação documental corrigida em 840de1d. Os comentários
+  de stage 2 foram movidos ao fim, conforme docs/agents/issue-tracker.md.
+  Zero smells acionáveis; Primary files e commits de teste/código separados
+  foram respeitados.
+- Spec: um achado em qa/pc.ps1:99–102. System.ItemNameDisplay omite .lnk;
+  a reconstrução do caminho original rejeita uma entrada real na Lixeira.
+  Reprodução fora do sandbox: CLEAN-019-review-identity.lnk foi relatado
+  como remocao permanente, mas sua entrada existe na Lixeira com o SHA-256
+  do registro anterior de track. System.FileName contém o nome completo;
+  ItemNameDisplay contém apenas CLEAN-019-review-identity. O PDF e o .txt
+  foram relatados corretamente; o caso subst continuou passando.
+- ❌ Critério 7: identificar o nome original completo na confirmação da
+  Lixeira e adicionar uma regressão de .lnk em qa/pc.test.mjs, na seam já
+  aprovada do wrapper. O teste precisa falhar contra e958f49 e passar com
+  a correção, em commits separados. Preservar a confirmação pelos bytes e
+  o relato de remoção permanente do critério 8. A correção exige teste novo;
+  por isso volta ao stage 2, sem alteração dos critérios ou Primary files.
+- ✅ Critério 1: sh recebeu uma string e o extra em três campos; a chave
+  escapada foi aceita também pelo content nativo.
+- ✅ Critérios 2 e 3: confirmação positiva, erro/exit/resposta negativa após
+  mover foram cobertos, sem rm indevido. PNG e PDFs nativos ficaram com
+  is_trashed=1 e caminhos .trashed-*.
+- ✅ Critério 4: cenário downloads tentou a segunda URI e reciclou sem rm.
+  Nos PDFs nativos desta execução, a URI file já reciclou; a precondição
+  do fallback não ocorreu. O cenário controlado comprova esse ramo.
+- ✅ Critérios 5 e 6: rm removeu somente após ambas as URIs falharem;
+  rm silencioso manteve o arquivo e tracked, com exit 1.
+- ✅ Critério 8: Windows real/subst apagou a fixture e relatou remoção permanente.
+- Callers, falhas e interações examinados: clean com push/track/list-files;
+  Media-Uri/mediastore.mjs com share preservado; baseline, aparelho, Pasta
+  e hash; upload parcial, ausência inicial, repetição, erros de update/query
+  e rm, fallback Downloads e persistência após falha. O PC isolado também
+  enviou um PDF recebido pelo app Android. Redmi e outros fluxos visuais
+  não foram executados nesta revisão do kit. Nenhuma decisão nova de proxy.
+- Prova independente: testes copiados sem alteração e wrappers de 8f06c7e;
+  red 9/9 falhando pelas razões esperadas; green focado no Windows 10/10.
+  Gate completo em primeiro plano: exit 0, gate: passou; Rust 83/83,
+  UI 61/61, QA 34/34. Gradle check passou; testes up-to-date, XMLs existentes
+  app 94/94 e protocol-client 72/72, sem falhas, erros ou skips.
+- QA e evidências:
+  [.scratch/qa-runs/2026-10-03-emulator-CLEAN-019-review.md](../../qa-runs/2026-10-03-emulator-CLEAN-019-review.md).
+  up e down concluídos; zero portas do kit escutando ao final; tracked vazio,
+  destinos documentados e nenhum arquivo anterior ou não registrado apagado.
+  Nenhum débito humano. A limitação da Lixeira no sandbox foi descartada
+  por validação no Windows real; o achado .lnk foi reproduzido nesse ambiente.
+- Handoff: Stage to-implement na branch clean-019; somente o ❌ acima resta.
+  Nenhum merge na sessão e nenhuma entrada CLEAN-019 no ledger.
+
+- Stage 2, correção da reabertura (2026-10-03): seam preservada em
+  `pc.ps1 list-files/track/clean`. O teste cria um atalho real via WScript,
+  registra e limpa pela interface pública, exige o destino Lixeira e
+  preservação do arquivo de destino do atalho. Callers examinados: clean
+  consome track/list-files; somente a identificação da entrada reciclada muda.
+  Ausência, repetição, baseline, hash alterado e drive subst continuam cobertos.
+  Red no Windows real: `node --test qa/pc.test.mjs`, 2 testes, 1 passou e
+  1 falhou: o .txt é relatado corretamente, mas o .lnk dá
+  `remocao permanente` em vez de `Lixeira do Windows`.
+- Reabertura corrigida: `System.FileName` conserva a extensão `.lnk` na
+  reconstrução do caminho original; conferência de nova entrada e SHA-256
+  preservada. Teste vermelho no commit 614420c, correção sem testes no
+  c7618dc. Green focado: 2/2, incluindo o caso subst e preservação do alvo
+  do atalho. Gate completo em primeiro plano: exit 0, `gate: passou`;
+  Rust 83/83, UI 61/61, QA 34/34, formatação, Clippy e typecheck passaram.
+  Android `check` passou (testes UP-TO-DATE). Diff final limitado aos dois
+  Primary files do PC e ao ticket, sem alteração dos critérios ou do celular.
+  Stage 2 encerra em to-review; re-review independente ainda pendente.
+
+#### Resolution (2026-10-03)
+
+Verdict: Approve
+
+- Re-review limitada ao ❌ do critério 7 e ao diff desde 2c3bb37.
+  Standards: zero violações documentadas e zero smells acionáveis.
+  Spec: zero achados; nenhum requisito parcial ou ampliação de escopo.
+  As duas revisões foram realizadas por subagentes independentes.
+- ✅ Critério 7: `System.FileName` conserva `.lnk` e a confirmação mantém
+  entrada nova, caminho original completo e SHA-256. O teste usa um atalho
+  Windows real, chama track/clean e preserva seu alvo. Prova nativa na Pasta
+  isolada encontrou `.txt` e `.lnk` na Lixeira com os hashes registrados;
+  `ItemNameDisplay` omitiu `.lnk`, mas `FileName` devolveu o nome completo.
+- ✅ Critério 8 preservado: o teste subst apagou a fixture e relatou
+  `remocao permanente`, tanto no red quanto no green. Critérios 1–6
+  mantidos: todos os sete cenários de limpeza do celular passaram no gate;
+  a evidência nativa da primeira revisão permanece válida para esses ramos
+  sem alterações. Nenhum critério ou Primary file foi renegociado.
+- Callers e falhas examinados nesta passagem: list-files/baseline, track,
+  clean, pc.mjs, guardas de Pasta/manifesto/hash/reparse point, ausência,
+  repetição, registro de cleanup e falha de exclusão. Android e limite de
+  cota da Lixeira não foram reexecutados nativamente; o código desses ramos
+  não mudou nesta correção. Nenhuma decisão nova de proxy e nenhum débito
+  humano: todos os passos novos exigidos pela reabertura foram verificados.
+- Red independente: testes atuais copiados sem alterações, wrapper de
+  produção de 614420c; 2 testes, 1 passou e 1 falhou no destino do `.lnk`,
+  exit 1. Green na branch corrigida: 2/2, exit 0, sem falhas ou skips.
+  Teste/código separados em 614420c/c7618dc; nenhum teste foi alterado pela
+  revisão. Repetir clean manteve os caminhos e destinos, com tracked vazio.
+- Gate completo em primeiro plano após rebase na sessão: exit 0,
+  `gate: passou`. Rust 83/83, UI 61/61, QA 34/34; formatação, Clippy e
+  typecheck passaram. Gradle check: BUILD SUCCESSFUL, testes UP-TO-DATE;
+  XMLs conferidos com app 94/94 e protocol-client 72/72, zero falhas,
+  erros ou skips. Log local: `2026-10-03-clean-019-rereview/gate.log`.
+- QA e destinos: [relatório da re-review](../../qa-runs/2026-10-03-emulator-CLEAN-019-rereview.md).
+  up compilou a branch, pareou e confirmou presença; down passou, com
+  active=false, zero portas do kit escutando e zero arquivos rastreados.
+  Nenhum arquivo anterior ou não registrado foi apagado. O build terminou
+  sem interrupção efetiva; a retentativa do SDK usou o caminho configurado
+  no projeto. A formatação do Cargo.toml reescrita pelo build foi restaurada.
+- Arquivos da correção: qa/pc.ps1 e qa/pc.test.mjs; evidências nos dois
+  relatórios de QA, neste ticket e no ledger. Diff final conferido, sem
+  alterações alheias ao ticket, segredos ou artefatos gerados committed.
+  Merge sem squash 5081871 na sessão sweatshop/2026-10-03-1608; Stage done
+  e ledger registrados no mesmo commit de encerramento. Sem PR ou push
+  nesta etapa; o merge do PR de sessão permanece com o humano.
+
+#### Observação de QA do CLEAN-021 (2026-10-03)
+
+Durante o QA real do CLEAN-021, três payloads ASCII controlados sob extensão
+`.jpg`, criados com adb no emulador, foram relatados como `Lixeira do
+MediaStore`. Uma consulta com inclusão de pendentes encontrou os derivados
+`.pending-*`, `is_trashed=0/is_pending=1`. O caminho original estava ausente,
+mas os arquivos permaneciam fora da Lixeira.
+
+A inferência de Lixeira pelo desaparecimento do caminho original já está na
+base do CLEAN-021 e corresponde à hipótese do critério 3 deste ticket.
+A observação pede triagem da hipótese para renames pendentes; não altera
+aqui critérios, Stage ou código. Não é regressão dos quatro operadores
+de caminhos do CLEAN-021.
+
+GUID e SHA-256 dos derivados foram conferidos contra as próprias fontes do
+QA; eles foram registrados no manifesto principal e removidos pelo wrapper
+com destino final `rm (MediaStore indisponivel)`. A listagem final contém
+exatamente os 12 caminhos anteriores; nenhuma fixture ou entrada `tracked`
+restou. Caminhos, comandos e estados no
+[relatório do CLEAN-021](../../qa-runs/2026-10-03-emulator-CLEAN-021-review.md).
+Evidência local: `phone-criteria-evidence.json`, campos
+`mediaStoreConfirmation` e `cleanupFollowup`.
+
+- 2026-10-04 Proxy decided: a observação vira o ticket novo CLEAN-031 (`needs-triage`, `19-CLEAN-031-limpeza-do-celular-relata-lixeira-para-pendente.md`); este ticket segue done, sem mudar critérios — é um destino relatado que não confere com o real, o que as histórias 9 e 10 pedem acertar, e nenhum aberto (CLEAN-027 a 030) trata da limpeza do celular.
+
+- 2026-10-04, correção direta solicitada na revisão do PR #10: CLEAN-031
+  substitui a hipótese do critério 3. Ausência do caminho original não prova
+  Lixeira; confirmação indisponível mantém URI e hash no manifesto e retorna
+  erro. Os comentários anteriores permanecem como histórico da decisão.

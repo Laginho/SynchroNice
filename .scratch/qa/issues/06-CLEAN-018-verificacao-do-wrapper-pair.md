@@ -1,5 +1,5 @@
 # CLEAN-018: Preservar uma verificação executável do wrapper pair
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -76,3 +76,117 @@ ticket que não houve vermelho por não haver defeito.
   Achado confirmado: nenhum teste roda o `pair`. Enhancement,
   ready-for-agent (Q2, proxy). O escape na camada nativa fica fora, porque
   o `up.ps1` real o exercita em todo stage 3.
+
+- Stage 2 (2026-10-03): seam exercitada: CLI real de qa/phone.ps1, com config sintético e adb.ps1 falso que captura argv. Chamador conferido: qa/up.ps1 (pair com -Config e -Ip). Cobertos campos ausentes/nulos/vazios/malformados, os quatro IPv4 inválidos, QR válido, rota UDP padrão e respostas Error:/Exception com exit 0. Nenhuma função de produção alterada. Teste focado: 6 testes passaram (pai + 5 subtestes, 21 execuções do wrapper). Não houve vermelho: cobertura de comportamento existente, conforme a exceção explícita deste ticket.
+
+- Gate completo (2026-10-03): powershell -ExecutionPolicy Bypass -File .\gate.ps1 — exit 0, gate: passou. Rust: 83 testes; PC/UI: 61; QA: 20 (incluindo os 6 do pair); fmt, clippy e typecheck passaram. Android: BUILD SUCCESSFUL, 41 tasks (1 executada, 40 up-to-date; testes Android up-to-date). Diff final revisado: somente qa/phone.test.mjs e este ticket. Limite mantido: o fake .ps1 não verifica o escape pela camada nativa de argv; esse caminho segue coberto pelo kit real no stage 3. Pronto para revisão independente.
+
+#### Review stage 3 (2026-10-03)
+
+Verdict: Reopen — critério 1: campos do Par em arrays ou com LF final chegam ao `am start`.
+
+- Base fixa: `31e1024f99ac417a607e14c5782ec088a39a7ca5`, na sessão
+  `sweatshop/2026-10-03-1608`. Revisados os commits `f302ed7` e `e5c2206`.
+- Standards: 0 violações documentadas e 0 smells acionáveis. O harness
+  chama a CLI real, usa dados sintéticos, captura argv e limpa temporários.
+  Não houve alteração de produção; a exceção explícita de cobertura sem
+  vermelho foi respeitada, e o commit posterior não toca testes.
+- Spec: 2 achados no critério 1, reproduzidos pela CLI real com `adb.ps1`
+  falso. São defeitos preexistentes que a cobertura entregue não detecta:
+  1. `nome_instancia` ou `token` como `[]` ou `[valor_valido]` resulta em
+     exit 0 e um `am start`. `-cnotmatch` filtra coleções; o resultado vazio
+     não rejeita esses campos. O config do PC exige strings e o parser do QR
+     Android não aceita listas.
+  2. Um nome ou token canônico seguido de `\n` também resulta em exit 0 e um
+     `am start`. O anchor `$` permite esse LF final, mas o Android exige
+     correspondência integral com `Regex.matches`.
+- Critério 1: ❌ nos dois casos acima. Foram seis reproduções indevidas,
+  uma por campo e formato; controles de string inválida retornaram exit 1,
+  `config.json sem Par valido` e nenhum lançamento.
+- Critérios 2–5: ✅ no gate desta revisão. Os cinco subtestes do `pair`
+  passaram, incluindo os casos pedidos, asserções do JSON, lookup UDP local
+  e respostas `Error:`/`Exception` (6 testes contando o pai, 21 execuções
+  do wrapper).
+- Chamadores e interações examinados: `qa/up.ps1` passa `-Config` e `-Ip`;
+  preparação/transporte adb, bloqueio de tela, guard de config, IPv4,
+  lookup UDP e lançamento de `DebugPairActivity`; tipos persistidos pelo PC
+  e aceitação do QR no Android. Nenhuma regressão introduzida identificada.
+  Transporte nativo de argv fica fora do fake, conforme o contrato.
+- Trabalho restante do stage 2: preservar testes dos arrays e do LF final,
+  demonstrar vermelho pelo wrapper real e só então corrigir o guard de
+  `pair`, dentro dos Primary files. A correção exige testes novos; por isso
+  não é um small fix do stage 3. Não há linha de ledger a remover.
+- Evidência: [relatório de revisão](../../qa-runs/2026-10-03-emulator-CLEAN-018-review.md).
+- Gate da revisão: `powershell -ExecutionPolicy Bypass -File .\gate.ps1`,
+  exit 0, `gate: passou`. Rust 83 testes; PC/UI 61; QA 20; fmt, clippy e
+  typecheck passaram. Android `BUILD SUCCESSFUL`, 41 tasks (1 executada,
+  40 up-to-date; testes Android up-to-date).
+- QA do emulador: `up` foi tentado com o SDK padrão e depois com o SDK
+  direto de `android/local.properties`. A primeira chamada não conseguiu
+  executar o adb pelo mount point de `%LOCALAPPDATA%`; a segunda abortou
+  com `infraestrutura: portas do emulador 5554/5555 ocupadas`, antes de
+  compilar/instalar/abrir os apps. O transporte nativo do QR ficou sem
+  verificar nesta revisão. A falha é de infraestrutura, não é outro
+  achado nem motivo de reabertura. `down -Sdk D:\AppData\Local\Android\Sdk`
+  confirmou exit 0, `stopped=true`, `restored=false`; estado isolado inativo.
+
+- Stage 2, reabertura (2026-10-03): seam mantida na CLI real de `qa/phone.ps1`, com adb falso. Chamador de produção conferido: `qa/up.ps1`, que fornece strings canônicas via config e IPv4 explícito. Casos degenerados: arrays vazios, arrays com uma string válida e LF final em cada campo. Teste focado `node --test --test-name-pattern='pair validates' qa/phone.test.mjs`: 12 testes, 5 passaram e 7 falharam (os seis novos casos e o pai); todos os casos novos retornaram 0/Starting: Intent em vez de rejeitar o Par. Produção ainda intacta neste commit.
+- Handoff da reabertura (2026-10-03): testes vermelhos em `e97e45a`; correção de produção separada em `763c6dc`, sem alterar testes. O guard exige `[string]` nos dois campos e usa `\A`/`\z` para validar o valor inteiro. Teste focado após a correção: 12/12 passaram, 27 execuções do wrapper; os seis casos novos conferem exit 1, mensagem de Par inválido e nenhum `am start`. Gate completo em primeiro plano: exit 0, `gate: passou`; Rust 83, PC/UI 61, QA 26 testes passaram; fmt, clippy e typecheck passaram. Android `BUILD SUCCESSFUL`, 41 tasks (1 executada, 40 up-to-date, incluindo testes). Diff revisado: apenas os dois Primary files e este ticket; nenhuma mudança de contrato ou documentação de uso necessária. Limitação preservada: fake `.ps1` não verifica transporte nativo de argv; QA real fica para o stage 3.
+
+- Stage 3, re-revisão (2026-10-03): Standards apontou a ordem dos dois comentários acima; reposicionados após a revisão anterior, conforme `docs/agents/issue-tracker.md`. Nenhuma mudança de código ou contrato. Prova independente: os testes atuais contra `qa/phone.ps1` de `e97e45a` deram 5/12 passados e 7/12 falhos (seis casos novos + pai), todos por aceitação indevida; na entrega `5634a94`, 12/12 passaram. O primeiro gate desta re-revisão foi impedido no Android pela rede restrita do sandbox (`Permission denied: getsockopt`); Rust 83, PC/UI 61 e QA 26 passaram. A validação completa será repetida com acesso ao ambiente necessário.
+
+- QA da re-revisão (2026-10-03): `up` com SDK direto e PC isolado terminou em exit 0. O adb real lançou a activity, o Android recebeu nome/token/porta corretos e IP igual à rota UDP local; `pair` sem `-Ip` também saiu 0. Dump com `Na rede` e PC com HTTP 200. `down` saiu 0 e liberou as portas do emulador e do PC; nenhum arquivo de usuário foi criado ou apagado, sem débito humano. Evidência: [relatório da re-revisão](../../qa-runs/2026-10-03-emulator-CLEAN-018-rereview.md). Gate final ainda pendente neste commit.
+
+#### Resolution (2026-10-03)
+
+Verdict: Approve
+
+- Re-revisão da entrega `5634a94`, delta desde `248fa8f`, sobre a base
+  fixa `31e1024` da sessão `sweatshop/2026-10-03-1608`. Rebase sem
+  alterações; integração sem squash em `e750a02`. Arquivos de produção
+  e testes: somente os dois Primary files. Stage 3 alterou apenas o
+  histórico deste ticket e preservou os relatórios de evidência.
+- Standards: **1 violação documental corrigida, 0 pendências, 0 smells
+  acionáveis**. Os comentários da reabertura foram reposicionados em
+  `822cf11`, seguindo o append cronológico de `docs/agents/issue-tracker.md`.
+  Código localizado e legível; testes em `e97e45a`, produção em `763c6dc`,
+  sem alteração de testes no commit de código. A cobertura inicial verde
+  segue a exceção explícita do contrato.
+- Spec: **0 achados** na re-revisão. Os dois achados anteriores do
+  critério 1 estão resolvidos, sem regressão identificada:
+  - ✅ Critério 1: campos precisam ser strings canônicas inteiras;
+    arrays vazios/com valor válido e LF final são rejeitados nos dois
+    campos com exit 1, mensagem de Par inválido e nenhum `am start`.
+  - ✅ Critério 2: os quatro IPv4 inválidos do contrato retornam 1,
+    sem lançamento da activity.
+  - ✅ Critério 3: exatamente um lançamento da activity correta e JSON
+    igual à entrada, porta 47820; confirmado também com adb real,
+    campos persistidos no Android e presença HTTP 200/`Na rede`.
+  - ✅ Critério 4: sem `-Ip`, o JSON usa o lookup UDP calculado na
+    máquina; chamada nativa saiu 0 e o endereço persistido também confere.
+  - ✅ Critério 5: `Error:` e `Exception` fazem o wrapper sair 1,
+    inclusive com exit 0 do adb falso.
+- Prova independente: testes atuais contra a produção de `e97e45a`
+  deram **5 passados e 7 falhos**, pelos seis casos novos e o pai;
+  na entrega corrigida, **12/12 passaram**, 27 execuções do wrapper.
+  O harness chama a CLI real. Limite da seam preservado: o fake `.ps1`
+  não transporta argv nativo; o kit real verificou esse caminho nesta
+  re-revisão. Nenhuma nova decisão de proxy.
+- Chamadores, falhas e interações reexaminados: `qa/up.ps1`, preparação
+  adb/bloqueio de tela, guard do config, IPv4, lookup UDP, montagem e
+  lançamento do QR; config tipado do PC e parser/`acceptQr`/activity
+  de debug do Android. Ações de arquivos e Wi-Fi não foram alteradas;
+  seus testes existentes passaram no gate. Sem mudança de configuração,
+  API ou uso que exija outra documentação.
+- Gate completo após rebase e QA, em primeiro plano: **exit 0**,
+  `gate: passou`; fmt, clippy, typecheck e lint passaram. Rust **83**,
+  PC/UI **61**, QA **26**, todos sem falhas. Android `BUILD SUCCESSFUL`,
+  41 tasks (1 executada, 40 up-to-date); testes app **94** e
+  protocol-client **72** up-to-date, XMLs sem falhas, erros ou skips.
+  A tentativa inicial restrita pelo sandbox foi superada pela repetição
+  com acesso ao ambiente necessário.
+- QA: [relatório da re-revisão](../../qa-runs/2026-10-03-emulator-CLEAN-018-rereview.md).
+  `up` e `down` saíram 0, portas liberadas; nenhum arquivo de usuário
+  criado ou apagado. Sem débito humano.
+- Resumo dos eixos: Standards **1 documental corrigido, 0 restante**;
+  Spec **0 achados**. Nenhum achado pendente em qualquer eixo.

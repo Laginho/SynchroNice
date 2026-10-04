@@ -1,5 +1,5 @@
 # CLEAN-022: Descoberta automática do celular ignora o emulador
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,3 +64,93 @@ Os casos são os critérios 1 a 3.
   Confirmado: não há filtro de loopback nem de qemu. Bug, ready-for-agent
   (Q6, proxy). O loopback sai só da descoberta, porque o `-Serial`
   explícito com loopback é usado de propósito.
+
+- Stage 2 (2026-10-03): seam exercitada pelo wrapper real com adb falso.
+  Chamadores examinados: descoberta via devices e mDNS, validação do serial
+  explícito, qa/up.ps1 e testes existentes com loopback explícito. Cobertura
+  inclui ausência de aparelho, 127.0.0.0/8, localhost, IPv6, mistura com
+  celular real, USB/emulator/offline e nome de serviço sem fio.
+  Red: 10 cenários, 7 falham por selecionar loopback; 3 controles passam
+  (Node conta também o teste pai: 11 testes, 3 passam, 8 falham).
+- Implementação: descoberta por devices e mDNS usa filtro de loopback;
+  validação de serial explícito permanece igual. Green: os 11 testes da
+  execução focada passam (10 cenários e o pai). Testes em d5015da;
+  implementação separada em 60d28f1, sem alterações nos testes.
+- Gate completo: passou, código 0; Rust 83/83, interface 61/61, QA 60/60,
+  fmt, Clippy, TypeScript e gradle check aprovados (tarefas de testes Android
+  UP-TO-DATE). A primeira execução no sandbox falhou por acesso a processos,
+  Lixeira e rede do Gradle; repetição fora do sandbox passou sem mudar código.
+  Diff final revisado: somente os dois Primary files e este ticket.
+
+- Stage 3 (2026-10-03): comentários do Stage 2 movidos para depois da triagem,
+  conforme a ordem de histórico de `docs/agents/issue-tracker.md`. Correção
+  somente documental, sem mudar contrato, testes ou código.
+
+#### Resolution (2026-10-03)
+Verdict: Approve
+
+- Revisão contra `205c76c0fd8f1ba57df2972eed0f4d3a04af2c77`, base da sessão
+  `sweatshop/2026-10-03-1608`. Rebase atualizado, sem conflitos; integração
+  sem squash no merge `11f0976`.
+- Implementação nos dois Primary files: `qa/phone.ps1` e
+  `qa/phone.test.mjs`. Descoberta por devices e mDNS descarta loopback;
+  serial explícito e por ambiente conserva a validação anterior. Nenhuma
+  correção de fonte ou teste no Stage 3.
+
+##### Standards
+
+- Nenhum bloqueador de código ou smell acionável. O filtro fica num único
+  predicado, usado pelas duas fontes de descoberta, com escopo restrito.
+- Correção documental em `bf992da`: registros do Stage 2 reposicionados
+  após a triagem, conforme `docs/agents/issue-tracker.md` (histórico em
+  Comments é acrescentado ao fim).
+- Desvio formal sem bloqueio: `d5015da`, `60d28f1` e `88fa4aa` têm corpo
+  vazio. A seção "Commits and closing" de `ticket-flow` pede corpo com
+  motivo e ID. Os assuntos são Conventional Commits em inglês e citam o
+  ticket; a justificativa está no ticket. Histórico preservado.
+- Test-first correto: `d5015da` contém testes e metadata; `60d28f1` muda
+  somente produção; os commits seguintes não alteram testes.
+
+##### Spec
+
+Zero achados de requisito ausente, implementação incorreta ou expansão
+de escopo. Os quatro critérios estão atendidos:
+
+1. ✅ Sem serial e somente loopback, saída 1, `sem aparelho` e nenhuma
+   conexão ou ação. Conferido por teste e por listagem real do emulador,
+   com guarda que registraria qualquer tentativa de conexão ou ação.
+2. ✅ Celular `192.168.0.50:41234` escolhido após o emulador, com todas as
+   ações usando seu `-s`. Também verificado pelo fallback mDNS com adb falso.
+3. ✅ `localhost`, `[::1]` e IPv4 de `127.0.0.0/8` descartados na descoberta.
+4. ✅ Loopback explícito permanece aceito. Testes anteriores intactos e
+   aprovados; `up` e `dump` no emulador usam `127.0.0.1:5555`, saída 0.
+
+- Chamadores, falhas e interações examinados: descoberta por devices e
+  mDNS; ausência de candidato; `connect`/`get-state`; preparação e ações
+  após seleção; `qa/up.ps1 pair`; serial explícito e por ambiente;
+  USB, emulator-NNNN, offline e nome de serviço sem fio. Guarda de
+  bloqueio de tela, preparação opcional, arquivos, pair e Wi-Fi permanecem
+  cobertos pelos testes existentes do gate.
+- Não exercitados: Redmi físico, queda real de rede e execução concorrente
+  dos wrappers. Nenhum critério do ticket exige esses passos; nenhum
+  critério visual ficou pendente. Não há linha `Proxy decided` neste ticket.
+- Red independente: testes atuais contra o wrapper de `205c76c` deram
+  3/11 passados e 8/11 falhos (sete cenários de loopback e o teste pai).
+  Green na implementação: 11/11, dez cenários e o pai. Os testes chamam a
+  CLI de produção com adb controlado, sem copiar a lógica.
+- Gate completo em primeiro plano: saída 0, `gate: passou`; Rust 83/83,
+  interface 61/61, QA 60/60; fmt, Clippy e TypeScript aprovados. Android:
+  `BUILD SUCCESSFUL`, 41 tarefas, uma executada e 40 up-to-date; testes
+  reutilizados pelo Gradle. Log: `.scratch/run-log/CLEAN-022-stage3-gate.log`.
+- [QA no emulador](../../qa-runs/2026-10-03-emulator-CLEAN-022-review.md):
+  critérios 1–4 aprovados. SDK padrão em C: falhou; SDK configurado em D:
+  passou. Após um aviso de System UI e uma nova leitura, `composer` e
+  `presence: Na rede` presentes; PC HTTP 200. `down` saiu 0, estado
+  `active: false`, debug encerrado e adb sem dispositivos. Sem arquivos de
+  usuário criados/apagados e sem débito humano.
+- Finais de linha de `Cargo.toml` alterados pelo build foram restaurados
+  depois de conferir que não havia mudança de conteúdo. Diff final
+  restrito aos Primary files, ticket, relatório e ledger do fluxo.
+
+Totais: Standards 1 correção documental e 1 desvio formal registrado,
+0 bloqueadores de código; Spec 0 achados.

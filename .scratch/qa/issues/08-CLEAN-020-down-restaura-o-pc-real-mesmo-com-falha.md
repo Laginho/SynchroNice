@@ -1,5 +1,5 @@
 # CLEAN-020: `down` restaura o PC real mesmo quando o emulador falha
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -69,6 +69,22 @@ Os casos são os critérios 2, 3 e 4. O critério 5 roda com o fake respondendo
 
 ## Comments
 
+- Stage 2 (2026-10-03): costura confirmada pelo ticket: `qa/down.ps1` real,
+  adb falso e executáveis Windows temporários compilados com `Add-Type`.
+  Chamadores examinados: rollback de `qa/up.ps1:133` e uso direto documentado
+  em `docs/agents/qa.md`; nenhum muda. Casos degenerados cobertos: estado
+  ausente/inativo, emulador já ausente e `realWasRunning: false`.
+  Red inicial: `node --test qa/down.test.mjs`, 10 testes, 2 passaram e 8
+  falharam (inclui o teste pai); os parâmetros ainda são ignorados e o adb
+  padrão é usado. Após expor os parâmetros, será provado também o red da
+  restauração com as quatro falhas reais do wrapper antes de corrigir a ordem.
+
+- Ajuste do harness: `Get-Process -ErrorAction SilentlyContinue` sem processos
+  pode deixar `$?` falso mesmo sem erro fatal. O helper encerra explicitamente
+  com 0 após seus comandos; erros terminantes continuam falhando. Na prova
+  com os parâmetros expostos, as quatro falhas do emulador deixam o debug
+  vivo, exatamente o defeito do contrato.
+
 - `qa/down.ps1:21-29` lança erro (`Emulador mudou`, `Nao foi possivel
   derrubar`, `Emulador nao encerrou` após 30 s) antes de matar o PC de
   debug (`:34`) e de reabrir o PC real (`:35-58`). Como `qa/up.ps1:133`
@@ -86,3 +102,89 @@ Os casos são os critérios 2, 3 e 4. O critério 5 roda com o fake respondendo
   finally. Bug, ready-for-agent. A costura do teste foi escolhida pelo
   humano (Q4): `-Adb`, `-DebugExe` e `-ReleaseExe` com padrão, mais
   `qa/down.test.mjs`. `hard` (Q17, proxy).
+
+#### Stage 2 — implementação (2026-10-03)
+
+- `qa/down.ps1` aceita `-Adb`, `-DebugExe` e `-ReleaseExe`, com os caminhos
+  anteriores por padrão; `qa/up.ps1` permanece inalterado. Restaura o PC antes
+  da parte do emulador, uma das ordens aprovadas no contrato. Erros preservam
+  mensagem, saída 1 e estado ativo; repetir não duplica o processo real.
+- Red com a costura exposta, antes da mudança de ordem: 10 testes, 5 passaram
+  e 5 falharam (quatro cenários de erro mais o pai). Os quatro falharam porque
+  o debug continuava vivo. Caminho feliz, emulador ausente, PC real antes
+  fechado e estado ausente/inativo passaram. O primeiro ensaio no sandbox
+  bloqueou WMI com `Access denied`; a prova final usou permissão ampliada.
+- Green pelo gate completo: 10/10 novos testes passaram, incluindo todos os
+  quatro erros, ambiente sem as três variáveis de isolamento e repetição sem
+  outro PID/registro de lançamento. Os stubs temporários foram encerrados e
+  removidos; nenhum teste usa o PC real ou o adb real.
+- `powershell -ExecutionPolicy Bypass -File .\gate.ps1`: saída 0,
+  `gate: passou`. Rust: 83 testes; interface: 61; QA: 44 (incluindo os 10
+  novos); fmt, clippy e TypeScript passaram. Android: `BUILD SUCCESSFUL`,
+  41 tarefas (1 executada, 40 up-to-date; testes reutilizados pelo Gradle).
+  Log local: `.scratch/run-log/CLEAN-020-stage2-gate.log`.
+- Revisão final: `git diff --check` limpo, alterações restritas aos Primary
+  files e ao ticket, testes em commits separados da implementação. QA com
+  aplicativo/emulador real fica para a etapa 3 conforme o fluxo.
+
+#### Resolution (2026-10-03)
+
+Verdict: Approve
+
+- Revisão contra `832de66d6ddadf02d6d9ad4215cf7379f1c12bbd`, base da sessão
+  `sweatshop/2026-10-03-1608`. A branch já estava atualizada; integração sem
+  squash no merge `5a051e9`. Nenhuma correção de fonte necessária no stage 3.
+- Arquivos: `qa/down.ps1`, `qa/down.test.mjs` e inclusão do teste no
+  `gate.ps1`. `qa/up.ps1` e os caminhos padrão permanecem iguais. A alteração
+  de finais de linha em `Cargo.toml` gerada pelo build Tauri foi desfeita.
+
+##### Standards
+
+Nenhum achado material no código e nenhum smell acionável. Uma nota de processo:
+o stage 2 rodou a prova red diretamente com `node --test qa/down.test.mjs`,
+embora `AGENTS.md` e `docs/DECISIONS.md` indiquem o runner `gate.ps1 -TestsOnly`.
+O gate completo desta revisão passou com o teste integrado. O desvio histórico
+não quebra critério, fronteira, separação test-first ou comportamento do ticket.
+Os commits `1061de4` e `6c63df8` contêm os testes; `0262548` altera a implementação
+sem tocar em testes.
+
+##### Spec
+
+Zero achados: critérios 1–5 atendidos. A ordem PC primeiro é autorizada no
+contrato; os quatro erros preservam mensagem, código 1 e estado ativo, enquanto
+o PC é restaurado com ambiente limpo. Repetir não duplica o release. Caminho
+feliz e casos degenerados permanecem cobertos.
+
+1. ✅ Parâmetros aceitos, caminhos padrão preservados e `up.ps1` inalterado.
+2. ✅ Debug encerrado e release restaurado com ambiente limpo nas quatro falhas.
+3. ✅ Mensagem, saída 1 e `active: true` preservados nas quatro falhas.
+4. ✅ Repetição mantém o mesmo release, sem outro PID ou registro de lançamento.
+5. ✅ Caminho feliz encerra recursos, restaura quando necessário, grava estado
+   inativo e mantém o JSON esperado.
+
+- Chamadores, falhas e interações examinados: rollback de `qa/up.ps1:133`,
+  uso direto e pós-run documentados, reutilização de estado ativo após erro,
+  estado ausente/inativo, emulador ausente, `realWasRunning: false`, os quatro
+  erros, release já aberto, ambiente e JSON final. Falha de restauração mantém
+  o estado ativo; com a ordem aprovada, antecede o teardown do emulador.
+- Não exercitados: chamadas concorrentes, WMI negado e executável inválido.
+  Espera pela saída dos processos e restauração após QA no Redmi continuam
+  nos tickets separados CLEAN-026 e CLEAN-024.
+- Red confirmado no transcript local
+  `.scratch/run-log/CLEAN-020-implement-20261003-210304.txt:43` (`item_21`):
+  costura exposta, saída 1, 10 testes, 5 passaram e 5 falharam. Os quatro
+  cenários de erro falharam porque o debug continuava vivo; a quinta falha
+  contada é o teste pai. Os cinco cenários normais passaram.
+- Green desta revisão: gate completo em primeiro plano, saída 0,
+  `gate: passou`; Rust 83, interface 61, QA 44 (10/10 novos), fmt, clippy
+  e TypeScript passaram. Android: `BUILD SUCCESSFUL`, 41 tarefas,
+  1 executada e 40 up-to-date; testes reutilizados pelo Gradle.
+  Log local: `.scratch/run-log/CLEAN-020-stage3-gate.log`.
+- [QA no emulador](../../qa-runs/2026-10-03-emulator-CLEAN-020-review.md):
+  `up` terminou com presença confirmada; `down` encerrou debug e emulador,
+  gravou `active: false` e saiu 0. Repetição saiu 0 sem abrir PC.
+  O PC real estava fechado; o cenário de restauração foi comprovado pelos
+  executáveis Windows temporários do teste, conforme a costura do contrato.
+- Totais da revisão: Standards 1 nota processual, nenhum achado de código;
+  Spec 0 achados. Sem débito humano novo. Diff final restrito ao ticket,
+  relatório e ledger, além dos Primary files já validados.

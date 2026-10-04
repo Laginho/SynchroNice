@@ -1,5 +1,5 @@
 # CLEAN-023: `wifi-off` sempre restaura o Wi-Fi
-Stage: to-implement
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -70,3 +70,81 @@ git-bash com `svc`, `dumpsys` e `sleep` falsos:
   Confirmado. Bug, ready-for-agent (Q7, proxy). Fica `trap 'exit 1' INT
   TERM` com `trap restore EXIT`, para não religar duas vezes. O HUP é
   no-op sob `nohup`.
+
+- Stage 2 (2026-10-03): seam aprovada: `phone.ps1 wifi-off`, com adb falso
+  executando o script capturado em Git Bash. Callers examinados: launcher nohup,
+  reconexão e leitura do log no PC; `restore` só é chamado pelo EXIT e
+  `wait_wifi` pela desativação/restauração. Cobertos sinais durante sleep,
+  falhas transitórias/permanentes de enable e os nove cenários existentes.
+  Red: `node --test --test-name-pattern='wifi-off confirms' qa/phone.test.mjs`
+  teve 9 passes e 5 falhas (quatro cenários novos + o teste pai): TERM saiu
+  com 3840, INT com 0; os dois cenários de retry fizeram só uma tentativa.
+- Green: o mesmo comando passou 14/14 (13 cenários + pai). INT e TERM
+  encerram com código 1 e restauram exatamente uma vez; enable transitório
+  confirma na terceira chamada; falha permanente faz cinco chamadas, sem
+  marcador de restauração e com erro reportado pelo PC. Os nove cenários
+  anteriores permanecem verdes.
+- Gate completo: `powershell -ExecutionPolicy Bypass -File .\gate.ps1`,
+  exit 0, `gate: passou`: fmt, clippy, 83 testes Rust, typecheck, 61 testes
+  da UI e 73 testes QA passaram; Gradle check BUILD SUCCESSFUL (41 tarefas,
+  1 executada, 40 up-to-date). Diff revisado: só Primary files e este ticket;
+  testes em commits separados da implementação. Sem teste em aparelho real
+  neste stage 2; a evidência de sinais usa Git Bash e comandos Android falsos.
+
+- Stage 3 (2026-10-03): corrigida a posição dos comentários do stage 2 para
+  preservar a cronologia exigida pelo tracker. Revisão Standards/Spec e QA
+  Android registrados no [relatório](../../qa-runs/2026-10-03-emulator-CLEAN-023-review.md).
+  INT e TERM confirmados pelo trace `sleep 6 -> exit 1 -> restore`, com uma
+  restauração; retries transitório e permanente também conferidos. O dump
+  integral excede o limite do `printf`, problema anterior anotado no CLEAN-027;
+  a prova Android filtrou somente a linha real de estado do `dumpsys`.
+  Gate de stage 3 ainda pendente neste checkpoint. Nenhum `Proxy decided`
+  consta no ticket; não houve mudança de contrato nem de código de produção.
+
+#### Resolution (2026-10-04)
+
+Verdict: Approve
+
+Standards: três desvios de registro de baixo impacto. A cronologia dos
+comentários foi corrigida; a ausência de corpos nos commits do stage 2 e
+o handoff em commit documental separado ficam registrados no relatório.
+Fronteiras do ticket e separação test-first respeitadas. Sem smell material.
+
+Spec:
+
+1. ✅ TERM durante sleep: no Android, trace `sleep 6 -> exit 1 -> restore`,
+   um `svc wifi enable` bem-sucedido e um `QA_WIFI_RESTORED`.
+2. ✅ INT: mesma prova no launcher `nohup sh ... &`, com restauração única.
+3. ✅ Duas falhas de enable e sucesso na terceira: três chamadas, estado real
+   enabled confirmado e um marcador de restauração.
+4. ✅ Falha permanente: cinco chamadas, nenhum marcador e CLI do PC exit 1
+   com `Wi-Fi nao confirmou desligar e restaurar`.
+5. ✅ Os nove cenários anteriores continuam passando; teste focado 14/14
+   (13 cenários e o pai) no gate da revisão.
+
+- Arquivos de produção/testes: `qa/phone.ps1` e `qa/phone.test.mjs`.
+  O stage 3 corrigiu somente documentação do tracker e registrou evidências.
+  Commits `f458769`/`713d817` só de testes antecedem `836cc3d`, que não toca
+  testes. Handoff do stage 2: `342f48c`.
+- Prova independente red/green: testes atuais contra o wrapper da base
+  `168ffb9` deram 9 passes e 5 falhas, pelos quatro cenários novos e o pai.
+  Na implementação revisada, 14/14 passaram; suíte QA completa 73/73.
+- Gate completo em primeiro plano, exit 0, `gate: passou`: fmt, Clippy,
+  TypeScript, Rust 83/83, interface 61/61 e QA 73/73; Gradle check
+  `BUILD SUCCESSFUL`, 41 tarefas (1 executada, 40 up-to-date).
+- Callers/caminhos examinados: launcher assíncrono, sinais durante sleep,
+  EXIT/restore, confirmação das duas transições, negativas, estados
+  desconhecidos, atrasos/timeouts, retries, reconexão/mDNS, log parcial,
+  limpeza e erro do PC. O Redmi não foi examinado nesta revisão.
+- QA: [relatório](../../qa-runs/2026-10-03-emulator-CLEAN-023-review.md).
+  O probe Android filtrou apenas a linha real de estado do `dumpsys` para
+  contornar o problema anterior de dump grande, registrado no CLEAN-027
+  (`needs-triage`). O script gerado permaneceu igual. No mksh, o wait final
+  retornou 0; o trace confirmou `exit 1` em ambos os sinais. Não há requisito
+  de código numérico no contrato. Nenhum `Proxy decided` neste ticket.
+- Limpeza concluída: Wi-Fi reativado, temporários de QA removidos, nenhum
+  arquivo de usuário criado/apagado; `down` exit 0, `stopped: true`,
+  `restored: false`, estado inativo. PC real não estava aberto.
+- Integração: rebase sobre a sessão atualizado, gate verde e merge sem
+  squash em `sweatshop/2026-10-03-1608`, commit `3bfba74`. O fechamento e a
+  linha do ledger são registrados juntos na sessão.

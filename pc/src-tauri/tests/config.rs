@@ -2,7 +2,9 @@ use pc_lib::config;
 use std::path::PathBuf;
 
 #[test]
-fn diretorio_isolado_desliga_autostart_e_padrao_o_mantem() {
+fn perfil_isolado_recusa_acesso_ao_autostart_e_padrao_permite() {
+    assert!(!config::autostart_permitido(true));
+    assert!(config::autostart_permitido(false));
     let padrao = PathBuf::from("perfil real");
     let isolado = PathBuf::from("execucao QA/dados");
     assert_eq!(
@@ -12,6 +14,10 @@ fn diretorio_isolado_desliga_autostart_e_padrao_o_mantem() {
     assert_eq!(
         config::resolve_data_dir(padrao.clone(), None),
         (padrao, true)
+    );
+    assert_eq!(
+        config::resolve_data_dir(PathBuf::new(), Some("".into())),
+        (PathBuf::new(), false)
     );
 }
 

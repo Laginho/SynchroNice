@@ -25,6 +25,10 @@ if (-not $Adb) {
 function Wireless([string]$candidate) {
     return $candidate -match '^\S+:\d+$|^adb-\S+\._adb-tls-connect\._tcp\.?$'
 }
+function Discoverable([string]$candidate) {
+    # Explicit serials may intentionally target the QA emulator; discovery must not.
+    return (Wireless $candidate) -and $candidate -notmatch '^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|\[::1\]):\d+$'
+}
 function Adb-Run([string[]]$Arguments, [switch]$AllowFailure) {
     # Windows PowerShell treats native stderr as ErrorRecords even with 2>&1.
     $ErrorActionPreference = 'Continue'
@@ -98,6 +102,28 @@ function Media-Uri([string]$remote) {
         return $uri
     } finally { Remove-Item -LiteralPath $local }
 }
+function Cleanup-MediaState([string]$uri) {
+    if ($uri -notmatch '^content://media/external/(file|downloads)/\d+$') { throw 'URI de limpeza invalida; arquivo preservado' }
+    $query = Adb-Run @('shell',"content query --uri $uri --projection is_trashed:is_pending:_data --extra 'android\:query-arg-match-trashed:i:1' --extra 'android\:query-arg-match-pending:i:1'")
+    if ($query -match 'Exception|Error') { throw "MediaStore nao confirmou destino: $query" }
+    $rows = @($query -split '\r?\n' | Where-Object { $_ -match '^Row: \d+ is_trashed=([01]), is_pending=([01]), _data=(.+)$' })
+    if ($rows.Count -ne 1) { throw 'MediaStore nao confirmou destino; arquivo preservado' }
+    $null = $rows[0] -match '^Row: \d+ is_trashed=([01]), is_pending=([01]), _data=(.+)$'
+    return [pscustomobject]@{ trashed=($Matches[1] -eq '1'); path=$Matches[3] }
+}
+function Check-MediaIdentity($entry, $media) {
+    # A provider rename keeps the original directory/name; bytes alone cannot identify an unrelated file.
+    $directory = $entry.path.Substring(0, $entry.path.LastIndexOf('/') + 1)
+    $name = $entry.path.Substring($directory.Length)
+    $renamed = '^' + [regex]::Escape($directory) + '\.(pending|trashed)-\d+-' + [regex]::Escape($name) + '$'
+    if (($media.path -ine $entry.path -and $media.path -notmatch $renamed) -or
+        @($script:fileState.baseline) -contains $media.path) {
+        throw 'Destino do MediaStore nao corresponde ao arquivo rastreado; preservado'
+    }
+    if (-not $entry.hash -or (Phone-Hash $media.path) -ine $entry.hash) {
+        throw "Arquivo alterado; preservado: $($media.path)"
+    }
+}
 function Prepare-Optional([string[]]$Arguments) {
     try { Adb-Run $Arguments | Out-Null }
     catch {
@@ -119,13 +145,13 @@ try {
         $devices = & $Adb devices 2>&1
         if ($LASTEXITCODE -ne 0) { throw 'infraestrutura: adb devices falhou' }
         $Serial = @($devices | ForEach-Object {
-            if ($_ -match '^(\S+)\s+device\s*$' -and (Wireless $Matches[1])) { $Matches[1] }
+            if ($_ -match '^(\S+)\s+device\s*$' -and (Discoverable $Matches[1])) { $Matches[1] }
         }) | Select-Object -First 1
         if (-not $Serial) {
             $services = & $Adb mdns services
             if ($LASTEXITCODE -ne 0) { throw 'infraestrutura: adb mdns falhou' }
             $Serial = @($services | ForEach-Object {
-                if ($_ -match '^\S+\s+_adb-tls-connect\._tcp\.?\s+(\S+:\d+)') { $Matches[1] }
+                if ($_ -match '^\S+\s+_adb-tls-connect\._tcp\.?\s+(\S+:\d+)' -and (Discoverable $Matches[1])) { $Matches[1] }
             }) | Select-Object -First 1
         }
     }
@@ -162,10 +188,10 @@ try {
         'track' {
             $prefix = '/storage/emulated/0/Download/SynchroNice/'
             if (-not $Path.StartsWith($prefix) -or $Path.Substring($prefix.Length) -match '[/\\\r\n]' -or
-                $Path.Substring($prefix.Length) -in '', '.', '..' -or @($fileState.baseline) -ccontains $Path) {
+                $Path.Substring($prefix.Length) -in '', '.', '..' -or @($fileState.baseline) -contains $Path) {
                 throw 'So registre arquivos novos desta execucao, diretamente em Download/SynchroNice'
             }
-            if (@($fileState.tracked.path) -cnotcontains $Path) {
+            if (@($fileState.tracked.path) -notcontains $Path) {
                 $fileState.tracked = @($fileState.tracked) + @{ path=$Path; hash=(Phone-Hash $Path) }
                 Save-Files
             }
@@ -222,10 +248,16 @@ wait_wifi() {
     return 1
 }
 restore() {
-    if svc wifi enable && wait_wifi enabled; then echo QA_WIFI_RESTORED; fi
+    for restore_attempt in 1 2 3 4 5; do
+        if svc wifi enable && wait_wifi enabled; then
+            echo QA_WIFI_RESTORED
+            break
+        fi
+    done
     rm -f __REMOTE__
 }
 trap restore EXIT
+trap 'exit 1' INT TERM
 svc wifi disable && wait_wifi disabled || exit 1
 echo QA_WIFI_DISABLED
 sleep __SECONDS__
@@ -273,27 +305,66 @@ sleep __SECONDS__
             foreach ($entry in @($fileState.tracked)) {
                 $remote = $entry.path
                 if ($remote -notmatch '^/storage/emulated/0/(Pictures/SynchroNiceQA|Download/SynchroNice)/[^/\\\r\n]+$' -or
-                    [IO.Path]::GetFileName($remote) -in '.', '..' -or @($fileState.baseline) -ccontains $remote) {
+                    [IO.Path]::GetFileName($remote) -in '.', '..' -or @($fileState.baseline) -contains $remote) {
                     throw 'Manifesto inseguro: arquivo fora da lista de QA'
                 }
                 $quoted = Shell-Quote $remote
                 $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
                 $destination = 'ja ausente'
-                if ($exists.Trim() -eq 'exists') {
-                    $expectedHash = $entry.hash
-                    if (-not $expectedHash) { $expectedHash = Upload-PrefixHash $entry }
-                    if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
+                $uri = $entry.mediaUri
+                if ($uri -and $uri -notmatch '^content://media/external/file/\d+$') { throw 'URI de limpeza invalida; arquivo preservado' }
+                $media = $null
+                if ($uri) {
+                    # Provider ids may be reused while a failed cleanup is waiting for retry.
+                    $media = Cleanup-MediaState $uri
+                    Check-MediaIdentity $entry $media
+                }
+                if ($exists.Trim() -eq 'exists' -or $uri) {
                     $destination = 'rm (MediaStore indisponivel)'
-                    try {
-                        $uri = Media-Uri $remote
-                        $result = Adb-Run @('shell','content','update','--uri',$uri,'--bind','is_trashed:i:1')
-                        $trashed = Adb-Run @('shell','content','query','--uri',$uri,'--projection','is_trashed','--extra','android:query-arg-match-trashed:i:1')
-                        if ($result -match 'Exception|Error' -or $trashed -notmatch 'is_trashed=1\b') { throw 'MediaStore nao confirmou lixeira' }
-                        $destination = 'Lixeira do MediaStore'
-                    } catch { Adb-Run @('shell',"rm -f -- $quoted") | Out-Null }
+                    if ($exists.Trim() -eq 'exists') {
+                        $expectedHash = $entry.hash
+                        if (-not $expectedHash) { $expectedHash = Upload-PrefixHash $entry }
+                        if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
+                        if (-not $uri) { try { $uri = Media-Uri $remote } catch { } }
+                        if ($uri) {
+                            # Save the verified identity before the provider can rename the source.
+                            $entry.hash = $expectedHash
+                            $entry | Add-Member -NotePropertyName mediaUri -NotePropertyValue $uri -Force
+                            Save-Files
+                        }
+                    } else {
+                        # A previous update may have moved it into pending, rather than trash.
+                        if ($media.trashed) { $destination = 'Lixeira do MediaStore' }
+                    }
+                    if ($uri -and $destination -ne 'Lixeira do MediaStore') {
+                        # Some Downloads entries only accept trash through the downloads collection.
+                        foreach ($candidate in @($uri, $uri.Replace('/file/', '/downloads/'))) {
+                            try { Adb-Run @('shell','content','update','--uri',$candidate,'--bind','is_trashed:i:1') | Out-Null } catch { }
+                            $media = $null
+                            try {
+                                $media = Cleanup-MediaState $candidate
+                            } catch { }
+                            if ($media) { Check-MediaIdentity $entry $media }
+                            if ($media -and $media.trashed) {
+                                $destination = 'Lixeira do MediaStore'
+                                break
+                            }
+                            $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
+                            if ($exists.Trim() -ne 'exists') {
+                                throw "Lixeira nao confirmada; arquivo mantido no manifesto: $remote"
+                            }
+                        }
+                    }
+                    if ($destination -ne 'Lixeira do MediaStore') {
+                        # Never apply fallback rm to an unconfirmed provider derivative.
+                        if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
+                        Adb-Run @('shell',"rm -f -- $quoted") | Out-Null
+                        $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
+                        if ($exists.Trim() -eq 'exists') { throw "Limpeza nao removeu arquivo; mantido no manifesto: $remote" }
+                    }
                 }
                 $fileState.cleanup = @($fileState.cleanup) + @{ path=$remote; destination=$destination }
-                $fileState.tracked = @($fileState.tracked | Where-Object { $_.path -cne $remote })
+                $fileState.tracked = @($fileState.tracked | Where-Object { $_.path -ne $remote })
                 Save-Files
             }
             ConvertTo-Json -InputObject @($fileState.cleanup) -Depth 10
@@ -304,7 +375,8 @@ sleep __SECONDS__
             $local = [IO.Path]::GetTempFileName()
             try {
                 [IO.File]::WriteAllText($local, (Dump), [Text.UTF8Encoding]::new($false))
-                $point = & node "$PSScriptRoot/dump.mjs" $local $By $Value
+                # JSON over stdin preserves quotes and Unicode through Windows PowerShell.
+                $point = ConvertTo-Json -InputObject $Value -Compress | & node "$PSScriptRoot/dump.mjs" $local $By
                 if ($LASTEXITCODE -ne 0) { throw 'parser do dump falhou' }
                 $point = $point | ConvertFrom-Json
                 if ($null -eq $point) { throw "elemento nao achado: $By=$Value" }
@@ -314,7 +386,7 @@ sleep __SECONDS__
         'type' {
             # adb input text has no Unicode support and interprets %s as a space.
             if (-not $Text -or $Text -match '[^\x20-\x7e]|%') { throw 'Use texto ASCII imprimivel sem % (limite do adb input text)' }
-            $quoted = "'" + $Text.Replace("'", "'\''").Replace(' ', '%s') + "'"
+            $quoted = Shell-Quote ($Text.Replace(' ', '%s'))
             Adb-Run @('shell',"input text $quoted")
         }
         'key' {
@@ -333,8 +405,9 @@ sleep __SECONDS__
         'stop' { Adb-Run @('shell','am','force-stop','synchronice.android') }
         'pair' {
             $pair = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
-            if ($pair.nome_instancia -cnotmatch '^synchronice-[0-9a-fA-F]{8}$' -or
-                $pair.token -cnotmatch '^[0-9a-fA-F]{32}$') { throw 'config.json sem Par valido' }
+            if ($pair.nome_instancia -isnot [string] -or $pair.token -isnot [string] -or
+                $pair.nome_instancia -cnotmatch '\Asynchronice-[0-9a-fA-F]{8}\z' -or
+                $pair.token -cnotmatch '\A[0-9a-fA-F]{32}\z') { throw 'config.json sem Par valido' }
             if (-not $Ip) {
                 # Same route lookup as the PC QR: UDP connect selects an address without sending data.
                 $socket = [Net.Sockets.UdpClient]::new()

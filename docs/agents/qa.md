@@ -48,7 +48,9 @@ Passos 👤 seguem a regra de débito acima.
 Limpe somente os arquivos rastreados pelo kit e inclua os destinos no
 relatório. Ao encerrar o run, inclusive após falha de infraestrutura ou
 "sem aparelho", rode `qa/down.ps1` com o `-RunDir` usado no emulador;
-o comando pode ser repetido.
+o comando pode ser repetido. Ele também devolve o PC real ao normal depois
+do pós-run no Redmi: relança o exe registrado sem CDP, isolamento ou
+redirecionamento de saída, mesmo sem emulador ativo.
 
 ## Emulador: PC isolado
 
@@ -228,6 +230,16 @@ e aguarda o CDP. `-Port` muda essa porta em **todas** as chamadas.
 A saída JSON informa PID e arquivo de stderr, dentro de `-RunDir`.
 Sem `-RunDir`, cria `.scratch/qa-runs/<data-hora>-redmi/`.
 Leia `pc.stderr.log` para diagnosticar falhas do app.
+O `start` não isolado registra PID e exe em
+`.scratch/qa-runs/real-pc/state.json`, independente de `-RunDir`, antes de
+aguardar o CDP. No fim, `down` só encerra e relança esse PID se o caminho do
+exe ainda corresponder; registro de processo morto ou diferente é apenas
+removido quando não há restauração pendente. Antes de encerrar o processo,
+o kit registra a intenção de restauração: se o relançamento falhar, repetir
+`down` retoma essa intenção. O PC já restaurado fica protegido em tentativas
+seguintes de limpeza do emulador, inclusive quando usa o exe de debug;
+nesse caso não se abre também o release. `down -RealPcStatePath` permite
+injetar outro registro nos testes.
 
 | Ação | Exemplo de argumentos | Resultado |
 | --- | --- | --- |
@@ -240,10 +252,10 @@ Leia `pc.stderr.log` para diagnosticar falhas do app.
 | Comando Tauri | `invoke -Command list_items -Json '{}'` | retorno JSON do comando real |
 | Presença | `presence` | `{"status":200,"online":true}` ou 204/false |
 | Listar Pasta | `list-files -RunDir '<execução>'` | caminhos; fotografia inicial para proteger arquivos anteriores |
-| Colar imagem | `paste-image -Path 'qa-foto.png'` | clipboard nativo do Windows, foco no composer e Ctrl+V pelo CDP |
-| Colar arquivos | `paste-files -Paths 'qa-a.pdf','qa-b.txt'` | CF_HDROP nativo; uma bolha por arquivo |
+| Colar imagem | `paste-image -Path 'qa-foto.png'` | clipboard nativo do Windows, foco no composer e Ctrl+V pelo CDP; sobrescreve o clipboard do usuário e não o restaura |
+| Colar arquivos | `paste-files -Paths 'qa-a.pdf','qa-b.txt'` | CF_HDROP nativo; uma bolha por arquivo; sobrescreve o clipboard do usuário e não o restaura |
 | Registrar chegada | `track -Path 'C:\Users\bruno\Downloads\SynchroNice\qa-foto.png' -RunDir '<execução>'` | registra um arquivo novo da Pasta para limpeza |
-| Limpar | `clean -RunDir '<execução>'` | arquivos registrados enviados à Lixeira do Windows |
+| Limpar | `clean -RunDir '<execução>'` | destino confirmado: `Lixeira do Windows` ou `remocao permanente` |
 
 Para vários caminhos, chame `& .\qa\pc.ps1 paste-files -Paths @('qa-a.pdf',
 'qa-b.txt')` **dentro do PowerShell**: `powershell -File` não recebe arrays
@@ -315,9 +327,16 @@ Fontes locais copiadas para o clipboard não entram automaticamente na lista.
 
 `clean` percorre apenas os arquivos registrados, recusa diretórios e compara
 o SHA-256 antes de apagar: arquivo alterado fica preservado e gera erro.
-No PC, usa `FileSystem.DeleteFile` com `SendToRecycleBin`. No celular,
-atualiza `is_trashed=1` no MediaStore e confirma por query; se não puder,
-usa `rm` apenas no caminho registrado. O manifesto fica vinculado à Pasta
+No PC, usa `FileSystem.DeleteFile` com `SendToRecycleBin` e confere a nova
+entrada na Lixeira; se o Windows apagou sem reciclar, relata `remocao permanente`.
+No celular, registra a URI e o hash antes do update e confirma `is_trashed=1`
+por query que inclui itens pendentes e na Lixeira. O desaparecimento do
+caminho original não prova reciclagem. Tenta a URI de Downloads se a URI
+de arquivo não reciclar; só então usa `rm` no caminho verificado e confere
+se sumiu. Se o destino não puder ser confirmado, sai com erro e mantém o
+arquivo rastreado. Uma nova chamada recupera a URI registrada e confere
+caminho e hash antes de atuar sobre um derivado `.pending-*` ou `.trashed-*`.
+O manifesto fica vinculado à Pasta
 ou ao aparelho; não o reutilize para outro alvo. Lista vazia não apaga nada.
 Os resultados ficam também em `cleanup` nos manifestos, inclusive após
 uma interrupção; `clean` pode ser repetido sem apagar arquivos adicionais.

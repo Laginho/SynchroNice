@@ -69,8 +69,9 @@ o PowerShell 5.1, a partir da raiz do repositório.
   \item Gerar o executável do PC (sem instalador):
         \cmd{cd pc; npx tauri build -{}-no-bundle; cd ..}
         O executável sai em \texttt{pc\textbackslash src-tauri\textbackslash target\textbackslash release\textbackslash}.
-        Use sempre esse, porque o primeiro uso registra o caminho no autostart
-        do Windows.
+        Use esse executável para testar ``Iniciar com o Windows'' na engrenagem:
+        o autostart é opcional e só registra o caminho ao marcar a opção.
+        Builds de debug recusam habilitá-lo. \fonte{SYN-030}
   \item Gerar o APK:
         \cmd{cd android; .\textbackslash gradlew.bat assembleDebug; cd ..}
   \item No celular, ligar a \emph{Depuração USB} (Opções do desenvolvedor),
@@ -312,9 +313,11 @@ celular para o PC, para ver a bolha à esquerda nos dois.
         nenhum arquivo pela metade fica na Pasta. Religar o Wi-Fi e mandar
         outro arquivo. $\rightarrow$ Ele chega em até uns 30 s, sem reiniciar
         o PC. \fonte{CLEAN-005, CLEAN-011}
-  \item Opcional: reiniciar o Windows. $\rightarrow$ O app do PC sobe sozinho
-        e o chat está vazio. Os arquivos continuam na Pasta.
-        \fonte{SYN-001 c.5, história 30}
+  \item Opcional: no PC release, marcar ``Iniciar com o Windows'' na
+        engrenagem e reiniciar o Windows. $\rightarrow$ O app do PC sobe sozinho
+        e o chat está vazio. Os arquivos continuam na Pasta. Desmarcar a opção
+        impede a abertura automática no login seguinte.
+        \fonte{SYN-030 c.3, história 30}
 \end{passos}
 
 \section*{Débito que este roteiro não cobre}
