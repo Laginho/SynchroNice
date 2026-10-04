@@ -1,5 +1,5 @@
 # CLEAN-022: Descoberta automática do celular ignora o emulador
-Stage: to-implement
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,3 +64,24 @@ Os casos são os critérios 1 a 3.
   Confirmado: não há filtro de loopback nem de qemu. Bug, ready-for-agent
   (Q6, proxy). O loopback sai só da descoberta, porque o `-Serial`
   explícito com loopback é usado de propósito.
+
+- Stage 2 (2026-10-03): seam exercitada pelo wrapper real com adb falso.
+  Chamadores examinados: descoberta via devices e mDNS, validação do serial
+  explícito, qa/up.ps1 e testes existentes com loopback explícito. Cobertura
+  inclui ausência de aparelho, 127.0.0.0/8, localhost, IPv6, mistura com
+  celular real, USB/emulator/offline e nome de serviço sem fio.
+  Red: 10 cenários, 7 falham por selecionar loopback; 3 controles passam
+  (Node conta também o teste pai: 11 testes, 3 passam, 8 falham).
+- Implementação: descoberta por devices e mDNS usa filtro de loopback;
+  validação de serial explícito permanece igual. Green: os 11 testes da
+  execução focada passam (10 cenários e o pai). Testes em d5015da;
+  implementação separada em 60d28f1, sem alterações nos testes.
+- Gate completo: passou, código 0; Rust 83/83, interface 61/61, QA 60/60,
+  fmt, Clippy, TypeScript e gradle check aprovados (tarefas de testes Android
+  UP-TO-DATE). A primeira execução no sandbox falhou por acesso a processos,
+  Lixeira e rede do Gradle; repetição fora do sandbox passou sem mudar código.
+  Diff final revisado: somente os dois Primary files e este ticket.
+
+- Stage 3 (2026-10-03): comentários do Stage 2 movidos para depois da triagem,
+  conforme a ordem de histórico de `docs/agents/issue-tracker.md`. Correção
+  somente documental, sem mudar contrato, testes ou código.

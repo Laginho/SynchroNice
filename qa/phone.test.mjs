@@ -6,6 +6,59 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
+test('automatic discovery ignores loopback and keeps wireless phone selection', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-022-discovery-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    const calls = join(directory, 'calls');
+    writeFileSync(adb, `
+if ($args[0] -eq 'devices') { $env:QA_DEVICES -split [char]10; exit 0 }
+if ($args[0] -eq 'mdns') { $env:QA_SERVICES -split [char]10; exit 0 }
+Add-Content -LiteralPath $env:QA_CALLS -Value ($args -join ' ')
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($args[2] -eq 'get-state') { 'device'; exit 0 }
+if (($args -join ' ') -match 'dumpsys window policy') { 'mShowingLockscreen=false' }
+exit 0
+`);
+    const phone = '192.168.0.50:41234';
+    const loopbacks = ['127.0.0.1:5555', '127.42.3.4:5555', 'localhost:5555', '[::1]:5555'];
+    const scenarios = loopbacks.map(endpoint => ({ name: `reject ${endpoint}`, devices: `${endpoint} device` }));
+    scenarios.push(
+      { name: 'phone after emulator', devices: `127.0.0.1:5555 device\n${phone} device`, selected: phone },
+      { name: 'mdns phone after loopback', devices: '127.0.0.1:5555 device',
+        services: `local _adb-tls-connect._tcp localhost:5555\nphone _adb-tls-connect._tcp ${phone}`, selected: phone },
+      { name: 'mdns loopback only', services: loopbacks.map(endpoint => `local _adb-tls-connect._tcp ${endpoint}`).join('\n') },
+      { name: 'explicit loopback', serial: '127.0.0.1:5555', selected: '127.0.0.1:5555' },
+      { name: 'USB emulator and offline ignored', devices: `emulator-5554 device\nUSB123 device\n${phone} offline` },
+      { name: 'wireless service name preserved', devices: 'adb-phone._adb-tls-connect._tcp device', selected: 'adb-phone._adb-tls-connect._tcp' },
+    );
+    for (const scenario of scenarios) {
+      await t.test(scenario.name, () => {
+        writeFileSync(calls, '');
+        const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve('qa/phone.ps1'), 'open', '-Adb', adb];
+        if (scenario.serial) args.push('-Serial', scenario.serial);
+        const result = spawnSync('powershell.exe', args, {
+          encoding: 'utf8', timeout: 30000,
+          env: { ...process.env, SYNCHRONICE_ADB_SERIAL: '', QA_CALLS: calls,
+            QA_DEVICES: scenario.devices ?? '', QA_SERVICES: scenario.services ?? '' },
+        });
+        assert.ifError(result.error);
+        const recorded = readFileSync(calls, 'utf8').trim();
+        assert.equal(result.status, scenario.selected ? 0 : 1, result.stdout + result.stderr);
+        if (scenario.selected) {
+          const commands = recorded.split(/\r?\n/);
+          assert.equal(commands[0], `connect ${scenario.selected}`);
+          assert.ok(commands.slice(1).every(command => command.startsWith(`-s ${scenario.selected} `)), recorded);
+          assert.ok(commands.some(command => command.includes('am start')), recorded);
+        } else {
+          assert.match(result.stderr, /sem aparelho/);
+          assert.equal(recorded, '', 'no connection or device action is allowed');
+        }
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('phone paths ignore case when protecting, tracking and cleaning files', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'clean-021-phone-'));
   const prefix = '/storage/emulated/0/Download/SynchroNice/';

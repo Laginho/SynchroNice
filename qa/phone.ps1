@@ -25,6 +25,10 @@ if (-not $Adb) {
 function Wireless([string]$candidate) {
     return $candidate -match '^\S+:\d+$|^adb-\S+\._adb-tls-connect\._tcp\.?$'
 }
+function Discoverable([string]$candidate) {
+    # Explicit serials may intentionally target the QA emulator; discovery must not.
+    return (Wireless $candidate) -and $candidate -notmatch '^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|\[::1\]):\d+$'
+}
 function Adb-Run([string[]]$Arguments, [switch]$AllowFailure) {
     # Windows PowerShell treats native stderr as ErrorRecords even with 2>&1.
     $ErrorActionPreference = 'Continue'
@@ -119,13 +123,13 @@ try {
         $devices = & $Adb devices 2>&1
         if ($LASTEXITCODE -ne 0) { throw 'infraestrutura: adb devices falhou' }
         $Serial = @($devices | ForEach-Object {
-            if ($_ -match '^(\S+)\s+device\s*$' -and (Wireless $Matches[1])) { $Matches[1] }
+            if ($_ -match '^(\S+)\s+device\s*$' -and (Discoverable $Matches[1])) { $Matches[1] }
         }) | Select-Object -First 1
         if (-not $Serial) {
             $services = & $Adb mdns services
             if ($LASTEXITCODE -ne 0) { throw 'infraestrutura: adb mdns falhou' }
             $Serial = @($services | ForEach-Object {
-                if ($_ -match '^\S+\s+_adb-tls-connect\._tcp\.?\s+(\S+:\d+)') { $Matches[1] }
+                if ($_ -match '^\S+\s+_adb-tls-connect\._tcp\.?\s+(\S+:\d+)' -and (Discoverable $Matches[1])) { $Matches[1] }
             }) | Select-Object -First 1
         }
     }
