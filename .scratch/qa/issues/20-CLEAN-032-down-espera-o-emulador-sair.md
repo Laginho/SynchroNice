@@ -1,5 +1,5 @@
 # CLEAN-032: `down` só termina depois de o processo do emulador sair
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -60,6 +60,9 @@ O caminho de processo impossível de matar não tem teste físico: sai erro com
 o PID, conferido por leitura como no CLEAN-026.
 
 ## Comments
+
+- Stage 2 (2026-10-04), leitura antes do vermelho: `down` é chamado pelo cleanup de falha de `qa/up.ps1` e pelos comandos de encerramento do kit. O novo caminho só alcança serial presente com AVD confirmado; serial ausente, AVD diferente, falhas do adb, estado ausente/inativo e restauração do PC continuam cobertos pelos 20 cenários existentes. Sem listener deve continuar sem espera de processo. O processo pode sair entre a captura e a espera; o handle mantém a identidade contra reutilização de PID.
+- Primeiro vermelho: `node --test --test-name-pattern='listener to exit naturally' qa/down.test.mjs` — 1 teste, 0 passou, 1 falhou porque `down` retornou com o listener próprio ainda vivo. Os cenários antigos agora recebem serial de porta livre, sem usar 5554.
 
 - Stage 3 do CLEAN-026 (2026-10-04): dois `down` seguidos saíram 0 com
   `stopped=true`; uma sonda de até 10 s depois do segundo ainda contou um
