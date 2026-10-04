@@ -126,3 +126,10 @@ stage 3 confere os critérios 1 e 2 por leitura, e o caminho feliz rodando
   entra no cleanup do launcher e dos filhos antes de devolver o erro.
   Sem teste novo, conforme a exceção aprovada no contrato. Gate e ciclo real
   no emulador serão registrados na resolução desta revisão.
+- A leitura final encontrou uma fronteira do critério 1 não capturada na
+  primeira passagem do eixo Spec desta retomada: `WaitForExit(10000)` pode
+  devolver falso, mas o processo sair antes do `catch`, que silenciava o
+  timeout. As três cópias de `Stop-AndWait` agora retêm a ocorrência do prazo
+  estourado e sempre devolvem o erro com PID nesse caso. A corrida de parada
+  de um processo que já encerrou continua sendo aceita. Correção pequena
+  nos Primary files, sem teste novo conforme a exceção do contrato.
