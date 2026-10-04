@@ -1,5 +1,5 @@
 # CLEAN-026: Processos do kit terminam de verdade antes do passo seguinte
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: CLEAN-020
 Review: agent
@@ -115,3 +115,14 @@ stage 3 confere os critérios 1 e 2 por leitura, e o caminho feliz rodando
     - Ensaio "PID ausente" que a tentativa não chegou a interpretar, reproduzido pelo proxy contra `f3436e6`: com `pc.pid` vazio, `Get-Content -Raw` devolve AutomationNull, e `$startedPid -notmatch '^\d+\s*$'` dá resultado vazio (falso), então o `throw 'Launcher do PC nao devolveu o PID'` nunca dispara. O `start` segue com `Get-Process -Id 0` (Idle), espera o CDP ~45 s e sai com `CDP indisponivel`. Por leitura: fora do isolado grava `pid=0` em `real-pc/state.json`, e um `pc.exe` tardio que abra o CDP nesses 45 s vira sucesso com `pid` 0. Toca o critério 2. Vem do SYN-025 (`a02363f`), não deste ticket, mas está em `qa/pc.ps1` (`start`), nos Primary files, e não pede teste novo pela exceção aprovada. Repro, sem `pc` aberto: `qa/pc.ps1 start -Isolated -Exe <arquivo de texto chamado pc.exe> -RunDir <diretório de rascunho> -Port <porta livre>`; hoje sai com código 1 em ~53 s e `CDP indisponivel`, o esperado é ~6 s e `Launcher do PC nao devolveu o PID`.
     - Gate completo uma vez, em primeiro plano, depois da última correção; um ciclo `up`/`down` no emulador no fim. Commite antes de qualquer espera longa.
     - A duplicação do `Stop-AndWait` já está no CLEAN-030; não abra outro ticket para ela.
+
+#### Stage 3 — retomada e correção pequena (2026-10-04)
+
+- O ensaio com um arquivo de texto chamado `pc.exe`, sem instância real
+  aberta, confirmou o achado do proxy: `pc.pid` vazio seguia até
+  `infraestrutura: CDP indisponivel`, em vez do erro do prazo do PID.
+- Correção em `qa/pc.ps1 start`: a leitura do PID é normalizada para string
+  e somente um inteiro positivo passa pela validação. Ausência de PID agora
+  entra no cleanup do launcher e dos filhos antes de devolver o erro.
+  Sem teste novo, conforme a exceção aprovada no contrato. Gate e ciclo real
+  no emulador serão registrados na resolução desta revisão.

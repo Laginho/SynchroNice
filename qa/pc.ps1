@@ -207,11 +207,11 @@ try {
             $launcher = $launcherCandidate
             [IO.File]::WriteAllText($launchPermit, '')
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
-                $startedPid = Get-Content -LiteralPath $pidFile -Raw
-                if ($startedPid -match '^\d+\s*$') { break }
+                $startedPid = [string](Get-Content -LiteralPath $pidFile -Raw)
+                if ($startedPid -match '^[1-9]\d*\s*$') { break }
                 Start-Sleep -Milliseconds 200
             }
-            if ($startedPid -notmatch '^\d+\s*$') { throw 'Launcher do PC nao devolveu o PID' }
+            if (-not ($startedPid -match '^[1-9]\d*\s*$')) { throw 'Launcher do PC nao devolveu o PID' }
             if (-not $Isolated) {
                 $realStatePath = "$PSScriptRoot/../.scratch/qa-runs/real-pc/state.json"
                 New-Item -ItemType Directory -Force -Path (Split-Path $realStatePath) | Out-Null
