@@ -1,5 +1,5 @@
 # CLEAN-024: O PC real volta ao normal depois do pós-run no Redmi
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: SYN-030, CLEAN-020
 Review: agent
@@ -102,3 +102,73 @@ não isolado, porque ele mata todo `pc`, inclusive o PC real do humano.
   ao redirecionar stderr nativo como `NativeCommandError`; o gate interno
   concluiu todos os passos e registrou sucesso. Diff final revisado, restrito
   aos Primary files e ao ticket; nenhum teste alterado no commit de código.
+
+#### Resolution (2026-10-04)
+
+Verdict: Approve
+
+- Revisão contra `6593287c2dbf7a4a4c936d52828351ddeb9773e5`, base da sessão
+  `sweatshop/2026-10-03-1608`. Rebase atualizado e integração sem squash no
+  merge `bde863a`. A revisão corrigiu somente a ordem dos comentários do
+  ticket e acrescentou evidências; nenhuma correção de produção ou testes.
+- Arquivos: `qa/pc.ps1`, `qa/down.ps1`, `qa/down.test.mjs` e
+  `docs/agents/qa.md`, mais ticket, relatório, ledger e achados para triagem.
+  O build Tauri alterou apenas os finais de linha de `Cargo.toml`; essa
+  alteração gerada foi desfeita antes da integração.
+
+##### Standards
+
+Nenhum bloqueio de código, escopo ou test-first. `7269ebf` contém os testes;
+`886b7e0` não altera testes; `96ffc9e` registra o gate verde e o handoff.
+Quatro notas processuais estão detalhadas no relatório: corpos ausentes nos
+commits, handoff em commit separado do último código, runner direto na prova
+red do stage 2 e ordem dos comentários. A última foi corrigida em `5f3f1e9`.
+Há uma observação de nome (`noOp` no harness), sem efeito funcional.
+
+##### Spec
+
+Zero falhas dos critérios numerados, zero escopo extra.
+
+1. ✅ Start não isolado grava PID e exe em estado fixo independente do RunDir,
+   antes da espera pelo CDP; conferido por leitura, conforme o contrato.
+2. ✅ Sem emulador ativo, processo correspondente é encerrado e o mesmo exe
+   relançado com ambiente sem isolamento/CDP; registro consumido. Testes
+   confirmam novo PID, uma única trace e repetição sem duplicação.
+3. ✅ PID morto ou exe divergente não provoca parada nem relançamento;
+   registro consumido e processos não correspondentes preservados.
+4. ✅ Sem registro, os nove cenários anteriores passam, incluindo os quatro
+   erros do emulador, casos ausente/inativo e repetição. O kit real também
+   encerrou PC isolado e emulador, com repetição bem-sucedida.
+5. ✅ Documentação descreve a devolução do PC real ao normal no fim do
+   pós-run no Redmi, inclusive sem emulador ativo.
+
+- Chamadores, falhas e interações examinados: rollback de `qa/up.ps1`,
+  pós-run e uso direto documentados, start isolado/não isolado, falha do
+  launcher/CDP, estado ausente/inativo/ativo, PID morto/exe divergente,
+  ambiente, repetição, erros de adb/AVD/kill/timeout e autostart do SYN-030.
+  Concorrência e corrupção de estado não foram exercitadas. Start não
+  isolado foi revisado por leitura para preservar o PC do usuário.
+- Red repetido nesta revisão com produção da base: saída 1, 15 testes,
+  9 passaram e 6 falharam (cinco casos novos e o pai). Falhas pela falta de
+  restauração ou de consumo do registro. Green pelo gate completo em
+  primeiro plano: saída 0, `gate: passou`, Rust 83/83, interface 61/61 e
+  QA 78/78, incluindo 15/15 do `down`. Fmt, Clippy e TypeScript passaram;
+  Gradle `check` com `BUILD SUCCESSFUL`, testes Android em cache.
+- [QA e revisão completa](../../qa-runs/2026-10-04-emulator-CLEAN-024-review.md):
+  `up -Sdk D:/AppData/Local/Android/Sdk` saiu 0 com presença confirmada;
+  `presence` retornou 200. `down` e repetição saíram 0; PID isolado
+  encerrado, emulador desconectado e `active: false`. O PC real estava
+  fechado; a restauração foi comprovada pelos executáveis Windows
+  temporários previstos na costura. Nenhum débito humano novo.
+- Dois requisitos adicionais, reproduzidos com cmdlets simulados, seguem
+  para triagem: [CLEAN-028](16-CLEAN-028-down-recupera-falha-na-restauracao.md)
+  (retomada após falha de WMI) e
+  [CLEAN-029](17-CLEAN-029-down-preserva-exe-real-de-debug.md)
+  (registro de exe debug com emulador ativo). O primeiro precisa distinguir
+  restauração pendente do PID morto que o critério 3 manda ignorar; o
+  segundo amplia a situação da prosa que o critério 2 não inclui e mantém
+  o mesmo encerramento do debug da rotina anterior. Não reabrem os critérios
+  deste ticket.
+- Totais: Standards 4 notas processuais, 1 observação de nome, 0 bloqueios;
+  Spec 0 falhas dos critérios e 2 observações para triagem. `Stage: done`,
+  Resolution e ledger registrados juntos na sessão.
