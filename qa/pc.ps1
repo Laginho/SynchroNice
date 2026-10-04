@@ -34,6 +34,8 @@ function Stop-AndWait {
 }
 $launch = $null
 $launcher = $null
+$launcherCandidate = $null
+$launchPermit = $null
 if ($Action -in 'list-files','track','clean' -and -not $RunDir) {
     [Console]::Error.WriteLine('Informe -RunDir compartilhado por toda a execucao de QA'); exit 1
 }
@@ -172,7 +174,12 @@ try {
             # A WMI launcher avoids inheriting the caller's native pipes: start must return while the app lives.
             $pidFile = Join-Path $RunDir 'pc.pid'
             [IO.File]::WriteAllText($pidFile, '')
-            $launchScript = '$p = Start-Process -WindowStyle Hidden -PassThru -FilePath ' +
+            # Do not create a child until the caller has pinned and identified this launcher.
+            $launchPermit = Join-Path $RunDir ('pc-launch-' + [guid]::NewGuid().ToString('N') + '.permit')
+            $launchScript = '$deadline = [DateTime]::UtcNow.AddSeconds(15); while (-not (Test-Path -LiteralPath ' +
+                "'" + $launchPermit.Replace("'", "''") + "'" +
+                ')) { if ([DateTime]::UtcNow -ge $deadline) { exit 1 }; Start-Sleep -Milliseconds 50 }; ' +
+                '$p = Start-Process -WindowStyle Hidden -PassThru -FilePath ' +
                 "'" + $resolvedExe.Replace("'", "''") + "' -WorkingDirectory '" + (Split-Path $resolvedExe).Replace("'", "''") +
                 "' -RedirectStandardError '" + "$RunDir/pc.stderr.log".Replace("'", "''") +
                 "' -RedirectStandardOutput '" + "$RunDir/pc.stdout.log".Replace("'", "''") +
@@ -183,13 +190,22 @@ try {
                 EnvironmentVariables=[string[]]@([Environment]::GetEnvironmentVariables().GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
             }
             $launchRequestedAt = Get-Date
+            $launcherCommandLine = "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
             $launch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-                CommandLine="powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
+                CommandLine=$launcherCommandLine
                 ProcessStartupInformation=$startup
             }
             if ($launch.ReturnValue -ne 0) { throw "Nao foi possivel abrir o PC: WMI $($launch.ReturnValue)" }
-            $launcher = Get-Process -Id $launch.ProcessId -ErrorAction SilentlyContinue
-            if ($launcher -and $launcher.StartTime -lt $launchRequestedAt) { $launcher = $null }
+            $launcherCandidate = Get-Process -Id $launch.ProcessId -ErrorAction SilentlyContinue
+            if (-not $launcherCandidate) { throw "infraestrutura: launcher PID $($launch.ProcessId) terminou antes da autorizacao" }
+            $null = $launcherCandidate.Handle
+            $launcherInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($launch.ProcessId)"
+            if ($launcherCandidate.HasExited -or $launcherCandidate.StartTime -lt $launchRequestedAt -or
+                $launcherInfo.CommandLine -cne $launcherCommandLine) {
+                throw "infraestrutura: identidade do launcher PID $($launch.ProcessId) nao confirmada"
+            }
+            $launcher = $launcherCandidate
+            [IO.File]::WriteAllText($launchPermit, '')
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
                 $startedPid = Get-Content -LiteralPath $pidFile -Raw
                 if ($startedPid -match '^\d+\s*$') { break }
@@ -207,6 +223,7 @@ try {
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previous
             $env:SYNCHRONICE_DATA_DIR = $previousData
             $env:WEBVIEW2_USER_DATA_FOLDER = $previousProfile
+            if ($launchPermit) { Remove-Item -LiteralPath $launchPermit -ErrorAction SilentlyContinue }
         }
         $ready = $false
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -228,19 +245,34 @@ try {
 } catch {
     $failure = $_.Exception.Message
     try {
-        if ($Action -eq 'start' -and $launch -and $launch.ReturnValue -eq 0) {
-            if ($launcher) { $launcher | Stop-AndWait }
+        if ($Action -eq 'start' -and $launcher) {
+            $launcher | Stop-AndWait
+            $launcherExitedAt = $launcher.ExitTime
             # Enumerate only AFTER the launcher exits: it can no longer spawn a late child.
-            # Creation time and executable exclude unrelated children of a reused parent PID.
-            Get-CimInstance Win32_Process -Filter "ParentProcessId = $($launch.ProcessId)" |
-                Where-Object { $_.ExecutablePath -eq $resolvedExe -and $_.CreationDate -ge $launchRequestedAt } |
+            # Its retained handle reserves the parent PID until cleanup finishes.
+            Get-CimInstance Win32_Process -Filter "ParentProcessId = $($launcher.Id)" |
+                Where-Object { $_.ExecutablePath -eq $resolvedExe -and $_.CreationDate -ge $launchRequestedAt -and $_.CreationDate -le $launcherExitedAt } |
                 ForEach-Object {
                     $child = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
-                    if ($child -and $child.Path -eq $resolvedExe -and $child.StartTime -ge $launchRequestedAt) {
-                        $child | Stop-AndWait
+                    if ($child) {
+                        try {
+                            $null = $child.Handle
+                            if ($child.Path -eq $resolvedExe -and $child.StartTime -ge $launchRequestedAt -and $child.StartTime -le $launcherExitedAt) {
+                                $child | Stop-AndWait
+                            }
+                        } catch {
+                            if (-not $child.HasExited) { throw "infraestrutura: PID $($child.Id): $($_.Exception.Message)" }
+                        } finally { $child.Dispose() }
                     }
                 }
+        } elseif ($Action -eq 'start' -and $launcherCandidate) {
+            # An unverified candidate must not be killed. Our launcher exits without a permit.
+            if (-not $launcherCandidate.WaitForExit(20000)) {
+                throw "infraestrutura: PID $($launcherCandidate.Id): launcher sem autorizacao nao encerrou em 20 segundos"
+            }
         }
     } catch { $failure += "; limpeza falhou: $($_.Exception.Message)" }
     [Console]::Error.WriteLine($failure); exit 1
+} finally {
+    if ($launcherCandidate) { $launcherCandidate.Dispose() }
 }
