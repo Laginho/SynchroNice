@@ -1,5 +1,5 @@
 # CLEAN-019: Destino relatado pela limpeza é o destino real (celular e PC)
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -223,3 +223,50 @@ Verdict: Reopen — critério 7: atalho reciclado é relatado como remoção per
   Android `check` passou (testes UP-TO-DATE). Diff final limitado aos dois
   Primary files do PC e ao ticket, sem alteração dos critérios ou do celular.
   Stage 2 encerra em to-review; re-review independente ainda pendente.
+
+#### Resolution (2026-10-03)
+
+Verdict: Approve
+
+- Re-review limitada ao ❌ do critério 7 e ao diff desde 2c3bb37.
+  Standards: zero violações documentadas e zero smells acionáveis.
+  Spec: zero achados; nenhum requisito parcial ou ampliação de escopo.
+  As duas revisões foram realizadas por subagentes independentes.
+- ✅ Critério 7: `System.FileName` conserva `.lnk` e a confirmação mantém
+  entrada nova, caminho original completo e SHA-256. O teste usa um atalho
+  Windows real, chama track/clean e preserva seu alvo. Prova nativa na Pasta
+  isolada encontrou `.txt` e `.lnk` na Lixeira com os hashes registrados;
+  `ItemNameDisplay` omitiu `.lnk`, mas `FileName` devolveu o nome completo.
+- ✅ Critério 8 preservado: o teste subst apagou a fixture e relatou
+  `remocao permanente`, tanto no red quanto no green. Critérios 1–6
+  mantidos: todos os sete cenários de limpeza do celular passaram no gate;
+  a evidência nativa da primeira revisão permanece válida para esses ramos
+  sem alterações. Nenhum critério ou Primary file foi renegociado.
+- Callers e falhas examinados nesta passagem: list-files/baseline, track,
+  clean, pc.mjs, guardas de Pasta/manifesto/hash/reparse point, ausência,
+  repetição, registro de cleanup e falha de exclusão. Android e limite de
+  cota da Lixeira não foram reexecutados nativamente; o código desses ramos
+  não mudou nesta correção. Nenhuma decisão nova de proxy e nenhum débito
+  humano: todos os passos novos exigidos pela reabertura foram verificados.
+- Red independente: testes atuais copiados sem alterações, wrapper de
+  produção de 614420c; 2 testes, 1 passou e 1 falhou no destino do `.lnk`,
+  exit 1. Green na branch corrigida: 2/2, exit 0, sem falhas ou skips.
+  Teste/código separados em 614420c/c7618dc; nenhum teste foi alterado pela
+  revisão. Repetir clean manteve os caminhos e destinos, com tracked vazio.
+- Gate completo em primeiro plano após rebase na sessão: exit 0,
+  `gate: passou`. Rust 83/83, UI 61/61, QA 34/34; formatação, Clippy e
+  typecheck passaram. Gradle check: BUILD SUCCESSFUL, testes UP-TO-DATE;
+  XMLs conferidos com app 94/94 e protocol-client 72/72, zero falhas,
+  erros ou skips. Log local: `2026-10-03-clean-019-rereview/gate.log`.
+- QA e destinos: [relatório da re-review](../../qa-runs/2026-10-03-emulator-CLEAN-019-rereview.md).
+  up compilou a branch, pareou e confirmou presença; down passou, com
+  active=false, zero portas do kit escutando e zero arquivos rastreados.
+  Nenhum arquivo anterior ou não registrado foi apagado. O build terminou
+  sem interrupção efetiva; a retentativa do SDK usou o caminho configurado
+  no projeto. A formatação do Cargo.toml reescrita pelo build foi restaurada.
+- Arquivos da correção: qa/pc.ps1 e qa/pc.test.mjs; evidências nos dois
+  relatórios de QA, neste ticket e no ledger. Diff final conferido, sem
+  alterações alheias ao ticket, segredos ou artefatos gerados committed.
+  Merge sem squash 5081871 na sessão sweatshop/2026-10-03-1608; Stage done
+  e ledger registrados no mesmo commit de encerramento. Sem PR ou push
+  nesta etapa; o merge do PR de sessão permanece com o humano.
