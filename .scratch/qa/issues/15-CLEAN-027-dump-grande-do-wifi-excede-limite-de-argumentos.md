@@ -1,5 +1,5 @@
 # CLEAN-027: Dump grande do Wi-Fi excede o limite de argumentos
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -54,21 +54,6 @@ aparelho:
 
 ## Comments
 
-- Stage 2 (2026-10-04): callers examinados: desligamento e `restore` no
-  script gerado, ambos via `wait_wifi`; consumo dos marcadores pelo wrapper
-  após reconectar. Casos cobertos: estado atrasado/desconhecido, recusa
-  silenciosa, erro de dumpsys, sinais INT/TERM e retries da restauração.
-- Vermelho no commit de testes `093aa7c`: execução focada do cenário de
-  estado (`node --test --test-name-pattern='wifi-off confirms'
-  qa/phone.test.mjs`) teve 13 subcenários passando e `large-dump` falhando
-  com `Argument list too long` (Node: 15 testes, 13 pass, 2 fail incluindo
-  o teste pai). `status-denied` manteve clock 0. O gate `-TestsOnly`
-  confirmou a mesma falha, mas também sofreu restrições do sandbox:
-  `Access denied` nos testes do PC e rede negada no Gradle.
-- Implementação: here-document entrega a variável de estado ao stdin do
-  `grep`; nenhum argumento grande nem arquivo temporário adicional.
-  A captura de `dumpsys` mantém o retorno imediato se o comando falhar.
-
 - Stage 3 do CLEAN-023 (2026-10-03): no AVD `SynchroNice_API37`, shell
   `/system/bin/sh` mksh R59, a CLI real chegou ao `svc wifi disable`, mas
   `printf '%s\n' "$state"` falhou com `Argument list too long`. O wrapper
@@ -86,3 +71,28 @@ aparelho:
   arquivos locais `2026-10-03-emulator-CLEAN-023-review/runtime/signal-TERM/cli.stderr.log`
   e `environment.log`. O Redmi não foi acionado.
 - Proxy decided: aceito (normal, Review: agent); wait_wifi nunca passa o dump como argumento, dumpsys com erro falha sem retentativa, vermelho comportamental no harness (printf embutido desligado e printf falso com limite de 128 KiB por argumento) e wifi-off real no emulador como verificação — o bash do harness tem printf embutido, então só emulando o mksh do aparelho o teste reproduz o defeito; checagem estática do script testaria a forma, não o comportamento.
+
+- Stage 2 (2026-10-04): callers examinados: desligamento e `restore` no
+  script gerado, ambos via `wait_wifi`; consumo dos marcadores pelo wrapper
+  após reconectar. Casos cobertos: estado atrasado/desconhecido, recusa
+  silenciosa, erro de dumpsys, sinais INT/TERM e retries da restauração.
+- Vermelho no commit de testes `093aa7c`: execução focada do cenário de
+  estado (`node --test --test-name-pattern='wifi-off confirms'
+  qa/phone.test.mjs`) teve 13 subcenários passando e `large-dump` falhando
+  com `Argument list too long` (Node: 15 testes, 13 pass, 2 fail incluindo
+  o teste pai). `status-denied` manteve clock 0. O gate `-TestsOnly`
+  confirmou a mesma falha, mas também sofreu restrições do sandbox:
+  `Access denied` nos testes do PC e rede negada no Gradle.
+- Implementação (`0d8cb54`): here-document entrega a variável de estado ao
+  stdin do `grep`; nenhum argumento grande nem arquivo temporário adicional.
+  A captura de `dumpsys` mantém o retorno imediato se o comando falhar.
+- Verde: `powershell -ExecutionPolicy Bypass -File .\gate.ps1`, fora do
+  sandbox, saiu 0 com `gate: passou`: fmt, clippy, typecheck, 83 testes Rust,
+  61 testes da UI e 96 testes do kit QA passaram; `large-dump` e os 13
+  subcenários anteriores passaram, incluindo clock 0 em `status-denied`.
+  Android `check`: `BUILD SUCCESSFUL in 21s`, testes UP-TO-DATE; os relatórios
+  existentes registram 166 testes, sem falhas nem erros. As falhas de acesso
+  do sandbox desapareceram nesta rodada.
+- Handoff: testes e produção em commits separados; diff limitado aos Primary
+  files e ao ticket, `git diff --check` limpo. Critério 4 fica para o stage 3
+  no `SynchroNice_API37`; stage 2 não iniciou o kit real, conforme a spec.
