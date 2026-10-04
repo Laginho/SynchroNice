@@ -1,5 +1,5 @@
 # CLEAN-023: `wifi-off` sempre restaura o Wi-Fi
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -64,6 +64,17 @@ git-bash com `svc`, `dumpsys` e `sleep` falsos:
   Red: `node --test --test-name-pattern='wifi-off confirms' qa/phone.test.mjs`
   teve 9 passes e 5 falhas (quatro cenários novos + o teste pai): TERM saiu
   com 3840, INT com 0; os dois cenários de retry fizeram só uma tentativa.
+- Green: o mesmo comando passou 14/14 (13 cenários + pai). INT e TERM
+  encerram com código 1 e restauram exatamente uma vez; enable transitório
+  confirma na terceira chamada; falha permanente faz cinco chamadas, sem
+  marcador de restauração e com erro reportado pelo PC. Os nove cenários
+  anteriores permanecem verdes.
+- Gate completo: `powershell -ExecutionPolicy Bypass -File .\gate.ps1`,
+  exit 0, `gate: passou`: fmt, clippy, 83 testes Rust, typecheck, 61 testes
+  da UI e 73 testes QA passaram; Gradle check BUILD SUCCESSFUL (41 tarefas,
+  1 executada, 40 up-to-date). Diff revisado: só Primary files e este ticket;
+  testes em commits separados da implementação. Sem teste em aparelho real
+  neste stage 2; a evidência de sinais usa Git Bash e comandos Android falsos.
 
 - O script no aparelho em `qa/phone.ps1:225-229` só faz `trap restore EXIT`,
   e o `svc wifi enable` é tentado uma vez. Um TERM/INT/HUP, ou um enable que
