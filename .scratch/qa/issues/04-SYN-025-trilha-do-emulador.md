@@ -183,3 +183,14 @@ Verdict: Approve
   `.scratch/qa-runs/syn-025-review/gate.log`.
 - Relatório e evidências:
   [QA da revisão](../../qa-runs/2026-10-01-025-review.md).
+
+#### Observação do QA CLEAN-026 (2026-10-04)
+
+- Os dois `down` devolveram sucesso e o adb já estava encerrado, mas a
+  conferência adicional de processos até 10 s ainda encontrou um auxiliar
+  nativo do emulador saindo. A leitura subsequente confirmou zero PC,
+  qemu/emulator, dispositivos adb e listeners 5554/5555. A espera adb deste
+  ticket permaneceu inalterada pelo CLEAN-026; a observação é preexistente,
+  sem regressão neste diff, e fica aqui para eventual triagem da espera pelo
+  encerramento nativo. Evidência e limites:
+  [QA CLEAN-026](../../qa-runs/2026-10-04-emulator-CLEAN-026-review.md).

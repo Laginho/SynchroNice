@@ -1,5 +1,5 @@
 # CLEAN-026: Processos do kit terminam de verdade antes do passo seguinte
-Stage: reviewing
+Stage: done
 Status: ready-for-agent
 Blocked by: CLEAN-020
 Review: agent
@@ -139,3 +139,39 @@ stage 3 confere os critérios 1 e 2 por leitura, e o caminho feliz rodando
   casos e repropaga a falha de parada, com o PID, enquanto mantém a tolerância
   ao filho que encerrou durante a captura da identidade. Esta segunda camada
   também não havia sido capturada no primeiro fechamento do eixo Spec.
+
+#### Resolution (2026-10-04)
+
+Verdict: Approve
+
+- Critérios 1–3: ✅. Revisão independente dos eixos Standards e Spec sobre
+  a branch inteira, incluindo a correção da tentativa interrompida.
+  Standards: 0 violações e 1 heurística já acompanhada no CLEAN-030.
+  Spec: 3 achados corrigidos, 0 pendentes. A tolerância a processos já
+  encerrados foi preservada; timeout confirmado sempre mantém o erro com PID.
+- Arquivos de comportamento: `qa/up.ps1`, `qa/down.ps1` e `qa/pc.ps1 start`.
+  Correções desta retomada: `aeb080f` (PID vazio), `5ce2e13` (timeout no
+  helper) e `0a91d4b` (propagação no catch do filho). Nenhum teste foi
+  alterado por commits de código; a exceção aprovada dispensa novo teste/red.
+- Prova: antes do fix, PID ausente seguia até `CDP indisponivel`; na versão
+  final, erro correto do PID em 7,33 s. Falha de CDP após receber o PID em
+  46,59 s. Ambos os ensaios terminaram com zero filhos e launchers vivos.
+- Gate final, em primeiro plano, sobre `0a91d4b`: exit 0; Rust 83, UI 61,
+  kit 88 (14 cenários de down), fmt, Clippy e typecheck aprovados. Android
+  `check`: BUILD SUCCESSFUL, testes UP-TO-DATE.
+- QA final real: up e dois down com exit 0, presença 200, `list_items=[]`,
+  estado inativo e conferência final com zero PC/emuladores e adb vazio.
+  Relatório: [QA CLEAN-026](../../qa-runs/2026-10-04-emulator-CLEAN-026-review.md).
+  Ele registra também a junction do SDK contornada por `-Sdk` e a saída
+  assíncrona preexistente do auxiliar do emulador, observada fora dos pontos
+  Stop-Process deste ticket; a observação foi anotada no SYN-025.
+- Limites aprovados: processo resistente, reutilização de PID e corrida de
+  saída após timeout conferidos por leitura, sem reprodução física.
+  Chamadores, falhas e interações examinados estão no relatório; não há
+  critério de UI sem verificar nem novo débito humano.
+- Decisão preexistente do proxy de 2026-10-04 revisada: retomada independente
+  com gate/QA novos e recuperação do CLEAN-030. Foi seguida; nenhum requisito
+  do contrato foi renegociado nesta retomada.
+- Rebase sobre a sessão concluído, preservando as notas de revisão e de
+  recuperação. Merge sem squash em `89b13cf`; ledger e `Stage: done`
+  registrados juntos nesta resolução.
