@@ -176,6 +176,12 @@ try {
                 Start-Sleep -Milliseconds 200
             }
             if ($startedPid -notmatch '^\d+\s*$') { throw 'Launcher do PC nao devolveu o PID' }
+            if (-not $Isolated) {
+                $realStatePath = "$PSScriptRoot/../.scratch/qa-runs/real-pc/state.json"
+                New-Item -ItemType Directory -Force -Path (Split-Path $realStatePath) | Out-Null
+                @{ pid=[int]$startedPid; exe=$resolvedExe } | ConvertTo-Json |
+                    Set-Content -LiteralPath $realStatePath -Encoding UTF8
+            }
             $process = Get-Process -Id ([int]$startedPid)
         } finally {
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previous

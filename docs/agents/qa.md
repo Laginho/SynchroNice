@@ -48,7 +48,9 @@ Passos 👤 seguem a regra de débito acima.
 Limpe somente os arquivos rastreados pelo kit e inclua os destinos no
 relatório. Ao encerrar o run, inclusive após falha de infraestrutura ou
 "sem aparelho", rode `qa/down.ps1` com o `-RunDir` usado no emulador;
-o comando pode ser repetido.
+o comando pode ser repetido. Ele também devolve o PC real ao normal depois
+do pós-run no Redmi: relança o exe registrado sem CDP, isolamento ou
+redirecionamento de saída, mesmo sem emulador ativo.
 
 ## Emulador: PC isolado
 
@@ -228,6 +230,11 @@ e aguarda o CDP. `-Port` muda essa porta em **todas** as chamadas.
 A saída JSON informa PID e arquivo de stderr, dentro de `-RunDir`.
 Sem `-RunDir`, cria `.scratch/qa-runs/<data-hora>-redmi/`.
 Leia `pc.stderr.log` para diagnosticar falhas do app.
+O `start` não isolado registra PID e exe em
+`.scratch/qa-runs/real-pc/state.json`, independente de `-RunDir`, antes de
+aguardar o CDP. No fim, `down` só encerra e relança esse PID se o caminho do
+exe ainda corresponder; registro de processo morto ou diferente é apenas
+removido. `down -RealPcStatePath` permite injetar outro registro nos testes.
 
 | Ação | Exemplo de argumentos | Resultado |
 | --- | --- | --- |
