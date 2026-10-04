@@ -1,5 +1,5 @@
 # CLEAN-032: `down` só termina depois de o processo do emulador sair
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -61,13 +61,6 @@ o PID, conferido por leitura como no CLEAN-026.
 
 ## Comments
 
-- Stage 2 (2026-10-04), leitura antes do vermelho: `down` é chamado pelo cleanup de falha de `qa/up.ps1` e pelos comandos de encerramento do kit. O novo caminho só alcança serial presente com AVD confirmado; serial ausente, AVD diferente, falhas do adb, estado ausente/inativo e restauração do PC continuam cobertos pelos 20 cenários existentes. Sem listener deve continuar sem espera de processo. O processo pode sair entre a captura e a espera; o handle mantém a identidade contra reutilização de PID.
-- Primeiro vermelho: `node --test --test-name-pattern='listener to exit naturally' qa/down.test.mjs` — 1 teste, 0 passou, 1 falhou porque `down` retornou com o listener próprio ainda vivo. Os cenários antigos agora recebem serial de porta livre, sem usar 5554.
-- Primeiro verde: o mesmo teste, fora do sandbox (a consulta CIM de listeners é negada nele), passou: 1 teste, 1 passou, 0 falhou; o stub saiu espontaneamente após o `emu kill`.
-- Segundo vermelho: `node --test --test-name-pattern='forces the emulator listener' qa/down.test.mjs` — 1 teste, 0 passou, 1 falhou com timeout de infraestrutura após os 30 s, sem parada forçada. A correção aplica `Stop-AndWait` ao processo capturado; se falhar, seu erro inclui o PID e ocorre antes de limpar `state.active`.
-- Verde e gate completo (2026-10-04): `powershell -ExecutionPolicy Bypass -File .\gate.ps1` terminou com exit 0 e `gate: passou`. Rust: 83 passaram, 0 falharam; UI: 61 passaram, 0 falharam; QA: 98 passaram, 0 falharam (23 em `down.test.mjs`, incluindo os dois novos testes e os 20 cenários anteriores). Saída espontânea em 10,6 s; parada forçada em 32,0 s, com asserção dos 30 s completos desde `emu kill`. Fmt, clippy e typecheck passaram; `gradle check` terminou `BUILD SUCCESSFUL`, com os testes Android já atualizados (`UP-TO-DATE`).
-- Handoff: critério 5 (`up/down` reais pelo kit e ausência de qemu/listeners 5554/5555) permanece para o stage 3. O caminho de processo impossível de parar foi conferido por leitura, conforme previsto no contrato. Diff revisado e `git diff --check` sem erros; commits de código não tocam os testes.
-
 - Stage 3 do CLEAN-026 (2026-10-04): dois `down` seguidos saíram 0 com
   `stopped=true`; uma sonda de até 10 s depois do segundo ainda contou um
   processo `qemu-system-x86_64` ou `emulator` vivo (`survivingEmulator: 1`).
@@ -88,3 +81,11 @@ o PID, conferido por leitura como no CLEAN-026.
   e os locais `2026-10-04-clean-026-review/emulator-final/summary.json` e
   `post-shutdown.json`.
 - Proxy decided: aceito (normal, Review: agent, sem Blocked by); antes do emu kill o down guarda o dono do listener da porta do serial, espera até 30 s ele sair depois que o serial some do adb e senão aplica Stop-AndWait, e os testes nunca usam a 5554 — o critério 5 do SYN-025 pede down sem qemu e o up logo após o down é o uso do loop; reusa o Stop-AndWait existente, então não depende do CLEAN-030.
+
+- Stage 2 (2026-10-04), leitura antes do vermelho: `down` é chamado pelo cleanup de falha de `qa/up.ps1` e pelos comandos de encerramento do kit. O novo caminho só alcança serial presente com AVD confirmado; serial ausente, AVD diferente, falhas do adb, estado ausente/inativo e restauração do PC continuam cobertos pelos 20 cenários existentes. Sem listener deve continuar sem espera de processo. O processo pode sair entre a captura e a espera; o handle mantém a identidade contra reutilização de PID.
+- Primeiro vermelho: `node --test --test-name-pattern='listener to exit naturally' qa/down.test.mjs` — 1 teste, 0 passou, 1 falhou porque `down` retornou com o listener próprio ainda vivo. Os cenários antigos agora recebem serial de porta livre, sem usar 5554.
+- Primeiro verde: o mesmo teste, fora do sandbox (a consulta CIM de listeners é negada nele), passou: 1 teste, 1 passou, 0 falhou; o stub saiu espontaneamente após o `emu kill`.
+- Segundo vermelho: `node --test --test-name-pattern='forces the emulator listener' qa/down.test.mjs` — 1 teste, 0 passou, 1 falhou com timeout de infraestrutura após os 30 s, sem parada forçada. A correção aplica `Stop-AndWait` ao processo capturado; se falhar, seu erro inclui o PID e ocorre antes de limpar `state.active`.
+- Verde e gate completo (2026-10-04): `powershell -ExecutionPolicy Bypass -File .\gate.ps1` terminou com exit 0 e `gate: passou`. Rust: 83 passaram, 0 falharam; UI: 61 passaram, 0 falharam; QA: 98 passaram, 0 falharam (23 em `down.test.mjs`, incluindo os dois novos testes e os 20 cenários anteriores). Saída espontânea em 10,6 s; parada forçada em 32,0 s, com asserção dos 30 s completos desde `emu kill`. Fmt, clippy e typecheck passaram; `gradle check` terminou `BUILD SUCCESSFUL`, com os testes Android já atualizados (`UP-TO-DATE`).
+- Handoff: critério 5 (`up/down` reais pelo kit e ausência de qemu/listeners 5554/5555) permanece para o stage 3. O caminho de processo impossível de parar foi conferido por leitura, conforme previsto no contrato. Diff revisado e `git diff --check` sem erros; commits de código não tocam os testes.
+- Stage 3 (2026-10-04): corrigida a ordem dos comentários do stage 2 para acrescentá-los ao fim do histórico, conforme `docs/agents/issue-tracker.md`; nenhuma alteração de código ou dos critérios.
