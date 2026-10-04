@@ -1,5 +1,5 @@
 # CLEAN-025: Aspas em `type` e `tap -Value` do celular
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -56,6 +56,28 @@ camada nativa do PS 5.1. O `type` passa a escapar `"` para essa camada, como o
   um `input` falso que grava o argv (critério 3).
 
 ## Comments
+
+- Stage 2 (2026-10-04): callers examinados: o wrapper `tap` chama a CLI de
+  `dump.mjs`; `findNode` também é importado por `dump.test.mjs`. A CLI conserva
+  o argumento posicional existente e aceita JSON por stdin quando ele falta.
+  `type` reutiliza `Shell-Quote`, sem alterar os demais callers desse helper.
+  Seletores simples, espaços, apóstrofos e caracteres de shell foram cobertos.
+- Prova red/green: `88911fb` reproduz `elemento nao achado: text=say "hi"`
+  (texto simples passa); `d73bf86` deixa os 3 testes/subtestes verdes.
+  `c9c561a` reproduz o comando nativo `input text 'say%shi'`, perdendo aspas;
+  `497c3f0` deixa os 5 testes/subtestes de type verdes. Os dois grupos juntos:
+  8 passaram, 0 falharam. O fake de type passa o comando pela camada nativa
+  real do PS 5.1 para node e executa o resultado em git-bash com `input` falso.
+  Testes e produção estão em commits separados.
+- Gate completo: `powershell -ExecutionPolicy Bypass -File .\gate.ps1` passou
+  fora do sandbox: fmt, clippy, typecheck, 83 testes Rust, 61 testes da UI,
+  86 testes/subtestes QA e `gradle check` (testes Android UP-TO-DATE;
+  relatórios XML existentes somam 166 testes). A primeira execução no sandbox
+  falhou por Access denied nos testes do Windows e rede negada ao Gradle;
+  essas falhas desapareceram na execução sem sandbox. Logs locais em
+  `.scratch/qa-runs/CLEAN-025-stage2/gate.log` e `gate-sandbox.log`.
+  Diff final conferido: somente Primary files e este ticket; `git diff --check`
+  sem erros. QA com aparelho/emulador fica para o stage 3.
 
 - Itens pequenos achados na mesma revisão. A triagem pode dividir:
   - `qa/phone.ps1:317` (`type`) e `:307` (`tap -Value` para o node) não
