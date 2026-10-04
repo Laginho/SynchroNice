@@ -1,27 +1,49 @@
-# CLEAN-030: Avaliar helper compartilhado de parada com espera no kit
-Status: needs-triage
+# CLEAN-030: Um só `Stop-AndWait` para os wrappers do kit
+Stage: to-implement
+Status: ready-for-agent
+Blocked by: none
+Review: agent
+Difficulty: normal
 Origin: eixo Standards do stage 3 de CLEAN-026, 2026-10-04
 
-## Contexto
+- Primary files:
+  - New: qa/process.ps1
+  - qa/up.ps1 (só a cópia de `Stop-AndWait` e o dot-source)
+  - qa/down.ps1 (idem)
+  - qa/pc.ps1 (idem)
+
+#### What to build
 
 `qa/up.ps1`, `qa/down.ps1` e `qa/pc.ps1` definem cópias idênticas de
 `Stop-AndWait`: retenção do handle, parada forçada, espera de 10 segundos e
-erro de infraestrutura com PID. Uma correção futura dessa política precisa
-ser aplicada nas três cópias.
+erro de infraestrutura com PID. Essa política já precisou de duas correções
+na revisão do CLEAN-026, e cada correção futura teria de ir às três cópias.
 
-O revisor registrou possível Duplicated Code como preocupação pequena e
-não bloqueante. CLEAN-026 cumpre seu contrato; extrair um helper acrescenta
-um arquivo e uma dependência entre wrappers que não pertencem à fronteira
-aprovada daquele ticket.
+Ela passa a viver em `qa/process.ps1`, que define só o `Stop-AndWait`; os
+três wrappers fazem `. "$PSScriptRoot/process.ps1"` e apagam a própria cópia.
+Mesmo prazo de 10 s, mesma mensagem `infraestrutura: PID <n>: ...`.
+`Save-State` e `Get-RecordedPc` ficam onde estão.
 
-## Proposta para triagem
+#### Acceptance criteria
 
-Decidir se a manutenção em um único lugar compensa essa dependência.
-Se aprovado, definir a fronteira e a verificação antes de implementar;
-preservar os prazos, os erros com PID e a execução direta dos wrappers.
-Este registro não autoriza implementação nem altera os critérios de CLEAN-026.
+1. `Stop-AndWait` é definido num único arquivo, carregado pelos três
+   wrappers.
+2. Cada wrapper continua rodando direto, de qualquer diretório de trabalho.
+3. As suítes do kit passam sem mudança.
+
+#### Verification
+
+    powershell -ExecutionPolicy Bypass -File .\gate.ps1
+
+## Tests stage 2 writes (own commit, red)
+
+Nenhum: refatoração pura, sem mudança de comportamento. As suítes atuais são
+a rede; o override de `Stop-Process` no `down.test.mjs` continua valendo
+porque o escopo do PowerShell é dinâmico. O critério 1 o revisor confere no
+diff.
 
 ## Comments
 
 - Registrado como acompanhamento de manutenção, sem defeito de comportamento
   identificado e sem impedir a aprovação de CLEAN-026.
+- Proxy decided: aceito como refatoração pequena (normal, Review: agent); Stop-AndWait num único qa/process.ps1 carregado por up/down/pc via $PSScriptRoot, mesmos prazos e erros, sem teste novo — os wrappers já se chamam por $PSScriptRoot, não há autocontenção a preservar, e a política já precisou de duas correções no CLEAN-026; teste de "não define cópia" seria de organização interna, que a spec exclui.
