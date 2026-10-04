@@ -133,3 +133,9 @@ stage 3 confere os critérios 1 e 2 por leitura, e o caminho feliz rodando
   estourado e sempre devolvem o erro com PID nesse caso. A corrida de parada
   de um processo que já encerrou continua sendo aceita. Correção pequena
   nos Primary files, sem teste novo conforme a exceção do contrato.
+- A propagação do mesmo erro foi conferida até o `catch` externo do start:
+  o `catch` de identidade do filho também não pode silenciar um erro de
+  parada já classificado por `Stop-AndWait`. `stoppingChild` separa os dois
+  casos e repropaga a falha de parada, com o PID, enquanto mantém a tolerância
+  ao filho que encerrou durante a captura da identidade. Esta segunda camada
+  também não havia sido capturada no primeiro fechamento do eixo Spec.

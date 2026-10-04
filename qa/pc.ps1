@@ -259,12 +259,15 @@ try {
                 ForEach-Object {
                     $child = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
                     if ($child) {
+                        $stoppingChild = $false
                         try {
                             $null = $child.Handle
                             if ($child.Path -eq $resolvedExe -and $child.StartTime -ge $launchRequestedAt -and $child.StartTime -le $launcherExitedAt) {
+                                $stoppingChild = $true
                                 $child | Stop-AndWait
                             }
                         } catch {
+                            if ($stoppingChild) { throw }
                             if (-not $child.HasExited) { throw "infraestrutura: PID $($child.Id): $($_.Exception.Message)" }
                         } finally { $child.Dispose() }
                     }
