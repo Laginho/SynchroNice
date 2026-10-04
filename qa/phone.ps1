@@ -162,10 +162,10 @@ try {
         'track' {
             $prefix = '/storage/emulated/0/Download/SynchroNice/'
             if (-not $Path.StartsWith($prefix) -or $Path.Substring($prefix.Length) -match '[/\\\r\n]' -or
-                $Path.Substring($prefix.Length) -in '', '.', '..' -or @($fileState.baseline) -ccontains $Path) {
+                $Path.Substring($prefix.Length) -in '', '.', '..' -or @($fileState.baseline) -contains $Path) {
                 throw 'So registre arquivos novos desta execucao, diretamente em Download/SynchroNice'
             }
-            if (@($fileState.tracked.path) -cnotcontains $Path) {
+            if (@($fileState.tracked.path) -notcontains $Path) {
                 $fileState.tracked = @($fileState.tracked) + @{ path=$Path; hash=(Phone-Hash $Path) }
                 Save-Files
             }
@@ -273,7 +273,7 @@ sleep __SECONDS__
             foreach ($entry in @($fileState.tracked)) {
                 $remote = $entry.path
                 if ($remote -notmatch '^/storage/emulated/0/(Pictures/SynchroNiceQA|Download/SynchroNice)/[^/\\\r\n]+$' -or
-                    [IO.Path]::GetFileName($remote) -in '.', '..' -or @($fileState.baseline) -ccontains $remote) {
+                    [IO.Path]::GetFileName($remote) -in '.', '..' -or @($fileState.baseline) -contains $remote) {
                     throw 'Manifesto inseguro: arquivo fora da lista de QA'
                 }
                 $quoted = Shell-Quote $remote
@@ -311,7 +311,7 @@ sleep __SECONDS__
                     }
                 }
                 $fileState.cleanup = @($fileState.cleanup) + @{ path=$remote; destination=$destination }
-                $fileState.tracked = @($fileState.tracked | Where-Object { $_.path -cne $remote })
+                $fileState.tracked = @($fileState.tracked | Where-Object { $_.path -ne $remote })
                 Save-Files
             }
             ConvertTo-Json -InputObject @($fileState.cleanup) -Depth 10
