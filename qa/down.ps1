@@ -137,7 +137,7 @@ try {
             }
             if ($devices -match ('^' + [regex]::Escape($state.serial) + '\s+')) { throw 'Emulador nao encerrou' }
             if ($emulatorProcess -and -not $emulatorProcess.HasExited -and -not $emulatorProcess.WaitForExit(30000)) {
-                throw "infraestrutura: PID $($emulatorProcess.Id): nao encerrou em 30 segundos"
+                $emulatorProcess | Stop-AndWait
             }
         }
     }
