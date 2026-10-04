@@ -1,5 +1,5 @@
 # CLEAN-026: Processos do kit terminam de verdade antes do passo seguinte
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: CLEAN-020
 Review: agent
@@ -68,3 +68,5 @@ stage 3 confere os critérios 1 e 2 por leitura, e o caminho feliz rodando
   (Q9). `Difficulty: hard` pela parte (c), que é concorrente: quem conserta
   sem cuidado troca uma corrida por outra. Fica bloqueado pelo CLEAN-020
   porque os dois mexem nas mesmas linhas do `down.ps1`.
+
+- 2026-10-04 Stage stopped (incomplete handoff): Stage left uncommitted work; saved for recovery. See D:\Desktop\Projects\SynchroNice\.scratch\run-log\CLEAN-026-review-20261004-022744.txt.runtime.json and run-log/recovery.txt; inspect the saved work before retrying.
