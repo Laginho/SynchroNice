@@ -33,7 +33,7 @@ de erro do PC, além dos cenários com comandos falsos.
 ## Spec
 
 Zero achados no contrato. Os critérios 1–4 foram exercitados no Android;
-o critério 5 aguarda a execução final do gate neste checkpoint.
+o critério 5 foi confirmado no gate completo.
 
 | Critério | Veredito | Evidência em texto |
 | --- | --- | --- |
@@ -41,6 +41,7 @@ o critério 5 aguarda a execução final do gate neste checkpoint.
 | 2 — INT durante sleep | ✅ | Mesmo lançamento assíncrono e trace `sleep 6 -> exit 1 -> restore`. Um enable e um marcador; sinal enviado com sucesso, CLI exit 0. |
 | 3 — duas falhas e sucesso | ✅ | Wrapper do `svc` falhou nas chamadas 1/2 e delegou a terceira ao comando real. Três enables, estado real confirmado como enabled, um marcador e CLI exit 0. |
 | 4 — cinco falhas | ✅ | Cinco enables recusados pelo wrapper, sem `QA_WIFI_RESTORED`; CLI exit 1 com `Wi-Fi nao confirmou desligar e restaurar: QA_WIFI_DISABLED`. Wi-Fi reativado pelo comando real ao terminar a verificação. |
+| 5 — cenários anteriores | ✅ | No gate, os nove cenários anteriores passaram: delayed, stuck-disabling, disable-refused, restore-refused, status-denied, dump-denied, unknown, success e log-pending. O teste completo passou 14/14: 13 cenários e o pai. |
 
 O probe usa o wrapper de produção `phone.ps1 wifi-off -Seconds 6`, adb real
 e o script gerado sem mudanças. Uma ponte local conta/delega `svc`, marca o
@@ -62,7 +63,16 @@ Prova independente red: cópia dos testes atuais contra o wrapper da base
 `168ffb9`, em diretório local isolado, falhou pelos quatro cenários novos:
 TERM, INT, enable-retry e enable-failed. Resultado 9/14 passados, 5/14 falhos
 (quatro cenários e o pai), exit 1. Os nove cenários anteriores passaram.
-Green e gate de stage 3 pendentes neste checkpoint.
+Green: os testes atuais passaram no gate, incluindo 14/14 no teste focado,
+com os quatro cenários novos e os nove anteriores. Os testes chamam a CLI
+e o script gerado de produção.
+
+Gate de encerramento em 2026-10-04, em primeiro plano:
+`powershell -ExecutionPolicy Bypass -File .\gate.ps1`, exit 0, `gate: passou`.
+Formatação Rust, Clippy e TypeScript passaram; Rust 83/83, interface 61/61 e
+QA 73/73, sem falhas ou skips. Android: `BUILD SUCCESSFUL`, 41 tarefas,
+uma executada e 40 up-to-date, incluindo testes reutilizados pelo Gradle.
+Log local: `2026-10-03-emulator-CLEAN-023-review/gate.log`.
 
 Callers/interações examinados: launcher assíncrono e sinais durante sleep,
 EXIT/restore, confirmação das duas transições, negativas e estados
@@ -87,3 +97,7 @@ reativado pelo comando real. `down` com o mesmo SDK/RunDir saiu 0,
 encerrados. O PC real não estava aberto antes do primeiro `up`. Evidências
 isoladas ficaram preservadas. A conversão de finais de linha de
 `Cargo.toml` gerada pelo build foi revertida após conferir diff sem conteúdo.
+
+Standards: 3 desvios de registro de baixo impacto, com cronologia corrigida;
+Spec: 0 achados. Revisão aprovada; merge local da branch do ticket na sessão
+`sweatshop/2026-10-03-1608`: `3bfba74`.
