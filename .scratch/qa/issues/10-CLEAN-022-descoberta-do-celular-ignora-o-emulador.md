@@ -1,5 +1,5 @@
 # CLEAN-022: Descoberta automática do celular ignora o emulador
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -49,6 +49,14 @@ O fake grava o `-s <serial>` das chamadas seguintes para o critério 2.
 Os casos são os critérios 1 a 3.
 
 ## Comments
+
+- Stage 2 (2026-10-03): seam exercitada pelo wrapper real com adb falso.
+  Chamadores examinados: descoberta via devices e mDNS, validação do serial
+  explícito, qa/up.ps1 e testes existentes com loopback explícito. Cobertura
+  inclui ausência de aparelho, 127.0.0.0/8, localhost, IPv6, mistura com
+  celular real, USB/emulator/offline e nome de serviço sem fio.
+  Red: 10 cenários, 7 falham por selecionar loopback; 3 controles passam
+  (Node conta também o teste pai: 11 testes, 3 passam, 8 falham).
 
 - `Wireless` em `qa/phone.ps1:26` aceita qualquer `host:porta`, e com isso
   também o `127.0.0.1:5555` que o `qa/up.ps1:87` conecta. Se o `down` falhou
