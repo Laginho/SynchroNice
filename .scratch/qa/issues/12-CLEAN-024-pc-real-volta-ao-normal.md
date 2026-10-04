@@ -39,12 +39,15 @@ O conserto:
 
 1. Depois de `pc.ps1 start` sem `-Isolated`, o arquivo de estado existe com o
    PID e o exe abertos.
-2. `down.ps1`, sem `emulator.json` ativo e com esse registro apontando para um
+2. `down.ps1`, com ou sem `emulator.json` ativo e com esse registro apontando para um
    processo vivo, mata o processo e relança o mesmo exe sem
    `--remote-debugging-port` e sem `SYNCHRONICE_DATA_DIR`, e apaga o
-   registro.
+   registro. O exe real restaurado também fica preservado quando é o debug
+   (CLEAN-029).
 3. Com o registro apontando para um processo que já morreu, ou para outro
-   exe, o `down` não mata nem lança nada, e apaga o registro.
+   exe, o `down` não mata nem lança nada, e apaga o registro. Isso vale para
+   um registro sem restauração pendente: uma intenção já iniciada pelo kit
+   sobrevive à falha de relançamento e pode ser retomada (CLEAN-028).
 4. Sem registro, o `down` se comporta como hoje.
 5. `docs/agents/qa.md` diz que o `down` do fim do run também devolve o PC
    real ao normal depois do pós-run no Redmi.
