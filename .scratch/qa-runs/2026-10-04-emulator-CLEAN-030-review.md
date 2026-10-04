@@ -91,5 +91,7 @@ permanecem locais. A conversão de finais de linha de `Cargo.toml` pelo build
 foi revertida para os bytes salvos antes do up, após confirmar conteúdo
 idêntico. Nenhum artefato gerado integra a revisão.
 
+Integração local na sessão `sweatshop/2026-10-04-1210`: merge `f8b3169`.
+
 Standards: 1 desvio leve de processo, 0 achados de código e 0 smells.
 Spec: 0 achados. Revisão aprovada.
