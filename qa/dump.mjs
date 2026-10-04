@@ -14,8 +14,8 @@ export function findNode(xml, kind, value) {
   if (!attribute) throw new Error('Use id, text or description');
   // ponytail: only uiautomator node attributes; use an XML library if other XML is needed.
   for (const node of xml.matchAll(/<node\b[^>]*>/g)) {
-    const attrs = Object.fromEntries([...node[0].matchAll(/([\w-]+)="([^"]*)"/g)]
-      .map(([, name, text]) => [name, decode(text)]));
+    const attrs = Object.fromEntries([...node[0].matchAll(/([\w-]+)=(?:"([^"]*)"|'([^']*)')/g)]
+      .map(([, name, doubleQuoted, singleQuoted]) => [name, decode(doubleQuoted ?? singleQuoted)]));
     if (attrs[attribute] !== value) continue;
     const bounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(attrs.bounds);
     if (!bounds) continue;
