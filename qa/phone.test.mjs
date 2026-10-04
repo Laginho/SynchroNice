@@ -4,6 +4,103 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+
+test('phone paths ignore case when protecting, tracking and cleaning files', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-021-phone-'));
+  const prefix = '/storage/emulated/0/Download/SynchroNice/';
+  try {
+    const adb = join(directory, 'adb.ps1');
+    writeFileSync(adb, `
+$command = $args -join ' '
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'getprop ro.serialno') { 'QA-phone'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($command -match 'find /storage/emulated/0/Download/SynchroNice') {
+  Get-ChildItem -LiteralPath $env:QA_FAKE_STORAGE -File | ForEach-Object {
+    '/storage/emulated/0/Download/SynchroNice/' + $_.Name
+  }
+  exit 0
+}
+if ($command -match "'/storage/emulated/0/Download/SynchroNice/([^'/]+)'") {
+  $target = Join-Path $env:QA_FAKE_STORAGE $Matches[1]
+  if ($command.Contains('if [ -f')) { if (Test-Path -LiteralPath $target) { 'exists' }; exit 0 }
+  if ($command -match 'sha256sum') { (Get-FileHash -LiteralPath $target).Hash + '  file'; exit 0 }
+  if ($command -match 'rm -f --') { Remove-Item -LiteralPath $target; exit 0 }
+}
+if ($command -match 'content query') { 'No result found.'; exit 0 }
+exit 0
+`);
+    for (const scenario of ['track-baseline', 'clean-baseline', 'dedupe', 'interrupted-clean']) {
+      await t.test(scenario, () => {
+        const storage = join(directory, scenario);
+        const runDir = join(directory, `${scenario}-run`);
+        mkdirSync(storage);
+        const manifest = join(runDir, 'phone-files.json');
+        const readState = () => JSON.parse(readFileSync(manifest, 'utf8').replace(/^\uFEFF/, ''));
+        const saveState = state => writeFileSync(manifest, JSON.stringify(state));
+        const run = (action, name = 'foto.jpg') => {
+          const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            resolve('qa/phone.ps1'), action, '-Path', prefix + name, '-RunDir', runDir,
+            '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+            encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_FAKE_STORAGE: storage },
+          });
+          assert.ifError(result.error);
+          return result;
+        };
+        const succeeds = result => assert.equal(result.status, 0, result.stdout + result.stderr);
+        const photo = join(storage, 'Foto.jpg');
+        if (scenario.endsWith('baseline')) writeFileSync(photo, 'previous photo');
+        succeeds(run('list-files'));
+        if (scenario.endsWith('baseline')) {
+          assert.deepEqual(readState().baseline, [prefix + 'Foto.jpg']);
+          if (scenario === 'track-baseline') {
+            const refused = run('track');
+            assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+            assert.match(refused.stderr, /So registre arquivos novos desta execucao/);
+            assert.deepEqual(readState().tracked, []);
+          } else {
+            const state = readState();
+            // Supply the real hash so a missing baseline guard would actually delete the photo.
+            state.tracked = [{ path: prefix + 'foto.jpg', hash: createHash('sha256').update('previous photo').digest('hex') }];
+            saveState(state);
+            const refused = run('clean');
+            assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+            assert.match(refused.stderr, /Manifesto inseguro/);
+            assert.deepEqual(readState().tracked, state.tracked);
+          }
+          assert.equal(readFileSync(photo, 'utf8'), 'previous photo');
+          return;
+        }
+        writeFileSync(photo, 'new QA photo');
+        succeeds(run('track', 'Foto.jpg'));
+        if (scenario === 'dedupe') {
+          succeeds(run('track'));
+          assert.equal(readState().tracked.length, 1);
+          succeeds(run('clean'));
+          assert.deepEqual(readState().tracked, []);
+          assert.equal(existsSync(photo), false);
+          succeeds(run('clean'));
+        } else {
+          const state = readState();
+          const changed = { path: prefix + 'changed.jpg', hash: state.tracked[0].hash };
+          writeFileSync(join(storage, 'changed.jpg'), 'user changed this file');
+          // A legacy duplicate must disappear in the first persisted cleanup, even if
+          // a later modified file interrupts the loop before reaching that duplicate.
+          state.tracked.push(changed, { ...state.tracked[0], path: prefix + 'foto.jpg' });
+          saveState(state);
+          const cleaned = run('clean');
+          assert.equal(cleaned.status, 1, cleaned.stdout + cleaned.stderr);
+          assert.match(cleaned.stderr, /Arquivo alterado; preservado/);
+          assert.equal(existsSync(photo), false);
+          assert.deepEqual(readState().tracked, [changed]);
+          assert.equal(readFileSync(join(storage, 'changed.jpg'), 'utf8'), 'user changed this file');
+        }
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('cleanup reports the actual MediaStore or rm destination and retains failures', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'clean-019-phone-'));

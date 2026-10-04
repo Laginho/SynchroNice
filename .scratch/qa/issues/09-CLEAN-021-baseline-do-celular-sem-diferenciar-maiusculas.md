@@ -1,5 +1,5 @@
 # CLEAN-021: Baseline do celular sem diferenciar maiúsculas
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -50,6 +50,24 @@ temporário no NTFS, que não diferencia maiúsculas como o FUSE. O teste semeia
 `Foto.jpg` e roda `list-files`, `track` e `clean` para os critérios 1 a 4.
 
 ## Comments
+
+- Stage 2 (2026-10-03): seam confirmado pelo ticket: CLI `phone.ps1`, manifesto
+  e armazenamento NTFS temporário via adb falso. Consumidores examinados: `track`
+  e `clean` usados pelo roteiro de QA; `push`/`share` também alimentam `tracked`.
+  Cobertura inclui baseline, dedupe, limpeza repetida/vazia e interrupção por
+  arquivo alterado entre duas entradas antigas de grafia diferente. As quatro
+  regressões falharam no código original (5 falhas contando o teste pai).
+- Stage 2 concluído: testes vermelhos em `670096b`; correção em `b5e0929`
+  (somente os quatro operadores de caminho; serial continua com `-cne`).
+  Prova focada: `node --test --test-name-pattern='phone paths ignore case'
+  qa/phone.test.mjs`, de 0/5 para 5/5. O caso de limpeza interrompida deixa
+  somente o arquivo alterado no manifesto, preservando seu conteúdo.
+  `gate.ps1 -TestsOnly` confirmou as regressões, mas também encontrou restrições
+  do sandbox (processos/Lixeira e rede do Gradle). Gate completo executado com
+  permissões adequadas: `gate: passou`, Rust 83/83, UI 61/61, QA 49/49;
+  fmt, clippy, TypeScript e `gradle check` aprovados (Android UP-TO-DATE).
+  Diff conferido, sem mudanças fora do escopo. Validação deste estágio usa adb
+  falso e NTFS; não houve teste em aparelho real.
 
 - `qa/phone.ps1:165` (track) e `:276` (clean) comparam com o baseline por
   `-ccontains`, que diferencia maiúsculas. O `/storage/emulated/0` não
