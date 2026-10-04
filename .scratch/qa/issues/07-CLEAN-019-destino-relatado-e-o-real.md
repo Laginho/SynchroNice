@@ -293,3 +293,5 @@ restou. Caminhos, comandos e estados no
 [relatório do CLEAN-021](../../qa-runs/2026-10-03-emulator-CLEAN-021-review.md).
 Evidência local: `phone-criteria-evidence.json`, campos
 `mediaStoreConfirmation` e `cleanupFollowup`.
+
+- 2026-10-04 Proxy decided: a observação vira o ticket novo CLEAN-031 (`needs-triage`, `19-CLEAN-031-limpeza-do-celular-relata-lixeira-para-pendente.md`); este ticket segue done, sem mudar critérios — é um destino relatado que não confere com o real, o que as histórias 9 e 10 pedem acertar, e nenhum aberto (CLEAN-027 a 030) trata da limpeza do celular.
