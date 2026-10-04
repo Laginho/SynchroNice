@@ -332,7 +332,8 @@ sleep __SECONDS__
             $local = [IO.Path]::GetTempFileName()
             try {
                 [IO.File]::WriteAllText($local, (Dump), [Text.UTF8Encoding]::new($false))
-                $point = & node "$PSScriptRoot/dump.mjs" $local $By $Value
+                # JSON over stdin preserves quotes and Unicode through Windows PowerShell.
+                $point = ConvertTo-Json -InputObject $Value -Compress | & node "$PSScriptRoot/dump.mjs" $local $By
                 if ($LASTEXITCODE -ne 0) { throw 'parser do dump falhou' }
                 $point = $point | ConvertFrom-Json
                 if ($null -eq $point) { throw "elemento nao achado: $By=$Value" }

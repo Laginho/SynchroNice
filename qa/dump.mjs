@@ -26,6 +26,7 @@ export function findNode(xml, kind, value) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [, , file, kind, value] = process.argv;
+  const [, , file, kind, argument] = process.argv;
+  const value = argument ?? JSON.parse(readFileSync(0, 'utf8'));
   console.log(JSON.stringify(findNode(readFileSync(file, 'utf8'), kind, value)));
 }
