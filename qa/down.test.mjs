@@ -53,9 +53,11 @@ public class Stub {
       ['real-dead', null],
       ['real-mismatch', null],
       ['real-relaunch-failure', null],
+      ['real-stop-failure', null],
       ['real-debug-active', null],
       ['real-debug-relaunch-failure', null],
       ['real-debug-cleanup-failure', 'Emulador mudou; preservado'],
+      ['real-debug-user-closed', 'Emulador mudou; preservado'],
     ];
     for (const [scenario, error] of scenarios) {
       await t.test(scenario, () => {
@@ -75,7 +77,7 @@ public class Stub {
         const restoreReal = realScenario && !['real-dead', 'real-mismatch'].includes(scenario);
         const realExe = realDebug ? debugExe : releaseExe;
         const realDir = realDebug ? debugDir : releaseDir;
-        const hasState = !['no-state', 'real-live', 'real-dead', 'real-mismatch', 'real-relaunch-failure'].includes(scenario);
+        const hasState = !['no-state', 'real-live', 'real-dead', 'real-mismatch', 'real-relaunch-failure', 'real-stop-failure'].includes(scenario);
         const noOp = ['inactive', 'no-state'].includes(scenario) || (realScenario && !realDebug && scenario !== 'real-active');
         const realStatePath = join(runDir, 'real-pc.json');
         if (hasState) {
@@ -95,7 +97,7 @@ if ($args[0] -eq 'devices') {
   exit 0
 }
 if (($args -join ' ') -match 'emu avd name') {
-  if ($scenario -in 'changed','real-debug-cleanup-failure' -and -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'repaired'))) { 'SomeoneElses_AVD' } else { 'SynchroNice_API37' }
+  if ($scenario -in 'changed','real-debug-cleanup-failure','real-debug-user-closed' -and -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'repaired'))) { 'SomeoneElses_AVD' } else { 'SynchroNice_API37' }
   exit 0
 }
 if (($args -join ' ') -match 'emu kill') {
@@ -108,6 +110,7 @@ exit 0
         const ownedProcesses = `Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -in @(${quote(debugExe)}, ${quote(releaseExe)}) }`;
         const processesAt = path => JSON.parse(powershell(`ConvertTo-Json -Compress -InputObject @(Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq ${quote(path)} } | ForEach-Object { $_.Id })`));
         const wmiFailure = join(runDir, 'wmi-failure');
+        const stopFailure = join(runDir, 'stop-failure');
         const wrapper = join(runDir, 'down-wrapper.ps1');
         writeFileSync(wrapper, `
 function Invoke-CimMethod {
@@ -115,7 +118,16 @@ function Invoke-CimMethod {
   if (Test-Path -LiteralPath ${quote(wmiFailure)}) { return @{ ReturnValue=2 } }
   CimCmdlets\\Invoke-CimMethod -ClassName $ClassName -MethodName $MethodName -Arguments $Arguments
 }
+function Stop-Process {
+  [CmdletBinding()]
+  param([Parameter(ValueFromPipeline)][Diagnostics.Process]$InputObject, [switch]$Force)
+  process {
+    if (Test-Path -LiteralPath ${quote(stopFailure)}) { throw 'simulated stop failure' }
+    Microsoft.PowerShell.Management\\Stop-Process -InputObject $InputObject -Force:$Force
+  }
+}
 & ${quote(resolve('qa/down.ps1'))} -RunDir ${quote(runDir)} -Adb ${quote(adb)} -DebugExe ${quote(debugExe)} -ReleaseExe ${quote(releaseExe)} -RealPcStatePath ${quote(realStatePath)}
+exit $LASTEXITCODE
 `);
         const run = () => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapper], {
           encoding: 'utf8', timeout: 45000, env: { ...process.env,
@@ -132,6 +144,16 @@ function Invoke-CimMethod {
             if (scenario === 'real-dead') powershell(`$p = Get-Process -Id ${originalRealPid}; $p | Stop-Process -Force; $p.WaitForExit()`);
             rmSync(join(realDir, originalRealPid + '.env'));
             writeFileSync(realStatePath, JSON.stringify({ pid: scenario === 'real-mismatch' ? debugPid : originalRealPid, exe: realExe }));
+          }
+          if (scenario === 'real-stop-failure') {
+            writeFileSync(stopFailure, '');
+            const failed = run();
+            assert.ifError(failed.error);
+            assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+            assert.ok(failed.stderr.includes('simulated stop failure'), failed.stderr);
+            assert.deepEqual(processesAt(realExe), [originalRealPid], 'failed stop must not launch a second real PC');
+            assert.equal(JSON.parse(readFileSync(realStatePath, 'utf8').replace(/^\uFEFF/, '')).restorePending, true);
+            rmSync(stopFailure);
           }
           if (relaunchFailure) {
             writeFileSync(wmiFailure, '');
@@ -173,15 +195,20 @@ function Invoke-CimMethod {
             if (realDebug) {
               assert.deepEqual(processesAt(releaseExe), [], 'the recorded debug executable takes precedence over emulator release fallback');
               if (error) {
+                const userClosed = scenario === 'real-debug-user-closed';
+                if (userClosed) powershell(`$p = Get-Process -Id ${releasePids[0]}; $p | Stop-Process -Force; $p.WaitForExit()`);
                 writeFileSync(join(runDir, 'repaired'), '');
                 const repaired = run();
                 assert.equal(repaired.status, 0, repaired.stdout + repaired.stderr);
-                assert.deepEqual(processesAt(realExe), releasePids, 'cleanup retry must preserve the restored real debug PC');
+                const remainingPids = userClosed ? [] : releasePids;
+                assert.deepEqual(processesAt(realExe), remainingPids, 'cleanup retry must preserve the restored real debug PC or respect its user closure');
+                assert.deepEqual(processesAt(releaseExe), [], 'cleanup retry must not restore the obsolete release fallback');
+                assert.deepEqual(readdirSync(realDir).filter(name => name.endsWith('.env')), traces, 'cleanup retry must not add another launch');
                 assert.equal(existsSync(realStatePath), false);
                 const repeated = run();
                 assert.equal(repeated.status, 0, repeated.stdout + repeated.stderr);
                 assert.deepEqual(JSON.parse(repeated.stdout), { stopped: true, restored: false });
-                assert.deepEqual(processesAt(realExe), releasePids);
+                assert.deepEqual(processesAt(realExe), remainingPids);
               }
             }
           } else assert.deepEqual(processesAt(releaseExe), scenario === 'real-mismatch' ? [originalRealPid] : []);

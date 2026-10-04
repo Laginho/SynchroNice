@@ -331,6 +331,16 @@ exit 0
           assert.equal(state.tracked.length, 1);
           assert.equal(state.cleanup.length, 0);
           assert.equal(existsSync(join(storage, 'payload')), true);
+          const unrelated = join(storage, 'unrelated.pdf');
+          writeFileSync(unrelated, 'QA cleanup payload');
+          const updates = readFileSync(join(storage, 'updates'), 'utf8');
+          const refused = run('clean', 'wrong-path');
+          assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+          assert.equal(readFileSync(join(storage, 'updates'), 'utf8'), updates,
+            'a cached URI must be checked before updating, even while the original remains present');
+          assert.deepEqual(readState(), state);
+          assert.equal(readFileSync(join(storage, 'payload'), 'utf8'), 'QA cleanup payload');
+          assert.equal(readFileSync(unrelated, 'utf8'), 'QA cleanup payload');
           return;
         }
         if (unconfirmed) {
