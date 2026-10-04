@@ -1,5 +1,5 @@
 # CLEAN-025: Aspas em `type` e `tap -Value` do celular
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -162,3 +162,44 @@ Verdict: Reopen — critério 1: `tap` não encontra o texto com aspas no XML re
   SDK do projeto confirmou presença 200; `down` encerrou o emulador e o PC
   isolado (código 0, `stopped=true`). A primeira tentativa de `up`, com SDK
   padrão ausente, foi infraestrutura e não motivou a reprovação.
+
+#### Resolution (2026-10-04)
+
+Verdict: Approve
+
+- Re-review do item ❌ e do diff desde `b3cb058`: Standards 0 achados;
+  Spec 0 achados, por revisores independentes. A correção reconhece os dois
+  delimitadores XML e mantém os seletores existentes.
+- ✅ Critério 1: no emulador, `text='say "hi"'` foi encontrado;
+  `tap -By text -Value 'say "hi"'` saiu com código 0. O trace nativo do
+  PowerShell confirma `shell input tap 502 1401`, centro dos bounds
+  `[215,1328][789,1475]`.
+- ✅ Critério 2: `CLEAN-025 plain` continua encontrado e tocado no centro,
+  com código 0. Os dois textos chegaram ao PC e as bolhas ficaram Entregue.
+- ✅ Critério 3: o teste nativo confere `input text 'say%s"hi"'`; no
+  emulador, `type` preservou as aspas no composer e no Item recebido no PC.
+- ✅ Critério 4: `paste-image` e `paste-files` documentam que sobrescrevem
+  o clipboard do usuário e não o restauram.
+- Arquivos de implementação: `qa/phone.ps1`, `qa/dump.mjs`,
+  `qa/phone.test.mjs` e `docs/agents/qa.md`, dentro dos Primary files.
+  Testes vermelhos em `88911fb`, `c9c561a` e `1a0611f` precedem as correções
+  `d73bf86`, `497c3f0` e `9c7a758`; commits de produção não alteram testes.
+  A regressão da retomada falhou antes do fix (3 passaram, 2 falharam,
+  contando o teste pai) e passou no gate. No XML real salvo, a CLI de
+  `b3cb058` retorna `null`; a atual retorna `{x:502,y:1401}`.
+- Callers e limites reexaminados: wrapper `tap`, CLI posicional/stdin,
+  importação de `findNode`, seletores id/texto/descrição, entidades, atributo
+  vazio, nó ausente e bounds inválidos; apóstrofo dentro de atributo duplo.
+  `type`, `Shell-Quote` e os demais critérios não mudaram nesta retomada.
+  O kit confirmou composer, envio, entrega e DOM do PC; sem novas lacunas
+  além das já registradas na primeira revisão.
+- Gate completo em primeiro plano: código 0, `gate: passou`; fmt, clippy,
+  typecheck, 83 testes Rust, 61 da UI e 88 QA. `gradle check` aprovado;
+  testes Android `UP-TO-DATE`, 166 testes nos 17 XML existentes, zero falhas
+  e erros. Diff revisado e `git diff --check` limpo.
+- QA: `.scratch/qa-runs/2026-10-04-clean-025-rereview.md`. `up` compilou
+  os apps desta branch com SDK do projeto e confirmou presença 200; `down`
+  terminou com código 0 e `stopped=true`. Emulador e PC isolado encerrados;
+  lista de arquivos de usuário criados/apagados vazia, sem débito humano.
+- Branch atualizada sobre `sweatshop/2026-10-03-1608` e integrada sem squash
+  no merge `87baa7e`; fechamento e ledger registrados juntos na sessão.
