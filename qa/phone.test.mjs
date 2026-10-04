@@ -636,32 +636,32 @@ exit 0
           resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
           encoding: 'utf8', timeout: 30000, env: { ...process.env,
             QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
-      });
-      assert.ifError(result.error);
-      const success = ['signal-TERM', 'signal-INT', 'enable-retry', 'delayed', 'success', 'log-pending'].includes(scenario);
-      const log = readFileSync(join(directory, 'log'), 'utf8');
-      if (scenario.startsWith('signal-')) {
-        assert.equal(readFileSync(join(directory, 'script-exit'), 'utf8'), '1', 'signal must terminate the script through exit');
-        assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), '1');
-        assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length, 1, log);
-      }
-      if (scenario.startsWith('enable-')) {
-        assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), scenario === 'enable-retry' ? '3' : '5');
-        assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length ?? 0, success ? 1 : 0, log);
-      }
-      assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
-      assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
-      if (success) {
-        const output = JSON.parse(result.stdout);
-        assert.equal(output.reconnected, true);
-        assert.match(output.log, /^QA_WIFI_DISABLED$/m);
-        assert.match(output.log, /^QA_WIFI_RESTORED$/m);
-        assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
-        assert.equal(readFileSync(join(directory, 'outage-seconds'), 'utf8').trim(), '1',
-          'the network must be fully disabled for the requested second before restoration');
-      } else {
-        assert.match(result.stderr, /Wi-Fi nao confirmou/);
-      }
+        });
+        assert.ifError(result.error);
+        const success = ['signal-TERM', 'signal-INT', 'enable-retry', 'delayed', 'success', 'log-pending'].includes(scenario);
+        const log = readFileSync(join(directory, 'log'), 'utf8');
+        if (scenario.startsWith('signal-')) {
+          assert.equal(readFileSync(join(directory, 'script-exit'), 'utf8'), '1', 'signal must terminate the script through exit');
+          assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), '1');
+          assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length, 1, log);
+        }
+        if (scenario.startsWith('enable-')) {
+          assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), scenario === 'enable-retry' ? '3' : '5');
+          assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length ?? 0, success ? 1 : 0, log);
+        }
+        assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
+        assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
+        if (success) {
+          const output = JSON.parse(result.stdout);
+          assert.equal(output.reconnected, true);
+          assert.match(output.log, /^QA_WIFI_DISABLED$/m);
+          assert.match(output.log, /^QA_WIFI_RESTORED$/m);
+          assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
+          assert.equal(readFileSync(join(directory, 'outage-seconds'), 'utf8').trim(), '1',
+            'the network must be fully disabled for the requested second before restoration');
+        } else {
+          assert.match(result.stderr, /Wi-Fi nao confirmou/);
+        }
       });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
