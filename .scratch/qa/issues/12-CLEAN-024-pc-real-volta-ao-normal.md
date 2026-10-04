@@ -1,5 +1,5 @@
 # CLEAN-024: O PC real volta ao normal depois do pós-run no Redmi
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: SYN-030, CLEAN-020
 Review: agent
@@ -62,6 +62,11 @@ O critério 1 fica por leitura na revisão. Nenhum teste roda o `pc.ps1 start`
 não isolado, porque ele mata todo `pc`, inclusive o PC real do humano.
 
 ## Comments
+
+- Stage 2: seam aprovada `qa/down.ps1`, com stubs executáveis e estado injetado
+  via `-RealPcStatePath`. Callers inspecionados: `qa/up.ps1` (cleanup de erro)
+  e instruções do foreman/revisão. Casos: emulador ausente/inativo/ativo,
+  PID morto, exe divergente e repetição; nenhum start real é executado.
 
 - Sem `-Isolated`, `qa/pc.ps1:26-28` abre `-Exe`, ou o `target/release/pc.exe`
   relativo ao script, com os dados reais, e `:128` mata todo `pc`. O app
