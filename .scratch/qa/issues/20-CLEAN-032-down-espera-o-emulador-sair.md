@@ -1,5 +1,5 @@
 # CLEAN-032: `down` só termina depois de o processo do emulador sair
-Stage: to-implement
+Stage: blocked
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -81,3 +81,5 @@ o PID, conferido por leitura como no CLEAN-026.
   e os locais `2026-10-04-clean-026-review/emulator-final/summary.json` e
   `post-shutdown.json`.
 - Proxy decided: aceito (normal, Review: agent, sem Blocked by); antes do emu kill o down guarda o dono do listener da porta do serial, espera até 30 s ele sair depois que o serial some do adb e senão aplica Stop-AndWait, e os testes nunca usam a 5554 — o critério 5 do SYN-025 pede down sem qemu e o up logo após o down é o uso do loop; reusa o Stop-AndWait existente, então não depende do CLEAN-030.
+
+- 2026-10-04 Review ended at reviewing (timeout); branch clean-032 holds the review; left for a human
