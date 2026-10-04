@@ -12,6 +12,21 @@ $statePath = Join-Path $RunDir 'emulator.json'
 $debugExe = [IO.Path]::GetFullPath((Join-Path $root 'pc/src-tauri/target/debug/pc.exe'))
 $releaseExe = [IO.Path]::GetFullPath((Join-Path $root 'pc/src-tauri/target/release/pc.exe'))
 function Save-State { $script:state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8 }
+function Stop-AndWait {
+    param([Parameter(ValueFromPipeline)][Diagnostics.Process]$Process)
+    process {
+        try {
+            if (-not $Process.HasExited) {
+                # Keep the handle so waiting cannot attach to a reused PID.
+                $null = $Process.Handle
+                $Process | Stop-Process -Force -ErrorAction Stop
+                if (-not $Process.WaitForExit(10000)) { throw 'nao encerrou em 10 segundos' }
+            }
+        } catch {
+            if (-not $Process.HasExited) { throw "infraestrutura: PID $($Process.Id): $($_.Exception.Message)" }
+        }
+    }
+}
 function Adb-Run([string[]]$Arguments) {
     $ErrorActionPreference = 'Continue'
     $result = & $adb @Arguments 2>&1
@@ -24,7 +39,7 @@ try {
     $state = if (Test-Path -LiteralPath $statePath) { Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } else { $null }
     if ($state -and $state.active) {
         # A rebuild cannot overwrite the running debug executable.
-        Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $debugExe } | Stop-Process -Force
+        Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $debugExe } | Stop-AndWait
     } else {
         $state = [pscustomobject]@{ active=$true; serial=$null; endpoint=$null; pcPid=$null; realWasRunning=$false }
     }
@@ -112,7 +127,7 @@ class QrImage {
     try { & npx.cmd tauri build --debug --no-bundle | Out-Host; if ($LASTEXITCODE -ne 0) { throw 'Build PC falhou' } }
     finally { Pop-Location }
     $real = @(Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $releaseExe })
-    if ($real.Count) { $state.realWasRunning = $true; Save-State; $real | Stop-Process -Force }
+    if ($real.Count) { $state.realWasRunning = $true; Save-State; $real | Stop-AndWait }
     $started = & "$PSScriptRoot/pc.ps1" start -Isolated -RunDir $RunDir -Port $Port | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or -not $started.pid) { throw 'PC isolado nao abriu' }
     $state.pcPid = $started.pid; Save-State

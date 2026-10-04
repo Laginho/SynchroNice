@@ -17,6 +17,23 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Console]::OutputEncoding
+function Stop-AndWait {
+    param([Parameter(ValueFromPipeline)][Diagnostics.Process]$Process)
+    process {
+        try {
+            if (-not $Process.HasExited) {
+                # Keep the handle so waiting cannot attach to a reused PID.
+                $null = $Process.Handle
+                $Process | Stop-Process -Force -ErrorAction Stop
+                if (-not $Process.WaitForExit(10000)) { throw 'nao encerrou em 10 segundos' }
+            }
+        } catch {
+            if (-not $Process.HasExited) { throw "infraestrutura: PID $($Process.Id): $($_.Exception.Message)" }
+        }
+    }
+}
+$launch = $null
+$launcher = $null
 if ($Action -in 'list-files','track','clean' -and -not $RunDir) {
     [Console]::Error.WriteLine('Informe -RunDir compartilhado por toda a execucao de QA'); exit 1
 }
@@ -135,14 +152,14 @@ try {
         $resolvedExe = (Resolve-Path -LiteralPath $Exe).Path
         New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
         if ($Isolated) {
-            Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $resolvedExe } | Stop-Process -Force
+            Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $resolvedExe } | Stop-AndWait
             if (Get-Process pc -ErrorAction SilentlyContinue) { throw 'Feche a instancia real antes de abrir o PC isolado (qa/up.ps1)' }
             $dataDir = Join-Path $RunDir 'data'
             New-Item -ItemType Directory -Force -Path "$dataDir/Pasta" | Out-Null
             if (-not (Test-Path -LiteralPath $Config)) {
                 [IO.File]::WriteAllText($Config, (@{ pasta="$dataDir/Pasta" } | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
             }
-        } else { Get-Process pc -ErrorAction SilentlyContinue | Stop-Process -Force }
+        } else { Get-Process pc -ErrorAction SilentlyContinue | Stop-AndWait }
         $previous = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
         $previousData = $env:SYNCHRONICE_DATA_DIR
         $previousProfile = $env:WEBVIEW2_USER_DATA_FOLDER
@@ -165,11 +182,14 @@ try {
                 ShowWindow=[uint16]0
                 EnvironmentVariables=[string[]]@([Environment]::GetEnvironmentVariables().GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
             }
+            $launchRequestedAt = Get-Date
             $launch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
                 CommandLine="powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
                 ProcessStartupInformation=$startup
             }
             if ($launch.ReturnValue -ne 0) { throw "Nao foi possivel abrir o PC: WMI $($launch.ReturnValue)" }
+            $launcher = Get-Process -Id $launch.ProcessId -ErrorAction SilentlyContinue
+            if ($launcher -and $launcher.StartTime -lt $launchRequestedAt) { $launcher = $null }
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
                 $startedPid = Get-Content -LiteralPath $pidFile -Raw
                 if ($startedPid -match '^\d+\s*$') { break }
@@ -206,6 +226,21 @@ try {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 } catch {
-    if ($Isolated -and $Action -eq 'start' -and $process -and -not $process.HasExited) { $process | Stop-Process -Force }
-    [Console]::Error.WriteLine($_.Exception.Message); exit 1
+    $failure = $_.Exception.Message
+    try {
+        if ($Action -eq 'start' -and $launch -and $launch.ReturnValue -eq 0) {
+            if ($launcher) { $launcher | Stop-AndWait }
+            # Enumerate only AFTER the launcher exits: it can no longer spawn a late child.
+            # Creation time and executable exclude unrelated children of a reused parent PID.
+            Get-CimInstance Win32_Process -Filter "ParentProcessId = $($launch.ProcessId)" |
+                Where-Object { $_.ExecutablePath -eq $resolvedExe -and $_.CreationDate -ge $launchRequestedAt } |
+                ForEach-Object {
+                    $child = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
+                    if ($child -and $child.Path -eq $resolvedExe -and $child.StartTime -ge $launchRequestedAt) {
+                        $child | Stop-AndWait
+                    }
+                }
+        }
+    } catch { $failure += "; limpeza falhou: $($_.Exception.Message)" }
+    [Console]::Error.WriteLine($failure); exit 1
 }

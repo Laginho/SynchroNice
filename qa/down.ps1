@@ -11,6 +11,21 @@ $RunDir = [IO.Path]::GetFullPath($RunDir)
 $statePath = Join-Path $RunDir 'emulator.json'
 $debugExe = [IO.Path]::GetFullPath($DebugExe)
 $releaseExe = [IO.Path]::GetFullPath($ReleaseExe)
+function Stop-AndWait {
+    param([Parameter(ValueFromPipeline)][Diagnostics.Process]$Process)
+    process {
+        try {
+            if (-not $Process.HasExited) {
+                # Keep the handle so waiting cannot attach to a reused PID.
+                $null = $Process.Handle
+                $Process | Stop-Process -Force -ErrorAction Stop
+                if (-not $Process.WaitForExit(10000)) { throw 'nao encerrou em 10 segundos' }
+            }
+        } catch {
+            if (-not $Process.HasExited) { throw "infraestrutura: PID $($Process.Id): $($_.Exception.Message)" }
+        }
+    }
+}
 function Start-NormalPc([string]$Executable) {
     $previousData = $env:SYNCHRONICE_DATA_DIR
     $previousProfile = $env:WEBVIEW2_USER_DATA_FOLDER
@@ -42,8 +57,7 @@ try {
         $real = Get-Content -LiteralPath $RealPcStatePath -Raw | ConvertFrom-Json
         $process = Get-Process -Id $real.pid -ErrorAction SilentlyContinue
         if ($process -and $process.Path -eq $real.exe) {
-            $process | Stop-Process -Force
-            $process.WaitForExit()
+            $process | Stop-AndWait
             Start-NormalPc $real.exe
             $restoredReal = $true
         }
@@ -58,7 +72,7 @@ try {
     }
     # Restore the PC before any emulator error can interrupt cleanup.
     # The kit owns this debug executable and the fixed HTTP port during the run.
-    Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $debugExe } | Stop-Process -Force
+    Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $debugExe } | Stop-AndWait
     if ($state.realWasRunning -and -not (Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $releaseExe })) {
         Start-NormalPc $releaseExe
     }
