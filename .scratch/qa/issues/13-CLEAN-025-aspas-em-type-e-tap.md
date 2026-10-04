@@ -1,5 +1,5 @@
 # CLEAN-025: Aspas em `type` e `tap -Value` do celular
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -65,6 +65,14 @@ camada nativa do PS 5.1. O `type` passa a escapar `"` para essa camada, como o
   Vermelho focado: 3 passaram, 2 falharam (caso novo e seu teste pai), com
   `elemento nao achado: text=say "hi"`. Bounds vazios/inválidos e nó ausente
   continuam cobertos pela suíte existente de `findNode`.
+- Retomada concluída: teste vermelho em `1a0611f`, correção isolada em
+  `9c7a758`. Parser aceita atributos delimitados por aspas simples ou duplas;
+  os 10 testes/subtestes focados de tap e findNode passaram. Gate completo
+  fora do sandbox: código 0, fmt/clippy/typecheck, 83 testes Rust, 61 da UI,
+  88 QA e `gradle check` aprovado (testes Android UP-TO-DATE). Log local:
+  `.scratch/qa-runs/CLEAN-025-stage2/gate-reopened.log`. Diff revisado e
+  `git diff --check` limpo; apenas Primary files e ticket alterados. A
+  confirmação da correção no emulador permanece para o stage 3.
 
 - Stage 2 (2026-10-04): callers examinados: o wrapper `tap` chama a CLI de
   `dump.mjs`; `findNode` também é importado por `dump.test.mjs`. A CLI conserva
