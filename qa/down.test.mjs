@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, copyFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, copyFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -90,6 +90,9 @@ exit 1
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.equal(alive(), false, 'down returned while the listener process was still alive');
     assert.equal(existsSync(exited), exitDelay !== null, 'graceful shutdown must let the stub exit on its own');
+    if (exitDelay === null) {
+      assert.ok(Date.now() - statSync(killed).mtimeMs >= 30000, 'forced stop must allow the full 30-second grace period');
+    }
     assert.equal(JSON.parse(readFileSync(statePath, 'utf8').replace(/^\uFEFF/, '')).active, false);
   } finally {
     if (child) {
@@ -103,6 +106,10 @@ exit 1
 
 test('down waits for the emulator listener to exit naturally after adb drops the serial', async () => {
   await checkListenerShutdown(8000);
+});
+
+test('down forces the emulator listener to stop after the 30-second grace period', async () => {
+  await checkListenerShutdown(null);
 });
 
 test('down restores the real PC even when emulator cleanup fails, and can be repeated', async t => {
