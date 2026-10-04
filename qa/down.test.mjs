@@ -1,11 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, copyFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, copyFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const quote = value => `'${value.replaceAll("'", "''")}'`;
+async function freeSerial() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  assert.notEqual(port, 5554);
+  return `emulator-${port}`;
+}
+
 function powershell(command) {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
     `$ErrorActionPreference = 'Stop'; ${command}; exit 0`], { encoding: 'utf8', timeout: 30000 });
@@ -13,6 +27,90 @@ function powershell(command) {
   assert.equal(result.status, 0, result.stdout + result.stderr);
   return result.stdout.trim();
 }
+
+async function checkListenerShutdown(exitDelay) {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-032-down-'));
+  const ready = join(directory, 'ready');
+  const killed = join(directory, 'killed');
+  const exited = join(directory, 'exited-naturally');
+  let child;
+  let childExited;
+  const alive = () => {
+    try { process.kill(child.pid, 0); return true; }
+    catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+  };
+  try {
+    const stub = join(directory, 'listener.cjs');
+    writeFileSync(stub, `
+const fs = require('node:fs');
+const net = require('node:net');
+const server = net.createServer();
+server.listen(0, '127.0.0.1', () => fs.writeFileSync(${JSON.stringify(ready)}, String(server.address().port)));
+const polling = setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(killed)})) return;
+  clearInterval(polling);
+  ${exitDelay === null ? '' : `setTimeout(() => {
+    fs.writeFileSync(${JSON.stringify(exited)}, '');
+    process.exit(0);
+  }, ${exitDelay});`}
+}, 50);
+setTimeout(() => process.exit(2), 120000);
+`);
+    child = spawn(process.execPath, [stub], { windowsHide: true, stdio: 'ignore' });
+    childExited = new Promise((resolve, reject) => {
+      child.once('exit', resolve);
+      child.once('error', reject);
+    });
+    const deadline = Date.now() + 10000;
+    while (!existsSync(ready)) {
+      assert.ok(Date.now() < deadline && child.exitCode === null, 'listener did not start');
+      await delay(50);
+    }
+    const port = Number(readFileSync(ready, 'utf8'));
+    assert.notEqual(port, 5554);
+    const serial = `emulator-${port}`;
+    const statePath = join(directory, 'emulator.json');
+    writeFileSync(statePath, JSON.stringify({ active: true, serial, realWasRunning: false }));
+    const adb = join(directory, 'adb.ps1');
+    writeFileSync(adb, `
+if ($args[0] -eq 'devices') {
+  'List of devices attached'
+  if (-not (Test-Path -LiteralPath ${quote(killed)})) { "${serial}\tdevice" }
+  exit 0
+}
+if (($args -join ' ') -eq '-s ${serial} emu avd name') { 'SynchroNice_API37'; exit 0 }
+if (($args -join ' ') -eq '-s ${serial} emu kill') { [IO.File]::WriteAllText(${quote(killed)}, ''); exit 0 }
+exit 1
+`);
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+      resolve('qa/down.ps1'), '-RunDir', directory, '-Adb', adb,
+      '-DebugExe', join(directory, 'unused-debug.exe'), '-ReleaseExe', join(directory, 'unused-release.exe'),
+      '-RealPcStatePath', join(directory, 'unused-real.json')], { encoding: 'utf8', timeout: 60000 });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(alive(), false, 'down returned while the listener process was still alive');
+    assert.equal(existsSync(exited), exitDelay !== null, 'graceful shutdown must let the stub exit on its own');
+    if (exitDelay === null) {
+      assert.ok(Date.now() - statSync(killed).mtimeMs >= 30000, 'forced stop must allow the full 30-second grace period');
+    }
+    assert.equal(JSON.parse(readFileSync(statePath, 'utf8').replace(/^\uFEFF/, '')).active, false);
+  } finally {
+    if (child) {
+      if (alive()) child.kill();
+      await childExited;
+    }
+    assert.ok(directory.startsWith(join(tmpdir(), 'clean-032-down-')));
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test('down waits for the emulator listener to exit naturally after adb drops the serial', async () => {
+  await checkListenerShutdown(8000);
+});
+
+test('down forces the emulator listener to stop after the 30-second grace period', async () => {
+  await checkListenerShutdown(null);
+});
 
 test('down restores the real PC even when emulator cleanup fails, and can be repeated', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'clean-020-down-'));
@@ -60,7 +158,7 @@ public class Stub {
       ['real-debug-user-closed', 'Emulador mudou; preservado'],
     ];
     for (const [scenario, error] of scenarios) {
-      await t.test(scenario, () => {
+      await t.test(scenario, async () => {
         const runDir = join(directory, scenario);
         const debugDir = join(runDir, 'debug');
         const releaseDir = join(runDir, 'release');
@@ -80,9 +178,10 @@ public class Stub {
         const hasState = !['no-state', 'real-live', 'real-dead', 'real-mismatch', 'real-relaunch-failure', 'real-stop-failure'].includes(scenario);
         const noOp = ['inactive', 'no-state'].includes(scenario) || (realScenario && !realDebug && scenario !== 'real-active');
         const realStatePath = join(runDir, 'real-pc.json');
+        const serial = await freeSerial();
         if (hasState) {
           writeFileSync(statePath, JSON.stringify({ active: !['inactive', 'real-inactive'].includes(scenario),
-            serial: 'emulator-5554', realWasRunning: !['no-real', 'real-debug-active'].includes(scenario) }));
+            serial, realWasRunning: !['no-real', 'real-debug-active'].includes(scenario) }));
         }
         const adb = join(runDir, 'adb.ps1');
         writeFileSync(adb, `
@@ -92,7 +191,7 @@ if ($args[0] -eq 'devices') {
   if ($scenario -eq 'devices-error') { exit 1 }
   'List of devices attached'
   if ($scenario -ne 'absent' -and (-not (Test-Path -LiteralPath $killed) -or $scenario -eq 'timeout')) {
-    "emulator-5554\tdevice"
+    "${serial}\tdevice"
   }
   exit 0
 }
