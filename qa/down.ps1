@@ -33,25 +33,7 @@ function Get-RecordedPc($Record) {
         if (-not $candidate.HasExited) { throw }
     }
 }
-function Stop-AndWait {
-    param([Parameter(ValueFromPipeline)][Diagnostics.Process]$Process)
-    process {
-        $timedOut = $false
-        try {
-            if (-not $Process.HasExited) {
-                # Keep the handle so waiting cannot attach to a reused PID.
-                $null = $Process.Handle
-                $Process | Stop-Process -Force -ErrorAction Stop
-                if (-not $Process.WaitForExit(10000)) {
-                    $timedOut = $true
-                    throw 'nao encerrou em 10 segundos'
-                }
-            }
-        } catch {
-            if ($timedOut -or -not $Process.HasExited) { throw "infraestrutura: PID $($Process.Id): $($_.Exception.Message)" }
-        }
-    }
-}
+. "$PSScriptRoot/process.ps1"
 function Start-NormalPc([string]$Executable) {
     $previousData = $env:SYNCHRONICE_DATA_DIR
     $previousProfile = $env:WEBVIEW2_USER_DATA_FOLDER
@@ -135,6 +117,17 @@ try {
         if ($devices -match ('^' + [regex]::Escape($state.serial) + '\s+')) {
             $avd = & $adb -s $state.serial emu avd name
             if ($LASTEXITCODE -ne 0 -or $avd -notcontains 'SynchroNice_API37') { throw 'Emulador mudou; preservado' }
+            $listener = Get-NetTCPConnection -LocalPort ([int]$state.serial.Split('-')[1]) -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            $emulatorProcess = if ($listener) { Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue }
+            if ($emulatorProcess) {
+                try {
+                    # The AVD check identifies our listener; keep its handle across emu kill.
+                    $null = $emulatorProcess.Handle
+                } catch {
+                    if (-not $emulatorProcess.HasExited) { throw }
+                }
+            }
             & $adb -s $state.serial emu kill | Out-Host
             if ($LASTEXITCODE -ne 0) { throw 'Nao foi possivel derrubar o emulador' }
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -143,6 +136,9 @@ try {
                 Start-Sleep -Seconds 1
             }
             if ($devices -match ('^' + [regex]::Escape($state.serial) + '\s+')) { throw 'Emulador nao encerrou' }
+            if ($emulatorProcess -and -not $emulatorProcess.HasExited -and -not $emulatorProcess.WaitForExit(30000)) {
+                $emulatorProcess | Stop-AndWait
+            }
         }
     }
     if ($state.endpoint) { & $adb disconnect $state.endpoint | Out-Null }

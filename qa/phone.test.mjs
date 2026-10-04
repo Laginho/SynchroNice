@@ -669,6 +669,16 @@ test('wifi-off confirms device state even when svc silently refuses a transition
     assert.equal(git.status, 0, git.stderr);
     const bash = resolve(git.stdout.trim(), '../../../bin/bash.exe');
     const adb = join(directory, 'adb.ps1');
+    // mksh on the device runs printf externally, with a 128 KiB argument limit.
+    writeFileSync(join(directory, 'printf'), `#!/bin/sh
+for argument do
+  if [ "\${#argument}" -gt 131072 ]; then
+    echo 'Argument list too long' >&2
+    exit 1
+  fi
+done
+exec /usr/bin/printf "$@"
+`);
     writeFileSync(join(directory, 'svc'), `#!/bin/sh
 echo "$*" >> "$QA_WIFI_DIRECTORY/calls"
 if [ "$2" = enable ]; then
@@ -724,6 +734,10 @@ else
   if [ "$state" = enabled ]; then echo 'Wifi is enabled'; else echo 'Wifi is disabled'; fi
 fi
 echo 'Other status details'
+if [ "$QA_FAKE_SCENARIO" = large-dump ]; then
+  head -c 409600 /dev/zero | tr '\\000' x
+  echo
+fi
 `;
     writeFileSync(join(directory, 'cmd'), status);
     writeFileSync(join(directory, 'dumpsys'), status);
@@ -754,7 +768,7 @@ if ($args[2] -eq 'push') {
   [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'captured.sh'), [IO.File]::ReadAllText($args[3])); exit 0
 }
 if ($command -match 'nohup') {
-  $output = & $env:QA_WIFI_BASH -c 'cd "$QA_WIFI_DIRECTORY" && PATH="$PWD:$PATH" sh captured.sh' 2>&1
+  $output = & $env:QA_WIFI_BASH -c 'cd "$QA_WIFI_DIRECTORY" && PATH="$PWD:$PATH" sh -c ''enable -n printf; . ./captured.sh''' 2>&1
   [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'script-exit'), [string]$LASTEXITCODE)
   # nohup launch succeeds; the device-side result is read after reconnecting.
   [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'log'), ($output -join "\n"))
@@ -772,7 +786,7 @@ if ($command -match 'shell cat .*wifi.*log') {
 }
 exit 0
 `);
-    for (const scenario of ['signal-TERM', 'signal-INT', 'enable-retry', 'enable-failed', 'delayed', 'stuck-disabling', 'disable-refused', 'restore-refused', 'status-denied', 'dump-denied', 'unknown', 'success', 'log-pending']) {
+    for (const scenario of ['signal-TERM', 'signal-INT', 'enable-retry', 'enable-failed', 'delayed', 'stuck-disabling', 'disable-refused', 'restore-refused', 'status-denied', 'dump-denied', 'unknown', 'success', 'log-pending', 'large-dump']) {
       await t.test(scenario, () => {
         writeFileSync(join(directory, 'state'), 'enabled\n');
         writeFileSync(join(directory, 'calls'), '');
@@ -786,8 +800,12 @@ exit 0
             QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
         });
         assert.ifError(result.error);
-        const success = ['signal-TERM', 'signal-INT', 'enable-retry', 'delayed', 'success', 'log-pending'].includes(scenario);
+        const success = ['signal-TERM', 'signal-INT', 'enable-retry', 'delayed', 'success', 'log-pending', 'large-dump'].includes(scenario);
         const log = readFileSync(join(directory, 'log'), 'utf8');
+        if (scenario === 'status-denied') {
+          assert.equal(readFileSync(join(directory, 'clock'), 'utf8').trim(), '0',
+            'a failed dumpsys must return immediately without waiting to retry');
+        }
         if (scenario.startsWith('signal-')) {
           assert.equal(readFileSync(join(directory, 'script-exit'), 'utf8'), '1', 'signal must terminate the script through exit');
           assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), '1');

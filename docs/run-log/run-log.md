@@ -270,3 +270,10 @@
 | 2026-10-04 02:27 | CLEAN-026 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 9m | 2.1M in (97% cached), 6k out | $3.027 | 1.044 |
 | 2026-10-04 03:27 | CLEAN-026 | review | gpt-6.1-sol max | 1 | failed (incomplete handoff), blocked | sweatshop/2026-10-03-1608 | 60m | ? | ? | ? |
 | 2026-10-04 04:53 | CLEAN-026 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 73m | 12.3M in (97% cached), 74k out | $3.761 | 2.126 |
+| 2026-10-04 12:28 | CLEAN-027 | implement | gpt-6.1-sol-fast high | 1 | to-review | sweatshop/2026-10-04-1210 | 18m | 6.0M in (98% cached), 13k out | ? | 0.790 |
+| 2026-10-04 13:01 | CLEAN-027 | review | gpt-6.1-sol-fast max | 1 | merged | sweatshop/2026-10-04-1210 | 33m | 9.1M in (98% cached), 44k out | ? | 2.712 |
+| 2026-10-04 13:15 | CLEAN-030 | implement | gpt-6.1-sol-fast high | 1 | to-review | sweatshop/2026-10-04-1210 | 13m | 4.6M in (98% cached), 10k out | ? | 1.569 |
+| 2026-10-04 13:46 | CLEAN-030 | review | gpt-6.1-sol-fast max | 1 | merged | sweatshop/2026-10-04-1210 | 32m | 9.0M in (98% cached), 39k out | ? | 2.050 |
+| 2026-10-04 14:02 | CLEAN-032 | implement | gpt-6.1-sol-fast high | 1 | to-review | sweatshop/2026-10-04-1210 | 15m | 3.2M in (97% cached), 12k out | ? | 1.016 |
+| 2026-10-04 14:42 | CLEAN-032 | review | gpt-6.1-sol-fast max | 1 | review ended at reviewing (timeout) | sweatshop/2026-10-04-1210 | 40m | ? | ? | ? |
+| 2026-10-04 15:46 | CLEAN-032 | review | gpt-6.1-sol-fast max | 1 | merged | sweatshop/2026-10-04-1210 | 60m | 12.1M in (97% cached), 78k out | $7.571 | 1.779 |
