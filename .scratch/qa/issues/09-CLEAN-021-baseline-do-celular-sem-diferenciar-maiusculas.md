@@ -1,5 +1,5 @@
 # CLEAN-021: Baseline do celular sem diferenciar maiúsculas
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -84,3 +84,72 @@ temporário no NTFS, que não diferencia maiúsculas como o FUSE. O teste semeia
   Confirmado em :165 e :276, e também nos vizinhos :168 e :296. Bug,
   ready-for-agent (Q5, proxy). Os quatro pontos mudam juntos, para o dedupe
   não ficar inconsistente.
+
+#### Resolution (2026-10-03)
+
+Verdict: Approve
+
+- Revisão contra `e9ca2bc08ea1fdb625e8ec4151a88a01b6ecd520`, base da sessão
+  `sweatshop/2026-10-03-1608`. Rebase atualizado, sem conflitos; integração
+  sem squash no merge `ae0f0f3`. Nenhuma correção de fonte no stage 3.
+- Implementação: `qa/phone.ps1` e `qa/phone.test.mjs`. Os quatro operadores
+  de caminho ignoram maiúsculas; identificação do aparelho continua com
+  `-cne`. Hash, limites da Pasta e quoting preservados.
+
+##### Standards
+
+Nenhum achado de código ou smell acionável. Dois desvios formais do stage 2
+em relação à skill `ticket-flow`:
+
+- `670096b`, `b5e0929` e `7ce04ba` têm somente assunto; “Commits and closing”
+  exige corpo explicando o motivo e citando o ID.
+- A transição para `to-review` ocorreu no commit de metadata `7ce04ba`,
+  depois do último commit de código `b5e0929`; a tabela “Stage” a coloca no
+  último commit de código.
+
+Separação test-first correta: `670096b` contém testes e metadata; `b5e0929`
+altera somente produção. Os desvios não quebram critério, fronteira,
+test-first ou comportamento; registrados sem reescrever o histórico.
+
+##### Spec
+
+Zero achados no contrato do CLEAN-021; critérios 1–4 atendidos por testes
+e pela CLI real no emulador.
+
+1. ✅ `track` recusa a variante do baseline e mantém `tracked` vazio.
+2. ✅ `clean` recusa a variante do baseline e preserva o arquivo.
+3. ✅ Grafias diferentes do mesmo caminho deixam uma única entrada.
+4. ✅ Limpar uma entrada remove suas variantes de `tracked`, inclusive antes
+   de uma interrupção por arquivo alterado.
+
+- Chamadores, falhas e interações examinados: `track`/`clean` usados por
+  agentes de QA; `push`/`share` alimentando o manifesto; baseline,
+  duplicatas antigas, hash alterado, limpeza vazia/repetida, interrupção
+  entre entradas e guarda do aparelho. Upload, MediaStore e fallback
+  conservam o mecanismo anterior.
+- Não exercitados: Redmi físico, chamadas concorrentes e nomes Unicode.
+  Nenhum critério visual ficou pendente.
+- Red confirmado em
+  `.scratch/run-log/CLEAN-021-implement-20261003-214214.txt:26` (`item_12`):
+  quatro regressões falharam no código original, 0/5 contando o pai.
+  Green em `:61` (`item_32`), 5/5. Testes de produção com adb falso e NTFS.
+- Gate completo em primeiro plano: saída 0, `gate: passou`; Rust 83/83,
+  interface 61/61, QA 49/49; fmt, clippy e TypeScript aprovados.
+  Android: `BUILD SUCCESSFUL`, 41 tarefas, 1 executada e 40 up-to-date;
+  testes reutilizados pelo Gradle.
+  Log: `.scratch/run-log/CLEAN-021-stage3-gate.log`.
+- [QA no emulador](../../qa-runs/2026-10-03-emulator-CLEAN-021-review.md):
+  quatro critérios passaram, 12 caminhos anteriores preservados e todas
+  as fixtures removidas. Primeiro `up` falhou por presença; retentativa
+  confirmou `online: true` e HTTP 200. `down` saiu 0, `active: false`,
+  debug encerrado e adb sem dispositivos.
+- Observação preexistente em Comments do CLEAN-019: fixtures ASCII sob nomes
+  `.jpg` ficaram como `.pending-*`, `is_trashed=0/is_pending=1`, apesar do
+  relato de Lixeira. Derivados próprios identificados por GUID e SHA-256
+  foram rastreados e removidos por `rm (MediaStore indisponivel)`.
+  O mecanismo já existia na base e não muda com os quatro operadores.
+- `Cargo.toml` alterado pelo build somente em finais de linha foi restaurado.
+  Diff de implementação restrito aos Primary files; resolução, relatório,
+  ledger e comentário de outro ticket seguem o fluxo.
+
+Totais: Standards 2 desvios formais, 0 achados de código; Spec 0 achados.

@@ -270,3 +270,26 @@ Verdict: Approve
   Merge sem squash 5081871 na sessão sweatshop/2026-10-03-1608; Stage done
   e ledger registrados no mesmo commit de encerramento. Sem PR ou push
   nesta etapa; o merge do PR de sessão permanece com o humano.
+
+#### Observação de QA do CLEAN-021 (2026-10-03)
+
+Durante o QA real do CLEAN-021, três payloads ASCII controlados sob extensão
+`.jpg`, criados com adb no emulador, foram relatados como `Lixeira do
+MediaStore`. Uma consulta com inclusão de pendentes encontrou os derivados
+`.pending-*`, `is_trashed=0/is_pending=1`. O caminho original estava ausente,
+mas os arquivos permaneciam fora da Lixeira.
+
+A inferência de Lixeira pelo desaparecimento do caminho original já está na
+base do CLEAN-021 e corresponde à hipótese do critério 3 deste ticket.
+A observação pede triagem da hipótese para renames pendentes; não altera
+aqui critérios, Stage ou código. Não é regressão dos quatro operadores
+de caminhos do CLEAN-021.
+
+GUID e SHA-256 dos derivados foram conferidos contra as próprias fontes do
+QA; eles foram registrados no manifesto principal e removidos pelo wrapper
+com destino final `rm (MediaStore indisponivel)`. A listagem final contém
+exatamente os 12 caminhos anteriores; nenhuma fixture ou entrada `tracked`
+restou. Caminhos, comandos e estados no
+[relatório do CLEAN-021](../../qa-runs/2026-10-03-emulator-CLEAN-021-review.md).
+Evidência local: `phone-criteria-evidence.json`, campos
+`mediaStoreConfirmation` e `cleanupFollowup`.
