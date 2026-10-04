@@ -1,5 +1,5 @@
 # CLEAN-027: Dump grande do Wi-Fi excede o limite de argumentos
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
