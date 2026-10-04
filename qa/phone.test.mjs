@@ -513,7 +513,7 @@ exit 0
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('wifi-off confirms device state even when svc silently refuses a transition', () => {
+test('wifi-off confirms device state even when svc silently refuses a transition', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'syn-024-wifi-state-'));
   try {
     const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
@@ -523,6 +523,15 @@ test('wifi-off confirms device state even when svc silently refuses a transition
     const adb = join(directory, 'adb.ps1');
     writeFileSync(join(directory, 'svc'), `#!/bin/sh
 echo "$*" >> "$QA_WIFI_DIRECTORY/calls"
+if [ "$2" = enable ]; then
+  count=$(cat "$QA_WIFI_DIRECTORY/enable-count")
+  count=$((count + 1))
+  echo "$count" > "$QA_WIFI_DIRECTORY/enable-count"
+  case "$QA_FAKE_SCENARIO" in
+    enable-retry) if [ "$count" -le 2 ]; then exit 1; fi ;;
+    enable-failed) exit 1 ;;
+  esac
+fi
 case "$QA_FAKE_SCENARIO:$2" in
   disable-refused:disable|restore-refused:enable) exit 0 ;;
 esac
@@ -574,6 +583,14 @@ echo 'Other status details'
     writeFileSync(join(directory, 'sleep'), `#!/bin/sh
 clock=$(( $(cat "$QA_WIFI_DIRECTORY/clock") + $1 ))
 echo "$clock" > "$QA_WIFI_DIRECTORY/clock"
+case "$QA_FAKE_SCENARIO" in
+  signal-TERM|signal-INT)
+    if [ "$(cat "$QA_WIFI_DIRECTORY/state")" = disabled ]; then
+      kill -s "\${QA_FAKE_SCENARIO#signal-}" "$PPID" || exit 1
+      /usr/bin/sleep 0.05
+    fi
+    ;;
+esac
 if [ "$(cat "$QA_WIFI_DIRECTORY/state")" = disabling ] && [ "$clock" -ge "$(cat "$QA_WIFI_DIRECTORY/deadline")" ]; then
   echo disabled > "$QA_WIFI_DIRECTORY/state"
   echo "$clock" > "$QA_WIFI_DIRECTORY/outage-start"
@@ -590,6 +607,7 @@ if ($args[2] -eq 'push') {
 }
 if ($command -match 'nohup') {
   $output = & $env:QA_WIFI_BASH -c 'cd "$QA_WIFI_DIRECTORY" && PATH="$PWD:$PATH" sh captured.sh' 2>&1
+  [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'script-exit'), [string]$LASTEXITCODE)
   # nohup launch succeeds; the device-side result is read after reconnecting.
   [IO.File]::WriteAllText((Join-Path $env:QA_WIFI_DIRECTORY 'log'), ($output -join "\n"))
   exit 0
@@ -606,32 +624,45 @@ if ($command -match 'shell cat .*wifi.*log') {
 }
 exit 0
 `);
-    for (const scenario of ['delayed', 'stuck-disabling', 'disable-refused', 'restore-refused', 'status-denied', 'dump-denied', 'unknown', 'success', 'log-pending']) {
-      writeFileSync(join(directory, 'state'), 'enabled\n');
-      writeFileSync(join(directory, 'calls'), '');
-      writeFileSync(join(directory, 'clock'), '0\n');
-      writeFileSync(join(directory, 'outage-seconds'), '0\n');
-      if (scenario === 'log-pending') writeFileSync(join(directory, 'pending'), '');
-      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-        resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
-        encoding: 'utf8', timeout: 30000, env: { ...process.env,
-          QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
+    for (const scenario of ['signal-TERM', 'signal-INT', 'enable-retry', 'enable-failed', 'delayed', 'stuck-disabling', 'disable-refused', 'restore-refused', 'status-denied', 'dump-denied', 'unknown', 'success', 'log-pending']) {
+      await t.test(scenario, () => {
+        writeFileSync(join(directory, 'state'), 'enabled\n');
+        writeFileSync(join(directory, 'calls'), '');
+        writeFileSync(join(directory, 'enable-count'), '0\n');
+        writeFileSync(join(directory, 'clock'), '0\n');
+        writeFileSync(join(directory, 'outage-seconds'), '0\n');
+        if (scenario === 'log-pending') writeFileSync(join(directory, 'pending'), '');
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), 'wifi-off', '-Seconds', '1', '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env,
+            QA_FAKE_SCENARIO: scenario, QA_WIFI_DIRECTORY: directory.replaceAll('\\', '/'), QA_WIFI_BASH: bash },
+        });
+        assert.ifError(result.error);
+        const success = ['signal-TERM', 'signal-INT', 'enable-retry', 'delayed', 'success', 'log-pending'].includes(scenario);
+        const log = readFileSync(join(directory, 'log'), 'utf8');
+        if (scenario.startsWith('signal-')) {
+          assert.equal(readFileSync(join(directory, 'script-exit'), 'utf8'), '1', 'signal must terminate the script through exit');
+          assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), '1');
+          assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length, 1, log);
+        }
+        if (scenario.startsWith('enable-')) {
+          assert.equal(readFileSync(join(directory, 'enable-count'), 'utf8').trim(), scenario === 'enable-retry' ? '3' : '5');
+          assert.equal(log.match(/^QA_WIFI_RESTORED$/gm)?.length ?? 0, success ? 1 : 0, log);
+        }
+        assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
+        assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
+        if (success) {
+          const output = JSON.parse(result.stdout);
+          assert.equal(output.reconnected, true);
+          assert.match(output.log, /^QA_WIFI_DISABLED$/m);
+          assert.match(output.log, /^QA_WIFI_RESTORED$/m);
+          assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
+          assert.equal(readFileSync(join(directory, 'outage-seconds'), 'utf8').trim(), '1',
+            'the network must be fully disabled for the requested second before restoration');
+        } else {
+          assert.match(result.stderr, /Wi-Fi nao confirmou/);
+        }
       });
-      assert.ifError(result.error);
-      const success = ['delayed', 'success', 'log-pending'].includes(scenario);
-      assert.equal(result.status, success ? 0 : 1, `${scenario}: ${result.stdout} ${result.stderr}`);
-      assert.match(readFileSync(join(directory, 'calls'), 'utf8'), /^wifi enable$/m, 'restoration must run on exit');
-      if (success) {
-        const output = JSON.parse(result.stdout);
-        assert.equal(output.reconnected, true);
-        assert.match(output.log, /^QA_WIFI_DISABLED$/m);
-        assert.match(output.log, /^QA_WIFI_RESTORED$/m);
-        assert.equal(readFileSync(join(directory, 'state'), 'utf8').trim(), 'enabled');
-        assert.equal(readFileSync(join(directory, 'outage-seconds'), 'utf8').trim(), '1',
-          'the network must be fully disabled for the requested second before restoration');
-      } else {
-        assert.match(result.stderr, /Wi-Fi nao confirmou/);
-      }
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

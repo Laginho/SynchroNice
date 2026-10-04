@@ -1,5 +1,5 @@
 # CLEAN-023: `wifi-off` sempre restaura o Wi-Fi
-Stage: to-implement
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -70,3 +70,33 @@ git-bash com `svc`, `dumpsys` e `sleep` falsos:
   Confirmado. Bug, ready-for-agent (Q7, proxy). Fica `trap 'exit 1' INT
   TERM` com `trap restore EXIT`, para não religar duas vezes. O HUP é
   no-op sob `nohup`.
+
+- Stage 2 (2026-10-03): seam aprovada: `phone.ps1 wifi-off`, com adb falso
+  executando o script capturado em Git Bash. Callers examinados: launcher nohup,
+  reconexão e leitura do log no PC; `restore` só é chamado pelo EXIT e
+  `wait_wifi` pela desativação/restauração. Cobertos sinais durante sleep,
+  falhas transitórias/permanentes de enable e os nove cenários existentes.
+  Red: `node --test --test-name-pattern='wifi-off confirms' qa/phone.test.mjs`
+  teve 9 passes e 5 falhas (quatro cenários novos + o teste pai): TERM saiu
+  com 3840, INT com 0; os dois cenários de retry fizeram só uma tentativa.
+- Green: o mesmo comando passou 14/14 (13 cenários + pai). INT e TERM
+  encerram com código 1 e restauram exatamente uma vez; enable transitório
+  confirma na terceira chamada; falha permanente faz cinco chamadas, sem
+  marcador de restauração e com erro reportado pelo PC. Os nove cenários
+  anteriores permanecem verdes.
+- Gate completo: `powershell -ExecutionPolicy Bypass -File .\gate.ps1`,
+  exit 0, `gate: passou`: fmt, clippy, 83 testes Rust, typecheck, 61 testes
+  da UI e 73 testes QA passaram; Gradle check BUILD SUCCESSFUL (41 tarefas,
+  1 executada, 40 up-to-date). Diff revisado: só Primary files e este ticket;
+  testes em commits separados da implementação. Sem teste em aparelho real
+  neste stage 2; a evidência de sinais usa Git Bash e comandos Android falsos.
+
+- Stage 3 (2026-10-03): corrigida a posição dos comentários do stage 2 para
+  preservar a cronologia exigida pelo tracker. Revisão Standards/Spec e QA
+  Android registrados no [relatório](../../qa-runs/2026-10-03-emulator-CLEAN-023-review.md).
+  INT e TERM confirmados pelo trace `sleep 6 -> exit 1 -> restore`, com uma
+  restauração; retries transitório e permanente também conferidos. O dump
+  integral excede o limite do `printf`, problema anterior anotado no CLEAN-027;
+  a prova Android filtrou somente a linha real de estado do `dumpsys`.
+  Gate de stage 3 ainda pendente neste checkpoint. Nenhum `Proxy decided`
+  consta no ticket; não houve mudança de contrato nem de código de produção.

@@ -226,10 +226,16 @@ wait_wifi() {
     return 1
 }
 restore() {
-    if svc wifi enable && wait_wifi enabled; then echo QA_WIFI_RESTORED; fi
+    for restore_attempt in 1 2 3 4 5; do
+        if svc wifi enable && wait_wifi enabled; then
+            echo QA_WIFI_RESTORED
+            break
+        fi
+    done
     rm -f __REMOTE__
 }
 trap restore EXIT
+trap 'exit 1' INT TERM
 svc wifi disable && wait_wifi disabled || exit 1
 echo QA_WIFI_DISABLED
 sleep __SECONDS__
