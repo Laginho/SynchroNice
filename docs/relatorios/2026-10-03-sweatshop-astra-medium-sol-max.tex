@@ -1,0 +1,502 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs,array,tabularx,longtable}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+\emergencystretch=2em
+
+\definecolor{sol}{HTML}{3B6EA8}
+\definecolor{ocioso}{HTML}{BBBBBB}
+\definecolor{perda}{HTML}{C0504D}
+
+\title{Sweatshop: limpeza do kit de QA em astra medium\\\large gpt-6-astra (medium) no stage 2 e no hard; gpt-6.1-sol (max) no stage 3}
+\author{Foreman, sessão \texttt{sweatshop/2026-10-03-1608}}
+\date{3 e 4 de outubro de 2026}
+
+\begin{document}
+\shorthandoff{"}
+\maketitle
+
+\section*{Resumo}
+
+Run sobre a fila \texttt{.scratch/qa/} (CLEAN-018 a CLEAN-026, consertos do
+kit de QA: \texttt{phone.ps1}, \texttt{pc.ps1}, \texttt{up}/\texttt{down},
+\texttt{dump.mjs}) mais o SYN-030 do Android/PC (autostart opcional no
+Windows). Escalação pedida pelo humano na linha de comando: \texttt{gpt-6-astra
+medium} no stage 2 e no hard, \texttt{gpt-6.1-sol max} no stage 3.
+
+\begin{itemize}
+  \item \textbf{Produzido:} \textbf{10 tickets mergeados} na sessão, todos
+        \emph{Approve}; SYN-030 com \texttt{Review: human}. A fila ficou sem
+        ticket rodável (``Nothing runnable''). PR de sessão:
+        \href{https://github.com/Laginho/SynchroNice/pull/10}{\#10} (o corpo
+        lista 11: o SYN-025, já fechado, entrou porque a revisão do CLEAN-026
+        escreveu uma observação nele). As revisões abriram quatro tickets
+        \texttt{needs-triage} (CLEAN-027 a CLEAN-030) e o proxy mais dois, das
+        observações deixadas em tickets fechados (CLEAN-031 e CLEAN-032).
+  \item \textbf{Custo:} \textbf{\$82,68} a preço de lista em 25 estágios com
+        preço, mais 2 sem preço (as duas revisões que chegaram ao limite:
+        SYN-030 e a primeira do CLEAN-026). Por modelo: astra medium \$58,40
+        (13 implementações), sol max \$24,27 (+2 sem preço). 737 min de estágio
+        em 12\,h\,45 de relógio (16:08--04:53); 123,0\,M tokens de entrada
+        (97,4\,\% em cache) e 570\,k de saída.
+  \item \textbf{O que deu errado:} \textbf{limites de tempo, não modelos.} O
+        driver morreu às 18:08 pelo teto de 2\,h das tarefas de fundo do Claude
+        Code (o foreman o lançou assim); um \texttt{adb} órfão segurou a revisão
+        do SYN-030 até os 60 min; e a revisão do CLEAN-026 estourou os 60 min
+        no meio do QA, depois de commitar um conserto próprio, e precisou do
+        proxy e de uma segunda revisão de 73 min.
+  \item \textbf{Veredito provisório:} astra medium implementa rápido (13 min
+        em média) e limpo, com TDD vermelho/verde em todos os tickets que o
+        pediam, mas a \$4,49 por implementação é o implementador mais caro por
+        estágio sob sol max. Reabriu 3 de 10 tickets na primeira revisão, os
+        três por critério explícito. Sol max reproduziu cada achado no
+        emulador ou no Windows real e passou a abrir ticket de triagem para o
+        que está fora do contrato, em vez de reabrir.
+\end{itemize}
+
+\section{Linha do tempo}
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+\multicolumn{2}{@{}l}{\textbf{03/10}}\\
+16:08 & Lançamento como tarefa de fundo. SYN-030 implementação (38 min,
+        \$11,14); o gate só passou com \texttt{RUST\_TEST\_THREADS=1} (teste de
+        upload concorrente instável e timeout do QA de Wi-Fi desligado).\\
+17:30 & SYN-030 revisão termina o turno, mas um \texttt{adb} órfão do kit
+        herdou o pipe e o \texttt{codex exec} não sai. O humano mata o
+        \texttt{adb} às 17:47, o mesmo minuto do limite de 60 min: mergeado,
+        sem preço.\\
+17:59 & CLEAN-018 implementação (13 min).\\
+18:08 & \textbf{O driver morre} com a tarefa de fundo, no teto de 2\,h do
+        Claude Code, no meio da revisão do CLEAN-018. Árvore limpa, nada
+        logado. O foreman volta para \texttt{main} e relança destacado
+        (\texttt{Start-Process}); a skill foreman é corrigida
+        (\texttt{83cd817}, Agent-Skills).\\
+18:11 & CLEAN-018 revisão 1. Um emulador órfão da revisão morta ocupa as
+        portas; o foreman o encerra (\texttt{adb emu kill}). \textbf{Reabre} às
+        18:38. Rodada 2 (7 + 35 min) mergeia às 19:20.\\
+19:20 & CLEAN-019 (8 min). Revisão 1 \textbf{reabre} às 20:18 (atalho
+        \texttt{.lnk} reciclado relatado como remoção permanente). Rodada 2
+        (10 + 34 min) mergeia às 21:02.\\
+21:03 & CLEAN-020 (11 + 28 min), CLEAN-021 (12 + 47 min) e CLEAN-022
+        (13 + 24 min), todos de primeira. A revisão do CLEAN-021 deixa no
+        CLEAN-019, já fechado, uma observação do MediaStore.\\
+23:18 & CLEAN-023 (14 + 40 min), de primeira; a revisão abre o CLEAN-027.\\
+\multicolumn{2}{@{}l}{\textbf{04/10}}\\
+00:13 & CLEAN-024 (11 + 41 min), de primeira; a revisão abre CLEAN-028 e
+        CLEAN-029.\\
+01:05 & CLEAN-025 (16 min). Revisão 1 \textbf{reabre} às 01:45 (aspas
+        simples no XML real). Rodada 2 (9 + 23 min) mergeia às 02:18.\\
+02:18 & CLEAN-026 implementação (9 min, sem teste novo por exceção da
+        triagem).\\
+03:27 & CLEAN-026 revisão: \textbf{limite de 60 min} no meio do QA, depois de
+        commitar \texttt{f3436e6}. O driver salva a recuperação e marca
+        \texttt{blocked}; ``Nothing runnable'', PR \#10. O proxy manda uma
+        revisão nova com 75 min e acha o bug do \texttt{pc.pid} vazio.\\
+03:39 & Relançado. A revisão 2 faz mais três consertos e mergeia às 04:53
+        (73 min). Fila vazia.\\
+\bottomrule
+\end{tabularx}
+
+\section{Métricas por estágio}
+
+As 27 linhas de \texttt{.scratch/run-log.md} do run (dia/hora em que o
+estágio terminou). ``?'' é estágio que o driver não precificou: as duas
+revisões que chegaram ao limite.
+
+\medskip
+\noindent{\footnotesize
+\begin{longtable}{@{}l l l r r r r r l@{}}
+\toprule
+Fim & Ticket & Estágio & Min & Entrada & Cache & Saída & Custo & Desfecho\\
+\midrule
+\endhead
+03/16:47 & SYN-030 & impl. & 38 & 9,2\,M & 99\,\% & 15\,k & 11,138 & to-review\\
+03/17:47 & SYN-030 & rev. & 60 & ? & ? & ? & ? & mergeado (limite)\\
+03/17:59 & CLEAN-018 & impl. & 13 & 2,9\,M & 97\,\% & 7\,k & 3,914 & to-review\\
+03/18:38 & CLEAN-018 & rev. & 27 & 4,9\,M & 97\,\% & 21\,k & 1,408 & reaberto\\
+03/18:45 & CLEAN-018 & impl. & 7 & 1,5\,M & 94\,\% & 4\,k & 2,531 & to-review\\
+03/19:20 & CLEAN-018 & rev. & 35 & 6,2\,M & 98\,\% & 35\,k & 1,809 & mergeado\\
+03/19:28 & CLEAN-019 & impl. & 8 & 2,5\,M & 97\,\% & 10\,k & 3,708 & to-review\\
+03/20:18 & CLEAN-019 & rev. & 50 & 6,9\,M & 97\,\% & 60\,k & 2,339 & reaberto\\
+03/20:28 & CLEAN-019 & impl. & 10 & 2,0\,M & 97\,\% & 4\,k & 2,799 & to-review\\
+03/21:02 & CLEAN-019 & rev. & 34 & 7,7\,M & 98\,\% & 39\,k & 2,197 & mergeado\\
+03/21:14 & CLEAN-020 & impl. & 11 & 2,7\,M & 97\,\% & 10\,k & 3,937 & to-review\\
+03/21:42 & CLEAN-020 & rev. & 28 & 5,1\,M & 97\,\% & 28\,k & 1,551 & mergeado\\
+03/21:54 & CLEAN-021 & impl. & 12 & 3,7\,M & 98\,\% & 7\,k & 4,781 & to-review\\
+03/22:40 & CLEAN-021 & rev. & 47 & 8,4\,M & 95\,\% & 49\,k & 2,938 & mergeado\\
+03/22:54 & CLEAN-022 & impl. & 13 & 3,4\,M & 98\,\% & 7\,k & 4,414 & to-review\\
+03/23:18 & CLEAN-022 & rev. & 24 & 5,9\,M & 98\,\% & 26\,k & 1,643 & mergeado\\
+03/23:33 & CLEAN-023 & impl. & 14 & 4,1\,M & 98\,\% & 7\,k & 5,116 & to-review\\
+04/00:13 & CLEAN-023 & rev. & 40 & 7,0\,M & 98\,\% & 47\,k & 2,168 & mergeado\\
+04/00:24 & CLEAN-024 & impl. & 11 & 4,5\,M & 98\,\% & 10\,k & 5,808 & to-review\\
+04/01:05 & CLEAN-024 & rev. & 41 & 5,9\,M & 98\,\% & 46\,k & 1,868 & mergeado\\
+04/01:21 & CLEAN-025 & impl. & 16 & 3,0\,M & 97\,\% & 7\,k & 4,000 & to-review\\
+04/01:45 & CLEAN-025 & rev. & 24 & 4,0\,M & 97\,\% & 21\,k & 1,213 & reaberto\\
+04/01:55 & CLEAN-025 & impl. & 9 & 2,5\,M & 98\,\% & 5\,k & 3,230 & to-review\\
+04/02:18 & CLEAN-025 & rev. & 23 & 4,6\,M & 97\,\% & 25\,k & 1,379 & mergeado\\
+04/02:27 & CLEAN-026 & impl. & 9 & 2,1\,M & 97\,\% & 6\,k & 3,027 & to-review\\
+04/03:27 & CLEAN-026 & rev. & 60 & ? & ? & ? & ? & \textcolor{perda}{limite, blocked}\\
+04/04:53 & CLEAN-026 & rev. & 73 & 12,3\,M & 97\,\% & 74\,k & 3,761 & mergeado\\
+\midrule
+\multicolumn{3}{@{}l}{Total} & 737 & 123,0\,M & 97,4\,\% & 570\,k & 82,68 & 25 com preço\\
+\multicolumn{3}{@{}l}{Sem preço} & 120 & ? & & ? & ? & 2 no limite\\
+\bottomrule
+\end{longtable}}
+
+A revisão do SYN-030 não tem custo porque o driver só registra o uso quando
+o processo sai. O \texttt{turn.completed} do seu \texttt{.txt} dá 7,19\,M de
+entrada (7,03\,M em cache) e 42,6\,k de saída em 43 min, perto de \$2 pela
+proporção das outras revisões em sol max; fica fora do total. A revisão do
+CLEAN-018 morta às 18:08 pelo teto das tarefas de fundo não está no log.
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar stacked, bar width=16pt, width=\linewidth, height=6.4cm,
+  ylabel={Minutos de estágio}, ymin=0,
+  symbolic x coords={SYN-030,CLEAN-018,CLEAN-019,CLEAN-020,CLEAN-021,CLEAN-022,CLEAN-023,CLEAN-024,CLEAN-025,CLEAN-026},
+  xtick=data, x tick label style={font=\scriptsize,rotate=35,anchor=east},
+  legend style={at={(0.02,0.97)},anchor=north west,draw=none,font=\small},
+  axis lines*=left, ymajorgrids, grid style={gray!25}]
+\addplot[fill=sol,draw=none] coordinates
+  {(SYN-030,81) (CLEAN-018,82) (CLEAN-019,102) (CLEAN-020,39) (CLEAN-021,59) (CLEAN-022,37) (CLEAN-023,54) (CLEAN-024,52) (CLEAN-025,72) (CLEAN-026,82)};
+\addplot[fill=perda,draw=none] coordinates
+  {(SYN-030,17) (CLEAN-018,0) (CLEAN-019,0) (CLEAN-020,0) (CLEAN-021,0) (CLEAN-022,0) (CLEAN-023,0) (CLEAN-024,0) (CLEAN-025,0) (CLEAN-026,60)};
+\legend{estágio concluído, perdido (processo preso, limite)}
+\end{axis}
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Onde foi o custo.} Por ticket, só estágios com preço: SYN-030
+\$11,14 (+1 sem preço), CLEAN-019 \$11,04, CLEAN-025 \$9,82, CLEAN-018
+\$9,66, CLEAN-021 \$7,72, CLEAN-024 \$7,68, CLEAN-023 \$7,28, CLEAN-026 \$6,79
+(+1), CLEAN-022 \$6,06, CLEAN-020 \$5,49. O implementador custou 71\,\% do
+run: astra medium leu 2--9\,M tokens por implementação, quase tudo em cache,
+e cada uma saiu entre \$2,53 e \$11,14. A perda foi de tempo: 17 min da
+revisão do SYN-030 depois do turno terminar e os 60 min da primeira revisão
+do CLEAN-026, cujo conserto (\texttt{f3436e6}) sobreviveu.
+
+\section{Comparação}
+
+Números de \texttt{run-log.md}. O run de 01--03/10 é o do relatório
+\path{2026-10-01-sweatshop-astra-sol-sonnet-5.5.pdf}.
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}X r r@{}}
+\toprule
+& misto, 01--03/10 & astra medium, 03--04/10\\
+\midrule
+Estágios no log & 42 & 27\\
+Tickets mergeados & 7 & 10\\
+Minutos de estágio por ticket mergeado & 169 & 74\\
+Minutos por ticket, mediana & 173 (34--298) & 66 (37--142)\\
+Custo por ticket mergeado (com preço) & \$3,33--21,03 & \$5,49--11,14\\
+Reaberturas & 8 & 3\\
+Minutos por implementação até \texttt{to-review}, média & 26,4 & 13,2\\
+Minutos por revisão concluída, média & 35,4 & 38,9\\
+Custo registrado & \$83,91 & \$82,68\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+Ressalva: os tickets são outros. O run anterior tinha concorrência no backend
+Rust e na UI; este tem scripts do kit (PowerShell e Node), com o SYN-030 como
+único ticket de app. A revisão ficou tão longa quanto antes porque quase toda
+reproduziu no emulador, no PC isolado ou no Windows real (Lixeira, processos).
+O mesmo custo comprou 10 tickets em vez de 7, mas o preço por implementação
+subiu: \$4,49 em média, contra \$0,62--2,26 do sonnet-5.5 high.
+
+\section{Atribuição das reaberturas}
+
+Três rodadas reabertas, um achado cada, mais quatro consertos feitos pela
+própria revisão do CLEAN-026 (rodada 0). O revisor de todas foi
+\texttt{gpt-6.1-sol max}, que não é o modelo do foreman (Opus 5.5); o próprio
+foreman classificou com a rubrica, a partir do comentário de reabertura, do
+ticket no stage 2 e do diff. Linhas em \path{.scratch/reopen-attribution.md}.
+
+\medskip
+\noindent{\scriptsize\sloppy
+\begin{longtable}{@{}l c >{\raggedright\arraybackslash}p{2.6cm} >{\raggedright\arraybackslash}p{5.0cm} >{\raggedright\arraybackslash}p{5.2cm}@{}}
+\toprule
+Ticket & R & Rótulo & Achado & Porquê\\
+\midrule
+\endhead
+CLEAN-018 & 1 & S2-explícito/código ? & \texttt{nome\_instancia} ou \texttt{token} como array, ou com LF no fim, ainda passam pelo \texttt{pair} e disparam \texttt{am start} & O critério 1 manda recusar config sem nome ou token válido; o que é válido está no código (\texttt{config.rs} declara \texttt{Option<String>}, o QR Android usa \texttt{Regex.matches} integral). O ? porque o ticket era só cobertura e não lista os formatos (1e4bc70)\\
+CLEAN-019 & 1 & S2-explícito/código & Um \texttt{.lnk} reciclado é relatado como remoção permanente: \texttt{qa/pc.ps1:99--102} usa \texttt{System.ItemNameDisplay}, que omite a extensão & O critério 7 pede destino \texttt{Lixeira do Windows} com o arquivo na Lixeira; as linhas são do próprio stage 2 (e958f49). Corrigir é só cuidado (2c3bb37)\\
+CLEAN-025 & 1 & S2-explícito/código ? & \texttt{tap -By text} não acha \texttt{say "hi"}: o uiautomator real serializa \texttt{text='say "hi"'} e \texttt{findNode} só aceita aspas duplas & O critério 1 pede achar o nó num dump com ele. O ? porque o formato com aspas simples é do Android, não do ticket nem do repo; a leitura estática da revisão também não o viu, só o QA real (b3cb058)\\
+CLEAN-026 & 0 & S2-implícito & Duas corridas de reutilização de PID no cleanup do launcher (handle não retido; filtro de filhos aceita filhos de um novo dono do PID) & O critério 2 pede que nenhum \texttt{pc.exe} do launcher sobreviva; são caminhos de concorrência do código do stage 2. Conserto da primeira revisão, que morreu no limite (e3bc975)\\
+CLEAN-026 & 0 & S2-explícito/código ? & \texttt{pc.pid} vazio vira AutomationNull, o \texttt{-notmatch} não dispara o erro de PID e o \texttt{start} segue com o pid 0 (Idle) até \texttt{CDP indisponivel} & O critério 2 trata do prazo do PID estourado. O ? porque o bug vem do SYN-025, anterior ao ticket; quem o achou foi o proxy, lendo a evidência da revisão morta (aeb080f)\\
+CLEAN-026 & 0 & S2-explícito/código & \texttt{WaitForExit} falso deixava de ser erro se o processo saísse antes do \texttt{catch} & O critério 1 diz que um processo que não sai no prazo gera erro com o PID; o \texttt{Stop-AndWait} é do stage 2 (5ce2e13)\\
+CLEAN-026 & 0 & S2-explícito/código & O erro do \texttt{Stop-AndWait} no filho era engolido pela captura de identidade e não chegava à falha externa & Critério 1, mesmo helper do stage 2 (0a91d4b)\\
+\bottomrule
+\end{longtable}}
+
+Totais: 6 S2-explícito/código (3 com ?), 0 S2-explícito/teste, 1
+S2-implícito, 0 S1, 0 S3. Todas são do implementador. O CLEAN-026 não tinha
+testes de stage 2 por exceção da triagem, e todos os seus achados vieram da
+leitura e do QA da revisão.
+
+\paragraph{O que é do stage 3.} Sem \emph{drip-feeding} nem \emph{churn} nas
+três reaberturas: cada rodada 2 mergeou sem achado novo. O CLEAN-026 é o caso
+à parte: a revisão consertou em vez de reabrir, quatro vezes, porque o ticket
+dispensava teste novo, e não viu o bug do \texttt{pc.pid} vazio que o proxy
+achou lendo a transcrição da revisão morta.
+
+\section{Scoreboard}
+
+Saída de \path{sweatshop/scripts/scoreboard.ps1} sobre os cinco repositórios
+desta máquina com \path{.scratch/run-log.md} (SynchroNice, ClassyCall,
+PhysiSyst, SIGAA-ME, slip), depois de registrar a atribuição acima.
+Cumulativo.
+
+\medskip
+\noindent{\scriptsize
+\begin{tabularx}{\linewidth}{@{}X r r r r r r@{}}
+\toprule
+Implementer & Stage runs & To review & Failed & Asked & Median min to review & Cost\\
+\midrule
+gpt-6-astra medium & 55 & 45 & 1 & 9 & 10m & \$160.16 (55/55 priced)\\
+sonnet & 121 & 75 & 31 & 15 & 7m & \$10.53 (4/121 priced)\\
+opus-5.5 & 35 & 31 & 4 & 0 & 6m & \$0.72 (1/35 priced)\\
+gpt-6.1-sol high & 38 & 33 & 0 & 5 & 8m & \$29.32 (38/38 priced)\\
+sonnet-5.5 high & 16 & 15 & 1 & 0 & 7m & \$28.15 (16/16 priced)\\
+sonnet-5.5 xhigh & 9 & 8 & 1 & 0 & 25m & \$35.54 (9/9 priced)\\
+opus-5.5 high & 2 & 2 & 0 & 0 & 9m & \$2.31 (2/2 priced)\\
+fable & 5 & 5 & 0 & 0 & 3m & ?\\
+gpt-6-luna & 23 & 11 & 10 & 2 & 26m & ?\\
+gpt-6-sol & 6 & 5 & 1 & 0 & 17m & ?\\
+gpt-5.6-sol & 5 & 4 & 1 & 0 & 17m & ?\\
+gpt-6-astra & 18 & 11 & 6 & 1 & 8m & ?\\
+sonnet-5 xhigh & 11 & 6 & 2 & 3 & 8m & \$18.09 (11/11 priced)\\
+gpt-6-astra low & 2 & 2 & 0 & 0 & 30m & \$19.03 (2/2 priced)\\
+gpt-6.1-sol max & 3 & 1 & 2 & 0 & 17m & \$1.44 (1/3 priced)\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+\noindent{\scriptsize
+\begin{tabular}{@{}l l r r r r r r r@{}}
+\toprule
+Implementador & Revisor & Reviews & Reabertos & Taxa & Por S2 & Taxa S2 & Sem rótulo & S2 na revisão\\
+\midrule
+gpt-6-astra medium & gpt-6.1-sol max & 35 & 7 & 20\% & 6 & 17\% & 0 & 1\\
+sonnet & opus & 68 & 20 & 29\% & 1 & $\geq$1\% & 19 & 0\\
+? & opus & 4 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+opus-5.5 & fable-5.1 & 30 & 1 & 3\% & 0 & $\geq$0\% & 1 & 0\\
+gpt-6.1-sol high & gpt-6.1-sol max & 32 & 8 & 25\% & 7 & 22\% & 0 & 0\\
+sonnet-5.5 high & gpt-6.1-sol max & 12 & 3 & 25\% & 3 & 25\% & 0 & 0\\
+sonnet-5.5 xhigh & gpt-6.1-sol max & 7 & 3 & 43\% & 3 & 43\% & 0 & 0\\
+opus-5.5 high & fable-5.1 high & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+opus-5.5 high & opus-5.5 xhigh & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+sonnet-5.5 high & opus-5.5 xhigh & 3 & 0 & 0\% & 0 & 0\% & 0 & 3\\
+sonnet-5.5 xhigh & opus-5.5 xhigh & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+gpt-6-astra medium & gpt-6-astra xhigh & 10 & 1 & 10\% & 1 & 10\% & 0 & 0\\
+sonnet & fable & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+fable & fable & 4 & 1 & 25\% & 0 & $\geq$0\% & 1 & 0\\
+gpt-6-luna & gpt-6-sol & 11 & 7 & 64\% & 0 & $\geq$0\% & 7 & 0\\
+gpt-6-sol & gpt-5.6-sol & 5 & 4 & 80\% & 0 & $\geq$0\% & 4 & 0\\
+gpt-5.6-sol & gpt-6-astra & 4 & 3 & 75\% & 0 & $\geq$0\% & 3 & 0\\
+gpt-6-astra & gpt-5.6-sol & 11 & 5 & 45\% & 0 & $\geq$0\% & 5 & 0\\
+sonnet-5 xhigh & opus-5.5 xhigh & 5 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+gpt-6-astra low & gpt-6.1-sol max & 2 & 1 & 50\% & 1 & 50\% & 0 & 0\\
+gpt-6.1-sol max & gpt-6.1-sol max & 1 & 1 & 100\% & 1 & 100\% & 0 & 0\\
+\bottomrule
+\end{tabular}}
+
+\medskip
+\noindent{\scriptsize
+\begin{tabularx}{\linewidth}{@{}X r r r r r r@{}}
+\toprule
+Implementer $\to$ Reviewer & Rounds & S2 explicit code & S2 explicit test & S2 implicit & S1 & S3 noise\\
+\midrule
+gpt-6-astra medium $\to$ gpt-6.1-sol max & 8 & 11 & 1 & 4 & 1 & 0\\
+gpt-6.1-sol high $\to$ gpt-6.1-sol max & 9 & 5 & 0 & 9 & 1 & 0\\
+sonnet-5.5 high $\to$ gpt-6.1-sol max & 3 & 5 & 0 & 2 & 3 & 0\\
+sonnet-5.5 xhigh $\to$ gpt-6.1-sol max & 3 & 7 & 0 & 3 & 2 & 0\\
+sonnet-5.5 high $\to$ opus-5.5 xhigh & 3 & 1 & 2 & 0 & 0 & 0\\
+gpt-6-astra medium $\to$ gpt-6-astra xhigh & 1 & 1 & 0 & 0 & 0 & 0\\
+sonnet $\to$ opus & 1 & 1 & 1 & 0 & 0 & 0\\
+gpt-6-astra low $\to$ gpt-6.1-sol max & 1 & 2 & 0 & 1 & 0 & 0\\
+gpt-6.1-sol max $\to$ gpt-6.1-sol max & 1 & 4 & 0 & 1 & 0 & 0\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+\noindent{\scriptsize Cobertura de evidência (saída da mesma execução):
+68 achados registrados por \emph{ticket-review}; ``earlier review miss'' 0
+de 10 conhecidos e ``review-induced churn'' 0 de 10. Do fim do turno à saída
+do processo: 108,4\,s em 74 estágios medidos, 548 sem medida. Intervenções
+registradas: 1 resgate humano, 5 recuperações automáticas, 7 decisões do
+proxy.}
+
+\paragraph{O que mudou desde o relatório de 01/10.}
+\begin{itemize}
+  \item \textbf{Linha nova com amostra:} \texttt{gpt-6-astra medium $\to$
+        gpt-6.1-sol max}, 35 revisões (13 deste run, as demais de runs de
+        02--03/10 em outros repositórios), 20\,\% de reabertura e 17\,\% S2,
+        sem reabertura sem rótulo. É a menor taxa S2 sob sol max entre os
+        pares com 10 ou mais revisões.
+  \item \textbf{\texttt{gpt-6-astra medium} como implementador:} de 4 para 55
+        estágios; mediana até review de 11 para 10 min; \$2,91 por estágio.
+  \item \textbf{\texttt{gpt-6-astra medium $\to$ gpt-6-astra xhigh}:} de 2
+        para 10 revisões (outro repositório), 10\,\% S2. Revisor diferente: não
+        compara com sol max.
+  \item Os demais pares não mudaram.
+\end{itemize}
+
+\paragraph{Implementadores sob o mesmo revisor} (\texttt{gpt-6.1-sol max}):
+astra medium 17\,\% S2 em 35, sol high 22\,\% em 32, sonnet-5.5 high 25\,\%
+em 12. Os três ainda empatam dentro do ruído dessas amostras. O preço não
+empata: \$2,91 por estágio para astra medium, \$0,77 para sol high e \$1,76
+para sonnet-5.5 high. Leia o ``S2 na revisão'' ao lado: astra medium tem 1
+revisão que consertou em vez de reabrir (o CLEAN-026, com quatro consertos),
+então a falta real dele é um pouco maior que os 17\,\%.
+
+\section{Observações sobre os modelos}
+
+\subsection*{gpt-6-astra (medium), implementação}
+\begin{itemize}
+  \item \textbf{Rápido e disciplinado:} 7--16 min por implementação nos
+        tickets do kit (38 no SYN-030), testes em commit próprio antes do
+        conserto, gate completo antes de \texttt{to-review}.
+  \item \textbf{Caro por estágio:} \$2,53--11,14; o SYN-030 sozinho custou
+        \$11,14 com 9,2\,M tokens de entrada.
+  \item \textbf{Cobre o caso do ticket, não o do aparelho:} as três
+        reaberturas foram entradas que o critério já cobria e o teste não
+        exercitava (array e LF no Par, \texttt{.lnk}, aspas simples no XML).
+  \item No CLEAN-020 rodou a prova vermelha com \texttt{node --test} em vez de
+        \texttt{gate.ps1 -TestsOnly}; a revisão anotou e aceitou. No CLEAN-024
+        relatou o exit 1 do PowerShell 5.1 (stderr nativo como
+        \texttt{NativeCommandError}) com o gate interno verde; a revisão
+        rodou o gate de novo e confirmou.
+\end{itemize}
+
+\subsection*{gpt-6.1-sol (max), revisão}
+\begin{itemize}
+  \item \textbf{Reproduz de verdade:} Lixeira real do Windows por SHA-256,
+        MediaStore no emulador, PC isolado, \texttt{up}/\texttt{down} reais. Os
+        três reprovações vieram reproduzidos.
+  \item \textbf{Abre ticket em vez de reabrir} o que está fora do contrato:
+        CLEAN-027 (\texttt{dumpsys} grande no \texttt{wait\_wifi}), CLEAN-028 e
+        CLEAN-029 (bordas da restauração do PC), CLEAN-030 (helper duplicado),
+        cada um com reprodução.
+  \item \textbf{Mas também escreve em ticket fechado:} duas observações foram
+        parar no CLEAN-019 e no SYN-025, que ninguém lê depois do
+        \texttt{done}. O proxy as transformou em CLEAN-031 e CLEAN-032 depois do
+        run.
+  \item \textbf{Conserta quando o ticket dispensa teste:} no CLEAN-026 fez
+        quatro commits de código próprio e consumiu 60 + 73 min. A primeira
+        revisão morreu no limite sem veredito.
+  \item \textbf{Falso negativo do próprio script:} na rodada 2 do CLEAN-019 o
+        auxiliar de QA que ela escreveu comparou mal e lançou ``Repeated clean
+        changed the recorded result''; ela mesma corrigiu e seguiu.
+\end{itemize}
+
+\section{Integração com o Codex, o Claude e o driver}
+\begin{itemize}
+  \item \textbf{Teto de 2\,h das tarefas de fundo do Claude Code:} matou o
+        driver às 18:08 (em 02/10 uma tarefa durou 10\,h). A skill foreman
+        agora lança o driver destacado, com saída em
+        \texttt{run-log/driver-<when>.out} (\texttt{83cd817}, Agent-Skills). O
+        relançamento seguiu até o fim, sem perder nada.
+  \item \textbf{\texttt{adb} órfão segura o \texttt{codex exec}:} o servidor
+        \texttt{adb} criado pelo kit dentro da revisão herda o pipe, e o processo
+        não sai depois do \texttt{turn.completed}. Custou 17 min e o preço da
+        revisão do SYN-030. Contorno do run: um servidor \texttt{adb} iniciado
+        pelo foreman (18:39), que as revisões seguintes reaproveitaram; nenhuma
+        travou de novo.
+  \item \textbf{Emulador órfão de revisão morta:} o \texttt{down} pulou o
+        emulador porque o \texttt{emulator.json} já dizia inativo, e a revisão
+        seguinte achou as portas ocupadas. O CLEAN-026 tratou parte disso
+        (paradas esperam o processo sair).
+  \item \textbf{Limite de 60 min na revisão com conserto próprio:} a revisão
+        do CLEAN-026 acabou em ``incomplete handoff'' e o driver salvou a
+        recuperação num ref de \path{refs/sweatshop-recovery/}. O
+        relançamento com \texttt{-ReviewMinutes 75} coube por 2 min.
+  \item \textbf{Coluna nova no log:} as linhas a partir das 18:38 trazem
+        ``Shutdown s'' (do fim do turno à saída do processo); a maior foi
+        10,2\,s, na revisão 1 do CLEAN-018.
+  \item \textbf{Gate:} o SYN-030 só passou com \texttt{RUST\_TEST\_THREADS=1}
+        (upload concorrente instável e timeout do QA de Wi-Fi desligado).
+\end{itemize}
+
+\section{Recomendações}
+\begin{enumerate}
+  \item \textbf{Driver ou kit: não deixar o \texttt{adb} herdar o pipe do
+        runtime.} Subir o servidor \texttt{adb} antes do estágio (como o
+        foreman fez por acaso) ou com \texttt{start-server} destacado no
+        \texttt{up.ps1}. O humano recusou matar o \texttt{adb} no driver
+        porque o driver serve outros repositórios.
+  \item \textbf{Limites: \texttt{-ReviewMinutes 75}} quando o ticket dispensa
+        teste de stage 2: a revisão vira o único lugar de prova e tende a
+        consertar. A revisão 2 do CLEAN-026 terminou aos 73 min.
+  \item \textbf{ticket-flow, stage 3: observação fora do contrato vira ticket
+        \texttt{needs-triage}, nunca comentário em ticket fechado.} Duas se
+        perderiam (CLEAN-019, SYN-025).
+  \item \textbf{Stage 1: exceção de teste com cuidado.} O CLEAN-026 sem testes
+        rendeu quatro consertos na revisão e um bug achado só pelo proxy. Se o
+        \texttt{start} não pode ser testado com o \texttt{pc.exe} real, pedir
+        um executável falso do kit no ticket (a revisão acabou fazendo isso).
+  \item \textbf{Triagem:} CLEAN-027 a CLEAN-032. Os dois últimos o proxy
+        abriu das observações em tickets fechados.
+  \item \textbf{Escalação:} astra medium não se paga contra sol high sob
+        \texttt{gpt-6.1-sol max} (linhas \texttt{gpt-6-astra medium $\to$
+        gpt-6.1-sol max}, 35 revisões, S2 17\,\%, e \texttt{gpt-6.1-sol high
+        $\to$ gpt-6.1-sol max}, 32 revisões, S2 22\,\%): diferença dentro do
+        ruído, a 3,8 vezes o custo por estágio. Usar astra medium quando a
+        cota do sol estiver apertada, não como padrão.
+  \item \textbf{Flaky:} o teste de upload concorrente do Rust e o QA de Wi-Fi
+        desligado que forçaram \texttt{RUST\_TEST\_THREADS=1} no SYN-030.
+  \item \textbf{Mergear o PR \#10} antes do próximo run.
+\end{enumerate}
+
+\section{Decisões do proxy}
+\begin{itemize}
+  \item \textbf{CLEAN-026:} ``retomar com um stage 3 novo (mesma lineup, no
+        próximo run com \texttt{-ReviewMinutes 75}) sobre a branch
+        \texttt{clean-026} inteira, \texttt{f3436e6} incluído, com gate e QA
+        novos; \texttt{Stage: to-review} aqui e na sessão; o CLEAN-030 do stash
+        de recuperação entra como ticket \texttt{needs-triage} nesta branch ---
+        a revisão morreu no limite de 60 min sem veredito, o stash
+        \texttt{refs/sweatshop-recovery/5336c8b9\ldots} não tem mudança
+        rastreada (só o arquivo do CLEAN-030), e \texttt{f3436e6} foi escrito
+        pelo próprio revisor e não passou por outra leitura nem pelo gate.''
+  \item \textbf{CLEAN-019} (observação do QA do CLEAN-021): ``a observação
+        vira o ticket novo CLEAN-031 (\texttt{needs-triage}); este ticket segue
+        done, sem mudar critérios --- é um destino relatado que não confere com
+        o real, o que as histórias 9 e 10 pedem acertar, e nenhum aberto
+        (CLEAN-027 a 030) trata da limpeza do celular.''
+  \item \textbf{SYN-025} (observação do QA do CLEAN-026): ``a observação vira
+        o ticket novo CLEAN-032 (\texttt{needs-triage}); este ticket segue done
+        --- a sonda contava \texttt{qemu-system-x86\_64}/\texttt{emulator},
+        então o próprio emulador sobreviveu ao \texttt{down} (critério 5), e
+        nenhum aberto o absorve: CLEAN-028/029 tratam da restauração do PC
+        real, CLEAN-030 só da duplicação do \texttt{Stop-AndWait}.''
+\end{itemize}
+
+\section{Débito humano}
+Do run (\texttt{grep -rh 'Débito humano:' .scratch/} na sessão, só as linhas
+deste run). Sem aparelho: todo QA foi no emulador e no Windows desta máquina;
+o passo do Redmi pós-run não rodou.
+\begin{itemize}
+  \item SYN-030 critérios 1--4 e 6: verificar \emph{start} release sem mudar
+        o Run, estado real do checkbox, habilitar/desabilitar e efeito no
+        próximo login/reabertura, reversão e \texttt{console.error} em falha
+        real, e recusa de habilitação em debug fora do perfil isolado. Texto e
+        posição do critério 2 e isolamento completo do critério 5 já
+        verificados pelo kit; APIs nativas do Computer Use indisponíveis
+        nesta sessão.
+\end{itemize}
+
+\end{document}

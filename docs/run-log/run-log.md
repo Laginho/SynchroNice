@@ -238,3 +238,35 @@
 | 2026-10-02 23:22 | SYN-029 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-01-2019 | 48m | 9.3M in (98% cached), 54k out | $2.712 |
 | 2026-10-03 00:04 | SYN-029 | implement | sonnet-5.5 xhigh | 1 | to-review | sweatshop/2026-10-01-2019 | 42m | 14.6M in (98% cached), 89k out | $4.776 |
 | 2026-10-03 00:54 | SYN-029 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-01-2019 | 49m | 14.0M in (99% cached), 46k out | $3.595 |
+| 2026-10-03 16:47 | SYN-030 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 38m | 9.2M in (99% cached), 15k out | $11.138 |
+| 2026-10-03 17:47 | SYN-030 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 60m | ? | ? |
+| 2026-10-03 17:59 | CLEAN-018 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 13m | 2.9M in (97% cached), 7k out | $3.914 |
+
+### Schema change
+
+| When | ID | Stage | Model | Attempt | Outcome | Session | Took | Tokens | Cost | Shutdown s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-03 18:38 | CLEAN-018 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-03-1608 | 27m | 4.9M in (97% cached), 21k out | $1.408 | 10.218 |
+| 2026-10-03 18:45 | CLEAN-018 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 7m | 1.5M in (94% cached), 4k out | $2.531 | 1.532 |
+| 2026-10-03 19:20 | CLEAN-018 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 35m | 6.2M in (98% cached), 35k out | $1.809 | 1.572 |
+| 2026-10-03 19:28 | CLEAN-019 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 8m | 2.5M in (97% cached), 10k out | $3.708 | 1.527 |
+| 2026-10-03 20:18 | CLEAN-019 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-03-1608 | 50m | 6.9M in (97% cached), 60k out | $2.339 | 1.549 |
+| 2026-10-03 20:28 | CLEAN-019 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 10m | 2.0M in (97% cached), 4k out | $2.799 | 1.279 |
+| 2026-10-03 21:02 | CLEAN-019 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 34m | 7.7M in (98% cached), 39k out | $2.197 | 1.351 |
+| 2026-10-03 21:14 | CLEAN-020 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 11m | 2.7M in (97% cached), 10k out | $3.937 | 1.033 |
+| 2026-10-03 21:42 | CLEAN-020 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 28m | 5.1M in (97% cached), 28k out | $1.551 | 1.310 |
+| 2026-10-03 21:54 | CLEAN-021 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 12m | 3.7M in (98% cached), 7k out | $4.781 | 1.522 |
+| 2026-10-03 22:40 | CLEAN-021 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 47m | 8.4M in (95% cached), 49k out | $2.938 | 1.076 |
+| 2026-10-03 22:54 | CLEAN-022 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 13m | 3.4M in (98% cached), 7k out | $4.414 | 1.018 |
+| 2026-10-03 23:18 | CLEAN-022 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 24m | 5.9M in (98% cached), 26k out | $1.643 | 0.783 |
+| 2026-10-03 23:33 | CLEAN-023 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 14m | 4.1M in (98% cached), 7k out | $5.116 | 0.766 |
+| 2026-10-04 00:13 | CLEAN-023 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 40m | 7.0M in (98% cached), 47k out | $2.168 | 3.092 |
+| 2026-10-04 00:24 | CLEAN-024 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 11m | 4.5M in (98% cached), 10k out | $5.808 | 1.292 |
+| 2026-10-04 01:05 | CLEAN-024 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 41m | 5.9M in (98% cached), 46k out | $1.868 | 1.046 |
+| 2026-10-04 01:21 | CLEAN-025 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 16m | 3.0M in (97% cached), 7k out | $4.000 | 0.765 |
+| 2026-10-04 01:45 | CLEAN-025 | review | gpt-6.1-sol max | 1 | reopened | sweatshop/2026-10-03-1608 | 24m | 4.0M in (97% cached), 21k out | $1.213 | 1.298 |
+| 2026-10-04 01:55 | CLEAN-025 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 9m | 2.5M in (98% cached), 5k out | $3.230 | 1.305 |
+| 2026-10-04 02:18 | CLEAN-025 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 23m | 4.6M in (97% cached), 25k out | $1.379 | 1.026 |
+| 2026-10-04 02:27 | CLEAN-026 | implement | gpt-6-astra medium | 1 | to-review | sweatshop/2026-10-03-1608 | 9m | 2.1M in (97% cached), 6k out | $3.027 | 1.044 |
+| 2026-10-04 03:27 | CLEAN-026 | review | gpt-6.1-sol max | 1 | failed (incomplete handoff), blocked | sweatshop/2026-10-03-1608 | 60m | ? | ? | ? |
+| 2026-10-04 04:53 | CLEAN-026 | review | gpt-6.1-sol max | 1 | merged | sweatshop/2026-10-03-1608 | 73m | 12.3M in (97% cached), 74k out | $3.761 | 2.126 |
