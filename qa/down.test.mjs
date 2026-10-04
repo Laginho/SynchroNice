@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, copyFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, copyFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -47,6 +47,11 @@ public class Stub {
       ['no-real', null],
       ['inactive', null],
       ['no-state', null],
+      ['real-live', null],
+      ['real-inactive', null],
+      ['real-active', null],
+      ['real-dead', null],
+      ['real-mismatch', null],
     ];
     for (const [scenario, error] of scenarios) {
       await t.test(scenario, () => {
@@ -60,9 +65,13 @@ public class Stub {
         copyFileSync(stub, debugExe);
         copyFileSync(stub, releaseExe);
         const statePath = join(runDir, 'emulator.json');
-        const noOp = ['inactive', 'no-state'].includes(scenario);
-        if (scenario !== 'no-state') {
-          writeFileSync(statePath, JSON.stringify({ active: scenario !== 'inactive',
+        const realScenario = scenario.startsWith('real-');
+        const restoreReal = ['real-live', 'real-inactive', 'real-active'].includes(scenario);
+        const hasState = !['no-state', 'real-live', 'real-dead', 'real-mismatch'].includes(scenario);
+        const noOp = ['inactive', 'no-state'].includes(scenario) || (realScenario && scenario !== 'real-active');
+        const realStatePath = join(runDir, 'real-pc.json');
+        if (hasState) {
+          writeFileSync(statePath, JSON.stringify({ active: !['inactive', 'real-inactive'].includes(scenario),
             serial: 'emulator-5554', realWasRunning: scenario !== 'no-real' }));
         }
         const adb = join(runDir, 'adb.ps1');
@@ -91,7 +100,8 @@ exit 0
         const ownedProcesses = `Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -in @(${quote(debugExe)}, ${quote(releaseExe)}) }`;
         const processesAt = path => JSON.parse(powershell(`ConvertTo-Json -Compress -InputObject @(Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq ${quote(path)} } | ForEach-Object { $_.Id })`));
         const run = () => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-          resolve('qa/down.ps1'), '-RunDir', runDir, '-Adb', adb, '-DebugExe', debugExe, '-ReleaseExe', releaseExe], {
+          resolve('qa/down.ps1'), '-RunDir', runDir, '-Adb', adb, '-DebugExe', debugExe, '-ReleaseExe', releaseExe,
+          '-RealPcStatePath', realStatePath], {
           encoding: 'utf8', timeout: 45000, env: { ...process.env,
             SYNCHRONICE_DATA_DIR: 'isolated-data', WEBVIEW2_USER_DATA_FOLDER: 'isolated-profile',
             WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9999' },
@@ -99,22 +109,32 @@ exit 0
         try {
           const debugPid = Number(powershell(`(Start-Process -FilePath ${quote(debugExe)} -WindowStyle Hidden -PassThru).Id`));
           assert.deepEqual(processesAt(debugExe), [debugPid]);
+          let originalRealPid;
+          if (realScenario) {
+            originalRealPid = Number(powershell(`(Start-Process -FilePath ${quote(releaseExe)} -WindowStyle Hidden -PassThru).Id`));
+            powershell(`$deadline = (Get-Date).AddSeconds(5); while (-not (Test-Path -LiteralPath ${quote(join(releaseDir, originalRealPid + '.env'))})) { if ((Get-Date) -gt $deadline) { throw 'initial trace missing' }; Start-Sleep -Milliseconds 50 }`);
+            if (scenario === 'real-dead') powershell(`$p = Get-Process -Id ${originalRealPid}; $p | Stop-Process -Force; $p.WaitForExit()`);
+            rmSync(join(releaseDir, originalRealPid + '.env'));
+            writeFileSync(realStatePath, JSON.stringify({ pid: scenario === 'real-mismatch' ? debugPid : originalRealPid, exe: releaseExe }));
+          }
           const result = run();
           assert.ifError(result.error);
           assert.equal(result.status, error ? 1 : 0, result.stdout + result.stderr);
           if (error) assert.ok(result.stderr.includes(error), result.stderr);
-          else assert.deepEqual(JSON.parse(result.stdout), { stopped: true, restored: !noOp && scenario !== 'no-real' });
+          else assert.deepEqual(JSON.parse(result.stdout), { stopped: true, restored: restoreReal || (!noOp && scenario !== 'no-real') });
+          assert.equal(existsSync(realStatePath), false, 'real PC record must be consumed');
           assert.deepEqual(processesAt(debugExe), noOp ? [debugPid] : [], 'debug process must stop on failures too');
           // WMI returns before the child has finished starting; wait for its trace.
-          if (!noOp && scenario !== 'no-real') {
+          if (restoreReal || (!noOp && scenario !== 'no-real')) {
             powershell(`$deadline = (Get-Date).AddSeconds(5); while (-not (Get-ChildItem -LiteralPath ${quote(releaseDir)} -Filter '*.env')) { if ((Get-Date) -gt $deadline) { throw 'release trace missing' }; Start-Sleep -Milliseconds 50 }`);
             const traces = readdirSync(releaseDir).filter(name => name.endsWith('.env'));
             assert.equal(traces.length, 1);
             assert.equal(readFileSync(join(releaseDir, traces[0]), 'utf8').trim(), '', 'release must inherit none of the isolated environment');
             const releasePids = processesAt(releaseExe);
             assert.deepEqual(releasePids, [Number(traces[0].split('.')[0])]);
+            if (restoreReal) assert.notEqual(releasePids[0], originalRealPid, 'CDP process must be replaced');
             // The changed-AVD case proves a failed retry neither loses the error nor duplicates the PC.
-            if (scenario === 'changed' || scenario === 'success') {
+            if (scenario === 'changed' || scenario === 'success' || restoreReal) {
               const repeated = run();
               assert.ifError(repeated.error);
               assert.equal(repeated.status, result.status, repeated.stdout + repeated.stderr);
@@ -123,8 +143,8 @@ exit 0
               assert.deepEqual(processesAt(releaseExe), releasePids);
               assert.deepEqual(readdirSync(releaseDir).filter(name => name.endsWith('.env')), traces);
             }
-          } else assert.deepEqual(processesAt(releaseExe), []);
-          if (scenario !== 'no-state') {
+          } else assert.deepEqual(processesAt(releaseExe), scenario === 'real-mismatch' ? [originalRealPid] : []);
+          if (hasState) {
             const state = JSON.parse(readFileSync(statePath, 'utf8').replace(/^\uFEFF/, ''));
             assert.equal(state.active, Boolean(error));
           }

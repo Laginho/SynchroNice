@@ -3,43 +3,64 @@ param(
     [string]$Sdk = "$env:LOCALAPPDATA/Android/Sdk",
     [string]$Adb = "$Sdk/platform-tools/adb.exe",
     [string]$DebugExe = "$PSScriptRoot/../pc/src-tauri/target/debug/pc.exe",
-    [string]$ReleaseExe = "$PSScriptRoot/../pc/src-tauri/target/release/pc.exe"
+    [string]$ReleaseExe = "$PSScriptRoot/../pc/src-tauri/target/release/pc.exe",
+    [string]$RealPcStatePath = "$PSScriptRoot/../.scratch/qa-runs/real-pc/state.json"
 )
 $ErrorActionPreference = 'Stop'
 $RunDir = [IO.Path]::GetFullPath($RunDir)
 $statePath = Join-Path $RunDir 'emulator.json'
 $debugExe = [IO.Path]::GetFullPath($DebugExe)
 $releaseExe = [IO.Path]::GetFullPath($ReleaseExe)
+function Start-NormalPc([string]$Executable) {
+    $previousData = $env:SYNCHRONICE_DATA_DIR
+    $previousProfile = $env:WEBVIEW2_USER_DATA_FOLDER
+    $previousCdp = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+    try {
+        $env:SYNCHRONICE_DATA_DIR = $null
+        $env:WEBVIEW2_USER_DATA_FOLDER = $null
+        $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $null
+        $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+            ShowWindow=[uint16]0
+            EnvironmentVariables=[string[]]@([Environment]::GetEnvironmentVariables().GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+        }
+        $launch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine=('"' + $Executable + '"')
+            CurrentDirectory=(Split-Path $Executable)
+            ProcessStartupInformation=$startup
+        }
+        if ($launch.ReturnValue -ne 0) { throw "PC real nao reabriu (WMI $($launch.ReturnValue)); repita down" }
+    } finally {
+        $env:SYNCHRONICE_DATA_DIR = $previousData
+        $env:WEBVIEW2_USER_DATA_FOLDER = $previousProfile
+        $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousCdp
+    }
+}
+
 try {
-    if (-not (Test-Path -LiteralPath $statePath)) { '{"stopped":true,"restored":false}'; exit 0 }
+    $restoredReal = $false
+    if (Test-Path -LiteralPath $RealPcStatePath) {
+        $real = Get-Content -LiteralPath $RealPcStatePath -Raw | ConvertFrom-Json
+        $process = Get-Process -Id $real.pid -ErrorAction SilentlyContinue
+        if ($process -and $process.Path -eq $real.exe) {
+            $process | Stop-Process -Force
+            $process.WaitForExit()
+            Start-NormalPc $real.exe
+            $restoredReal = $true
+        }
+        Remove-Item -LiteralPath $RealPcStatePath
+    }
+    if (-not (Test-Path -LiteralPath $statePath)) {
+        @{ stopped=$true; restored=$restoredReal } | ConvertTo-Json -Compress; exit 0
+    }
     $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    if (-not $state.active) { '{"stopped":true,"restored":false}'; exit 0 }
+    if (-not $state.active) {
+        @{ stopped=$true; restored=$restoredReal } | ConvertTo-Json -Compress; exit 0
+    }
     # Restore the PC before any emulator error can interrupt cleanup.
     # The kit owns this debug executable and the fixed HTTP port during the run.
     Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $debugExe } | Stop-Process -Force
     if ($state.realWasRunning -and -not (Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $releaseExe })) {
-        $previousData = $env:SYNCHRONICE_DATA_DIR
-        $previousProfile = $env:WEBVIEW2_USER_DATA_FOLDER
-        $previousCdp = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
-        try {
-            $env:SYNCHRONICE_DATA_DIR = $null
-            $env:WEBVIEW2_USER_DATA_FOLDER = $null
-            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $null
-            $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
-                ShowWindow=[uint16]0
-                EnvironmentVariables=[string[]]@([Environment]::GetEnvironmentVariables().GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
-            }
-            $launch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-                CommandLine=('"' + $releaseExe + '"')
-                CurrentDirectory=(Split-Path $releaseExe)
-                ProcessStartupInformation=$startup
-            }
-            if ($launch.ReturnValue -ne 0) { throw "PC real nao reabriu (WMI $($launch.ReturnValue)); repita down" }
-        } finally {
-            $env:SYNCHRONICE_DATA_DIR = $previousData
-            $env:WEBVIEW2_USER_DATA_FOLDER = $previousProfile
-            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousCdp
-        }
+        Start-NormalPc $releaseExe
     }
     if ($state.serial -match '^emulator-\d+$') {
         $devices = & $adb devices
@@ -60,5 +81,5 @@ try {
     if ($state.endpoint) { & $adb disconnect $state.endpoint | Out-Null }
     $state.active = $false
     $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
-    @{ stopped=$true; restored=$state.realWasRunning } | ConvertTo-Json -Compress
+    @{ stopped=$true; restored=($restoredReal -or $state.realWasRunning) } | ConvertTo-Json -Compress
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }

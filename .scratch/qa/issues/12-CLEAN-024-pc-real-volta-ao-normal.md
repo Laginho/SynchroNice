@@ -1,5 +1,5 @@
 # CLEAN-024: O PC real volta ao normal depois do pós-run no Redmi
-Stage: to-implement
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: SYN-030, CLEAN-020
 Review: agent
@@ -82,3 +82,23 @@ não isolado, porque ele mata todo `pc`, inclusive o PC real do humano.
   de gravar o Run ao iniciar, e a recusa por exe (a1) sai. Fica só a
   devolução do PC real ao normal pelo `down` (b2). Bloqueado pelo SYN-030
   e pelo CLEAN-020, que cria o `down.test.mjs` e os parâmetros de exe.
+
+- Stage 2: seam aprovada `qa/down.ps1`, com stubs executáveis e estado injetado
+  via `-RealPcStatePath`. Callers inspecionados: `qa/up.ps1` (cleanup de erro)
+  e instruções do foreman/revisão. Casos: emulador ausente/inativo/ativo,
+  PID morto, exe divergente e repetição; nenhum start real é executado.
+- Prova red-green (2026-10-04): `node --test qa/down.test.mjs` antes da
+  implementação: 9 passes e 6 falhas (5 casos novos mais o teste pai).
+  Após `886b7e0`: 15 passes, 0 falhas. A primeira tentativa no sandbox
+  encontrou WMI negado; as duas provas acima foram executadas com permissão
+  para WMI. Testes isolados em stubs temporários, sem tocar no PC do usuário.
+- Estado fixo: `.scratch/qa-runs/real-pc/state.json`, em pasta ignorada pelo
+  Git. A gravação precede a espera pelo CDP; `down` usa a mesma rotina WMI
+  para limpar ambiente e relançar o exe, com ou sem emulador ativo.
+- Gate completo: `gate: passou`; fmt, Clippy, TypeScript, 83 testes Rust,
+  61 testes UI e 78 testes QA sem falhas; Gradle `check` com `BUILD SUCCESSFUL`
+  (tarefas de testes Android em cache). Log local ignorado:
+  `.scratch/qa-runs/clean-024-stage2/gate.log`. O shell externo retornou 1
+  ao redirecionar stderr nativo como `NativeCommandError`; o gate interno
+  concluiu todos os passos e registrou sucesso. Diff final revisado, restrito
+  aos Primary files e ao ticket; nenhum teste alterado no commit de código.
