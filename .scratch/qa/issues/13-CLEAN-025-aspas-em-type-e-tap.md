@@ -1,5 +1,5 @@
 # CLEAN-025: Aspas em `type` e `tap -Value` do celular
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent

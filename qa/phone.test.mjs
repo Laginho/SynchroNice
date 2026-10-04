@@ -6,6 +6,39 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
+test('tap preserves quoted and plain selectors through native node argv', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-025-tap-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    const calls = join(directory, 'calls');
+    writeFileSync(adb, `
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($args[2] -eq 'get-state') { 'device'; exit 0 }
+if ($args[2] -eq 'exec-out') {
+  '<hierarchy><node text="say &quot;hi&quot;" bounds="[10,20][50,80]"/><node text="plain" bounds="[100,200][140,260]"/></hierarchy>'
+  exit 0
+}
+if ($args[3] -eq 'input' -and $args[4] -eq 'tap') {
+  [IO.File]::WriteAllText($env:QA_TAP_CALLS, ($args -join ' '))
+}
+exit 0
+`);
+    for (const [value, point] of [['say "hi"', '30 50'], ['plain', '120 230']]) {
+      await t.test(value, () => {
+        writeFileSync(calls, '');
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), 'tap', '-By', 'text', '-Value', value,
+          '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_TAP_CALLS: calls },
+        });
+        assert.ifError(result.error);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        assert.equal(readFileSync(calls, 'utf8'), `-s 127.0.0.1:5555 shell input tap ${point}`);
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('automatic discovery ignores loopback and keeps wireless phone selection', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'clean-022-discovery-'));
   try {
