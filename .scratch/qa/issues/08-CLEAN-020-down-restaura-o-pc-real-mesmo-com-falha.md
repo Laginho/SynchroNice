@@ -1,5 +1,5 @@
 # CLEAN-020: `down` restaura o PC real mesmo quando o emulador falha
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -68,6 +68,16 @@ Os casos são os critérios 2, 3 e 4. O critério 5 roda com o fake respondendo
 `emu kill`.
 
 ## Comments
+
+- Stage 2 (2026-10-03): costura confirmada pelo ticket: `qa/down.ps1` real,
+  adb falso e executáveis Windows temporários compilados com `Add-Type`.
+  Chamadores examinados: rollback de `qa/up.ps1:133` e uso direto documentado
+  em `docs/agents/qa.md`; nenhum muda. Casos degenerados cobertos: estado
+  ausente/inativo, emulador já ausente e `realWasRunning: false`.
+  Red inicial: `node --test qa/down.test.mjs`, 10 testes, 2 passaram e 8
+  falharam (inclui o teste pai); os parâmetros ainda são ignorados e o adb
+  padrão é usado. Após expor os parâmetros, será provado também o red da
+  restauração com as quatro falhas reais do wrapper antes de corrigir a ordem.
 
 - `qa/down.ps1:21-29` lança erro (`Emulador mudou`, `Nao foi possivel
   derrubar`, `Emulador nao encerrou` após 30 s) antes de matar o PC de
