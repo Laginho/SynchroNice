@@ -58,7 +58,7 @@ test('tap preserves quoted and plain selectors through native node argv', async 
 if ($args[0] -eq 'connect') { 'connected'; exit 0 }
 if ($args[2] -eq 'get-state') { 'device'; exit 0 }
 if ($args[2] -eq 'exec-out') {
-  '<hierarchy><node text="say &quot;hi&quot;" bounds="[10,20][50,80]"/><node text="plain" bounds="[100,200][140,260]"/></hierarchy>'
+  $env:QA_TAP_XML
   exit 0
 }
 if ($args[3] -eq 'input' -and $args[4] -eq 'tap') {
@@ -66,13 +66,21 @@ if ($args[3] -eq 'input' -and $args[4] -eq 'tap') {
 }
 exit 0
 `);
-    for (const [value, point] of [['say "hi"', '30 50'], ['plain', '120 230']]) {
-      await t.test(value, () => {
+    const originalXml = '<hierarchy><node text="say &quot;hi&quot;" bounds="[10,20][50,80]"/><node text="plain" bounds="[100,200][140,260]"/></hierarchy>';
+    for (const [name, value, point, xml] of [
+      ['entity-escaped quotes', 'say "hi"', '30 50', originalXml],
+      ['plain text', 'plain', '120 230', originalXml],
+      ['uiautomator single-quoted attribute', 'say "hi"', '502 1401',
+        `<hierarchy><node text='say "hi"' bounds='[215,1328][789,1475]'/></hierarchy>`],
+      ['apostrophe inside double-quoted attribute', "it's fine", '30 50',
+        `<hierarchy><node text="it's fine" bounds="[10,20][50,80]"/></hierarchy>`],
+    ]) {
+      await t.test(name, () => {
         writeFileSync(calls, '');
         const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
           resolve('qa/phone.ps1'), 'tap', '-By', 'text', '-Value', value,
           '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
-          encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_TAP_CALLS: calls },
+          encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_TAP_CALLS: calls, QA_TAP_XML: xml },
         });
         assert.ifError(result.error);
         assert.equal(result.status, 0, result.stdout + result.stderr);

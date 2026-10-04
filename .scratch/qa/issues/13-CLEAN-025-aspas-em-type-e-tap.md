@@ -1,5 +1,5 @@
 # CLEAN-025: Aspas em `type` e `tap -Value` do celular
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -56,6 +56,15 @@ camada nativa do PS 5.1. O `type` passa a escapar `"` para essa camada, como o
   um `input` falso que grava o argv (critério 3).
 
 ## Comments
+
+- Stage 2, retomada (2026-10-04): seam confirmado pela revisão: wrapper
+  `tap` em `qa/phone.test.mjs`, com fake adb e parser de produção. Callers
+  conferidos: CLI de `dump.mjs`, wrapper `tap` e imports em `dump.test.mjs`.
+  Regressão usa `text='say "hi"'` e bounds do emulador; preserva os casos
+  de entidades, texto simples e apóstrofo dentro de atributo com aspas duplas.
+  Vermelho focado: 3 passaram, 2 falharam (caso novo e seu teste pai), com
+  `elemento nao achado: text=say "hi"`. Bounds vazios/inválidos e nó ausente
+  continuam cobertos pela suíte existente de `findNode`.
 
 - Stage 2 (2026-10-04): callers examinados: o wrapper `tap` chama a CLI de
   `dump.mjs`; `findNode` também é importado por `dump.test.mjs`. A CLI conserva
