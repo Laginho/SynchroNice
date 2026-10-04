@@ -1,5 +1,5 @@
 # CLEAN-026: Processos do kit terminam de verdade antes do passo seguinte
-Stage: blocked
+Stage: to-review
 Status: ready-for-agent
 Blocked by: CLEAN-020
 Review: agent
@@ -70,3 +70,11 @@ stage 3 confere os critérios 1 e 2 por leitura, e o caminho feliz rodando
   porque os dois mexem nas mesmas linhas do `down.ps1`.
 
 - 2026-10-04 Stage stopped (incomplete handoff): Stage left uncommitted work; saved for recovery. See D:\Desktop\Projects\SynchroNice\.scratch\run-log\CLEAN-026-review-20261004-022744.txt.runtime.json and run-log/recovery.txt; inspect the saved work before retrying.
+
+- 2026-10-04 Proxy decided: retomar com um stage 3 novo (mesma lineup, no próximo run com `-ReviewMinutes 75`) sobre a branch `clean-026` inteira, `f3436e6` incluído, com gate e QA novos; `Stage: to-review` aqui e na sessão; o CLEAN-030 do stash de recuperação entra como ticket `needs-triage` nesta branch — a revisão morreu no limite de 60 min sem veredito, o stash `refs/sweatshop-recovery/5336c8b97cb14221bbc72b260deb2b00` não tem mudança rastreada (só o arquivo do CLEAN-030), e `f3436e6` foi escrito pelo próprio revisor e não passou por outra leitura nem pelo gate.
+  - **Para o stage 3 (retomada):**
+    - Revise `092e14c..clean-026` nos dois eixos. `f3436e6` é código a revisar, não revisão feita; o bloco "Stage 3 — correção de revisão" acima é nota da tentativa interrompida, não veredito.
+    - Já observado pela tentativa depois de `f3436e6` (transcript `.scratch/run-log/CLEAN-026-review-20261004-022744.txt`, não é prova committed): `up` recompilou e abriu o PC isolado, dois `down` terminaram sem PC aberto, e CDP indisponível depois do PID encerrou o filho.
+    - Ensaio "PID ausente" que a tentativa não chegou a interpretar, reproduzido pelo proxy contra `f3436e6`: com `pc.pid` vazio, `Get-Content -Raw` devolve AutomationNull, e `$startedPid -notmatch '^\d+\s*$'` dá resultado vazio (falso), então o `throw 'Launcher do PC nao devolveu o PID'` nunca dispara. O `start` segue com `Get-Process -Id 0` (Idle), espera o CDP ~45 s e sai com `CDP indisponivel`. Por leitura: fora do isolado grava `pid=0` em `real-pc/state.json`, e um `pc.exe` tardio que abra o CDP nesses 45 s vira sucesso com `pid` 0. Toca o critério 2. Vem do SYN-025 (`a02363f`), não deste ticket, mas está em `qa/pc.ps1` (`start`), nos Primary files, e não pede teste novo pela exceção aprovada. Repro, sem `pc` aberto: `qa/pc.ps1 start -Isolated -Exe <arquivo de texto chamado pc.exe> -RunDir <diretório de rascunho> -Port <porta livre>`; hoje sai com código 1 em ~53 s e `CDP indisponivel`, o esperado é ~6 s e `Launcher do PC nao devolveu o PID`.
+    - Gate completo uma vez, em primeiro plano, depois da última correção; um ciclo `up`/`down` no emulador no fim. Commite antes de qualquer espera longa.
+    - A duplicação do `Stop-AndWait` já está no CLEAN-030; não abra outro ticket para ela.
