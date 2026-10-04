@@ -1,5 +1,5 @@
 # CLEAN-026: Processos do kit terminam de verdade antes do passo seguinte
-Stage: reviewing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: CLEAN-020
 Review: agent
