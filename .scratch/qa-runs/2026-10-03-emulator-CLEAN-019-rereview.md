@@ -1,5 +1,7 @@
 # QA — 2026-10-03 — CLEAN-019 — re-review
 
+Verdict: Approve
+
 Escopo: somente o critério 7 reaberto e o diff desde 2c3bb37 até 6d55f16. Correção de produção: c7618dc. Base da sessão: 4cd3e06, sweatshop/2026-10-03-1608.
 Evidências locais: `2026-10-03-clean-019-rereview/` (ignorado pelo git).
 
@@ -19,7 +21,7 @@ A revisão Spec foi realizada por subagente independente. Foram examinados `list
 
 | Critério | Veredito | Evidência |
 | --- | --- | --- |
-| 1–6 — limpeza Android | ✅ mantidos | Nenhuma alteração nesses ramos desde a revisão anterior. Evidências nativas e cenários controlados registrados em [primeira revisão](2026-10-03-emulator-CLEAN-019-review.md). |
+| 1–6 — limpeza Android | ✅ mantidos | Os sete cenários atuais do wrapper passaram no gate: confirmed, query-error, query-exit, query-empty, downloads, rm e rm-fails. Nenhuma alteração nesses ramos desde a [primeira revisão](2026-10-03-emulator-CLEAN-019-review.md), que conserva a evidência nativa. |
 | 7 — Lixeira Windows, inclusive `.lnk` | ✅ | Teste novo falhou com o wrapper de 614420c: `.txt` correto, `.lnk` relatado como remoção permanente. Com c7618dc, os dois testes do PC passaram. A execução nativa independente confirmou `.txt` e `.lnk` na Lixeira, com SHA-256 igual ao salvo antes de clean e ausência no caminho original. |
 | 8 — drive `subst` sem Lixeira | ✅ | O mesmo teste de drive temporário passou no red e no green: fixture ausente e destino `remocao permanente`. |
 
@@ -33,7 +35,7 @@ Uma comparação textual/array no script auxiliar da revisão gerou falso negati
 
 `qa/up.ps1` compilou a branch do ticket, instalou o APK, abriu o PC isolado, pareou e confirmou `online=true`. O primeiro up procurou o SDK no caminho padrão inexistente; a execução com `-Sdk D:\AppData\Local\Android\Sdk`, conforme `android/local.properties`, passou. O build do PC levou 10m36s e terminou antes de qualquer tentativa de interrupção efetiva; nenhum compilador foi encerrado.
 
-`qa/down.ps1` com o mesmo RunDir e SDK passou: `stopped=true`, `restored=false`, estado `active=false`. O PC real não estava aberto antes do up. A conferência final de portas e o gate são registrados na resolução do ticket.
+`qa/down.ps1` com o mesmo RunDir e SDK passou: `stopped=true`, `restored=false`, estado `active=false`. O PC real não estava aberto antes do up. Consulta final confirmou zero portas do kit escutando (47820, 9222, 5554, 5555) e zero arquivos rastreados; evidência em `ports-after-down.json` e `pc-files.json`.
 
 Nesta re-review, o Android não recebeu arquivos novos; seus critérios e as evidências anteriores foram preservados. Redmi e limite de cota da Lixeira não foram reexecutados. Nenhum débito humano: todos os passos novos exigidos pela reabertura foram verificados no Windows real.
 
@@ -45,3 +47,9 @@ Nesta re-review, o Android não recebeu arquivos novos; seus critérios e as evi
 | `D:\Desktop\Projects\SynchroNice\.scratch\qa-runs\2026-10-03-clean-019-rereview\data\Pasta\CLEAN-019-rereview-native.lnk` | Lixeira do Windows; SHA-256 igual ao registro anterior de track |
 
 Os caminhos completos e os caminhos físicos das entradas recicladas ficam nos JSONs de evidência. Fixtures de teste automatizado também foram removidas de suas Pastas temporárias; o teste `subst` confirmou remoção permanente. Nenhum arquivo anterior ou não registrado foi apagado. O alvo do atalho, fonte local no diretório de evidências, permanece preservado.
+
+## Gate
+
+Branch rebaseada sobre a sessão antes da validação, sem conflitos. `powershell -ExecutionPolicy Bypass -File .\gate.ps1` rodou em primeiro plano e terminou com exit 0 e `gate: passou`. Formatação, Clippy e typecheck passaram. Rust: 83/83; UI: 61/61; QA: 34/34, sem falhas, skips ou cancelamentos. Gradle `check`: BUILD SUCCESSFUL; testes UP-TO-DATE. XMLs existentes conferidos: app 94/94 e protocol-client 72/72, zero falhas, erros ou skips. Log: `2026-10-03-clean-019-rereview/gate.log`.
+
+Standards: 0 achados; Spec: 0 achados. O único ❌ da revisão anterior está resolvido.
