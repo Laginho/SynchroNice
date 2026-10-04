@@ -1,5 +1,5 @@
 # CLEAN-030: Um só `Stop-AndWait` para os wrappers do kit
-Stage: to-implement
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -43,6 +43,29 @@ porque o escopo do PowerShell é dinâmico. O critério 1 o revisor confere no
 diff.
 
 ## Comments
+
+- Stage 2 (2026-10-04): extração pura autorizada pelo ticket, sem teste novo
+  ou prova red-green. Os chamadores de up, down e pc mantêm a seleção de
+  processos, inclusive pipeline vazio, processo já encerrado, falha de stop,
+  restauração do PC e limpeza do launcher. A função compartilhada preserva
+  integralmente o corpo anterior e o escopo dinâmico de Stop-Process.
+- Validação estrutural: corpo de qa/process.ps1 idêntico às três cópias
+  na base sweatshop/2026-10-04-1210; apenas um Stop-AndWait definido;
+  análise de sintaxe dos wrappers sem erros; git diff --check passou.
+  Chamada direta por caminho absoluto a partir de TEMP: up/pc retornam
+  o erro esperado para porta 0; down sem estado retorna stopped=true.
+- Referência antes da extração: suíte QA no sandbox, 76/96 passaram;
+  20 falhas (incluindo dois testes pais) por acesso negado em WMI,
+  destino de Lixeira indisponível e dois timeouts de Wi-Fi. Os testes
+  de down/pc já tinham terminado antes da edição; phone não foi alterado.
+  O gate completo é executado fora do sandbox para validar a integração.
+- Gate completo fora do sandbox, em primeiro plano: saída 0, `gate: passou`.
+  fmt e clippy aprovados; 83/83 testes Rust, tsc aprovado, 61/61 testes UI,
+  96/96 testes QA (incluindo override de Stop-Process e os dois cenários
+  de Wi-Fi com timeout na referência). Android `check` aprovado,
+  `BUILD SUCCESSFUL`, 41 tarefas (1 executada, 40 up-to-date).
+  Suítes existentes intactas; implementação 89c5f97. Diff final conferido:
+  somente Primary files e este registro; nenhum artefato gerado incluído.
 
 - Registrado como acompanhamento de manutenção, sem defeito de comportamento
   identificado e sem impedir a aprovação de CLEAN-026.
