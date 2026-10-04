@@ -38,9 +38,8 @@ Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
   `-TestsOnly` roda só os testes, sem
   fmt/lint/typecheck, que é o que a prova red-before-green precisa; o gate
   completo continua sendo o portão antes de `to-review`.
-- Models: stage 2 sonnet xhigh, stage 3 opus xhigh
-  (`sonnet` = Sonnet 5, `opus` = Opus 5.5; o driver só aceita o alias, sem
-  hífen. Stage 1 é sempre manual, o sweatshop nunca o roda.)
+- Models: stage 2 sonnet-5 xhigh, stage 3 opus-5.5 xhigh
+  (Versões fixadas para o driver. Stage 1 é sempre manual; o sweatshop nunca o roda.)
 - Models (Codex): stage 2 gpt-6.1-sol high, hard sonnet-5.5 high, stage 3 gpt-6.1-sol max
 - QA: stage 3 e `proxy` usam o kit no emulador; ❌ reprova o próprio ticket,
   falha de infraestrutura não reprova. Leia [quem usa o kit e quando](docs/agents/qa.md#quem-usa-o-kit-e-quando).
