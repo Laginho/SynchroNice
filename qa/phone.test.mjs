@@ -250,7 +250,7 @@ test('cleanup reports the actual MediaStore or rm destination and retains failur
     writeFileSync(source, 'QA cleanup payload');
     writeFileSync(join(directory, 'content'), `#!/bin/sh
 printf '%s\\n' "$@" > "$QA_CLEAN_STORAGE/query-argv"
-echo 'Row: 0 is_trashed=1'
+echo 'Row: 0 is_trashed=1, is_pending=0, _data=/storage/emulated/0/Pictures/SynchroNiceQA/.trashed-123-fixture.pdf'
 `);
     writeFileSync(adb, `
 $command = $args -join ' '
@@ -262,22 +262,38 @@ if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 
 if ($command -match 'set -C') { [IO.File]::WriteAllText($target, ''); exit 0 }
 if ($args[2] -eq 'push') { Copy-Item -LiteralPath $args[3] -Destination $target; exit 0 }
 if ($command.Contains('if [ -f')) { if (Test-Path -LiteralPath $target) { 'exists' }; exit 0 }
-if ($command -match 'sha256sum') { (Get-FileHash -LiteralPath $target).Hash + '  payload'; exit 0 }
+if ($command -match 'sha256sum') {
+  if ($command -match '/\\.trashed-') { $target = Join-Path $env:QA_CLEAN_STORAGE '.trashed-payload' }
+  if ($command -match '/\\.pending-') { $target = Join-Path $env:QA_CLEAN_STORAGE '.pending-payload' }
+  (Get-FileHash -LiteralPath $target).Hash + '  payload'; exit 0
+}
 if ($command -match 'content query.*--where') {
   'Row: 0 _id=42, _data=/storage/emulated/0/Pictures/SynchroNiceQA/fixture.pdf'; exit 0
 }
 if ($command -match 'content update') {
   [IO.File]::AppendAllText((Join-Path $env:QA_CLEAN_STORAGE 'updates'), $command + "\n")
-  if ($env:QA_CLEAN_SCENARIO -notin 'rm','rm-fails' -and
+  if ((Test-Path -LiteralPath $target) -and $env:QA_CLEAN_SCENARIO -notin 'rm','rm-fails' -and
       ($env:QA_CLEAN_SCENARIO -ne 'downloads' -or $command -match '/downloads/42')) {
-    Move-Item -LiteralPath $target -Destination (Join-Path $env:QA_CLEAN_STORAGE '.trashed-payload')
+    $moved = '.trashed-payload'
+    if ($env:QA_CLEAN_SCENARIO -eq 'pending') { $moved = '.pending-payload' }
+    Move-Item -LiteralPath $target -Destination (Join-Path $env:QA_CLEAN_STORAGE $moved)
+  }
+  if ($env:QA_CLEAN_SCENARIO -eq 'confirmed' -and (Test-Path -LiteralPath (Join-Path $env:QA_CLEAN_STORAGE '.pending-payload'))) {
+    Move-Item -LiteralPath (Join-Path $env:QA_CLEAN_STORAGE '.pending-payload') -Destination (Join-Path $env:QA_CLEAN_STORAGE '.trashed-payload')
   }
   'Updated 1 rows.'; exit 0
 }
 if ($command -match 'content query') {
   if ($env:QA_CLEAN_SCENARIO -eq 'query-error') { '[ERROR] Binding not well formed'; exit 0 }
   if ($env:QA_CLEAN_SCENARIO -eq 'query-exit') { 'query failed'; exit 1 }
-  if ($env:QA_CLEAN_SCENARIO -eq 'query-empty' -or (Test-Path -LiteralPath $target)) { 'Row: 0 is_trashed=0'; exit 0 }
+  if ($env:QA_CLEAN_SCENARIO -eq 'query-empty') { 'No result found.'; exit 0 }
+  if ($env:QA_CLEAN_SCENARIO -eq 'wrong-path') {
+    'Row: 0 is_trashed=1, is_pending=0, _data=/storage/emulated/0/Pictures/SynchroNiceQA/unrelated.pdf'; exit 0
+  }
+  if ($env:QA_CLEAN_SCENARIO -eq 'pending' -or (Test-Path -LiteralPath (Join-Path $env:QA_CLEAN_STORAGE '.pending-payload'))) {
+    'Row: 0 is_trashed=0, is_pending=1, _data=/storage/emulated/0/Pictures/SynchroNiceQA/.pending-123-fixture.pdf'; exit 0
+  }
+  if (Test-Path -LiteralPath $target) { 'Row: 0 is_trashed=0, is_pending=0, _data=/storage/emulated/0/Pictures/SynchroNiceQA/fixture.pdf'; exit 0 }
   # Execute exactly the shell text adb would join, not a reconstructed query.
   [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'query.sh'), ($args[3..($args.Count-1)] -join ' '))
   [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'shell-argc'), [string]($args.Count-3))
@@ -291,28 +307,63 @@ if ($command -match 'rm -f --') {
 }
 exit 0
 `);
-    for (const scenario of ['confirmed', 'query-error', 'query-exit', 'query-empty', 'downloads', 'rm', 'rm-fails']) {
+    for (const scenario of ['confirmed', 'query-error', 'query-exit', 'query-empty', 'pending', 'downloads', 'rm', 'rm-fails']) {
       await t.test(scenario, () => {
         const storage = join(directory, scenario);
         mkdirSync(storage);
         const runDir = join(storage, 'run');
-        const run = action => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        const run = (action, response = scenario) => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
           resolve('qa/phone.ps1'), action, '-Path', source, '-RunDir', runDir,
           '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
           encoding: 'utf8', timeout: 30000, env: { ...process.env,
-            QA_CLEAN_STORAGE: storage.replaceAll('\\', '/'), QA_CLEAN_SCENARIO: scenario,
+            QA_CLEAN_STORAGE: storage.replaceAll('\\', '/'), QA_CLEAN_SCENARIO: response,
             QA_CLEAN_BASH: bash, QA_CLEAN_TOOLS: directory.replaceAll('\\', '/') },
         });
         const pushed = run('push');
         assert.equal(pushed.status, 0, pushed.stdout + pushed.stderr);
         const cleaned = run('clean');
         assert.ifError(cleaned.error);
-        assert.equal(cleaned.status, scenario === 'rm-fails' ? 1 : 0, cleaned.stdout + cleaned.stderr);
-        const state = JSON.parse(readFileSync(join(runDir, 'phone-files.json'), 'utf8').replace(/^\uFEFF/, ''));
+        const unconfirmed = ['query-error', 'query-exit', 'query-empty', 'pending'].includes(scenario);
+        assert.equal(cleaned.status, scenario === 'rm-fails' || unconfirmed ? 1 : 0, cleaned.stdout + cleaned.stderr);
+        const readState = () => JSON.parse(readFileSync(join(runDir, 'phone-files.json'), 'utf8').replace(/^\uFEFF/, ''));
+        const state = readState();
         if (scenario === 'rm-fails') {
           assert.equal(state.tracked.length, 1);
           assert.equal(state.cleanup.length, 0);
           assert.equal(existsSync(join(storage, 'payload')), true);
+          return;
+        }
+        if (unconfirmed) {
+          // A missing source is also produced by MediaStore pending renames.
+          // CLEAN-019's old expectation inferred trash from absence; it lost both
+          // the true destination and the retry record when confirmation failed.
+          assert.equal(state.cleanup.length, 0);
+          assert.equal(state.tracked.length, 1);
+          assert.equal(state.tracked[0].path, '/storage/emulated/0/Pictures/SynchroNiceQA/fixture.pdf');
+          assert.equal(state.tracked[0].hash.toLowerCase(), createHash('sha256').update('QA cleanup payload').digest('hex'));
+          assert.equal(existsSync(join(storage, 'rm-called')), false);
+          const moved = join(storage, scenario === 'pending' ? '.pending-payload' : '.trashed-payload');
+          assert.equal(readFileSync(moved, 'utf8'), 'QA cleanup payload');
+          const retried = run('clean');
+          assert.equal(retried.status, 1, retried.stdout + retried.stderr);
+          assert.deepEqual(readState(), state, 'retry cannot forget an unconfirmed move as already absent');
+          const unrelated = join(storage, 'unrelated.pdf');
+          writeFileSync(unrelated, 'QA cleanup payload');
+          assert.equal(run('clean', 'wrong-path').status, 1, 'same bytes at an unrelated path are insufficient identity');
+          assert.deepEqual(readState(), state);
+          assert.equal(readFileSync(unrelated, 'utf8'), 'QA cleanup payload');
+          writeFileSync(moved, 'changed bytes');
+          assert.equal(run('clean', 'confirmed').status, 1, 'changed derivative must stay tracked and untouched');
+          assert.deepEqual(readState(), state);
+          assert.equal(readFileSync(moved, 'utf8'), 'changed bytes');
+          writeFileSync(moved, 'QA cleanup payload');
+          const recovered = run('clean', 'confirmed');
+          assert.equal(recovered.status, 0, recovered.stdout + recovered.stderr);
+          assert.equal(JSON.parse(recovered.stdout)[0].destination, 'Lixeira do MediaStore');
+          assert.deepEqual(readState().tracked, []);
+          assert.equal(readFileSync(join(storage, '.trashed-payload'), 'utf8'), 'QA cleanup payload');
+          assert.equal(readFileSync(unrelated, 'utf8'), 'QA cleanup payload');
+          assert.equal(existsSync(join(storage, 'rm-called')), false);
           return;
         }
         assert.equal(state.tracked.length, 0);
@@ -334,6 +385,9 @@ exit 0
           // Content.java splits at unescaped colons and then unescapes the key.
           assert.deepEqual(extra.split(/(?<!\\):/).map(field => field.replaceAll('\\:', ':')),
             ['android:query-arg-match-trashed', 'i', '1']);
+          const extras = argv.flatMap((arg, index) => arg === '--extra' ? [argv[index + 1]] : []);
+          assert.ok(extras.some(value => value.split(/(?<!\\):/).map(field => field.replaceAll('\\:', ':')).join('|')
+            === 'android:query-arg-match-pending|i|1'), 'confirmation must include pending rows');
         }
         assert.equal(run('clean').status, 0);
       });
