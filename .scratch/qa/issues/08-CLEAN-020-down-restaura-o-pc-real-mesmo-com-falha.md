@@ -79,6 +79,12 @@ Os casos são os critérios 2, 3 e 4. O critério 5 roda com o fake respondendo
   padrão é usado. Após expor os parâmetros, será provado também o red da
   restauração com as quatro falhas reais do wrapper antes de corrigir a ordem.
 
+- Ajuste do harness: `Get-Process -ErrorAction SilentlyContinue` sem processos
+  pode deixar `$?` falso mesmo sem erro fatal. O helper encerra explicitamente
+  com 0 após seus comandos; erros terminantes continuam falhando. Na prova
+  com os parâmetros expostos, as quatro falhas do emulador deixam o debug
+  vivo, exatamente o defeito do contrato.
+
 - `qa/down.ps1:21-29` lança erro (`Emulador mudou`, `Nao foi possivel
   derrubar`, `Emulador nao encerrou` após 30 s) antes de matar o PC de
   debug (`:34`) e de reabrir o PC real (`:35-58`). Como `qa/up.ps1:133`

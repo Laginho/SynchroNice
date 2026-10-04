@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 const quote = value => `'${value.replaceAll("'", "''")}'`;
 function powershell(command) {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-    `$ErrorActionPreference = 'Stop'; ${command}`], { encoding: 'utf8', timeout: 30000 });
+    `$ErrorActionPreference = 'Stop'; ${command}; exit 0`], { encoding: 'utf8', timeout: 30000 });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   return result.stdout.trim();
