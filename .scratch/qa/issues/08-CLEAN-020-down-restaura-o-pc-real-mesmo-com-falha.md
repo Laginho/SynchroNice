@@ -1,5 +1,5 @@
 # CLEAN-020: `down` restaura o PC real mesmo quando o emulador falha
-Stage: implementing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -102,3 +102,27 @@ Os casos são os critérios 2, 3 e 4. O critério 5 roda com o fake respondendo
   finally. Bug, ready-for-agent. A costura do teste foi escolhida pelo
   humano (Q4): `-Adb`, `-DebugExe` e `-ReleaseExe` com padrão, mais
   `qa/down.test.mjs`. `hard` (Q17, proxy).
+
+#### Stage 2 — implementação (2026-10-03)
+
+- `qa/down.ps1` aceita `-Adb`, `-DebugExe` e `-ReleaseExe`, com os caminhos
+  anteriores por padrão; `qa/up.ps1` permanece inalterado. Restaura o PC antes
+  da parte do emulador, uma das ordens aprovadas no contrato. Erros preservam
+  mensagem, saída 1 e estado ativo; repetir não duplica o processo real.
+- Red com a costura exposta, antes da mudança de ordem: 10 testes, 5 passaram
+  e 5 falharam (quatro cenários de erro mais o pai). Os quatro falharam porque
+  o debug continuava vivo. Caminho feliz, emulador ausente, PC real antes
+  fechado e estado ausente/inativo passaram. O primeiro ensaio no sandbox
+  bloqueou WMI com `Access denied`; a prova final usou permissão ampliada.
+- Green pelo gate completo: 10/10 novos testes passaram, incluindo todos os
+  quatro erros, ambiente sem as três variáveis de isolamento e repetição sem
+  outro PID/registro de lançamento. Os stubs temporários foram encerrados e
+  removidos; nenhum teste usa o PC real ou o adb real.
+- `powershell -ExecutionPolicy Bypass -File .\gate.ps1`: saída 0,
+  `gate: passou`. Rust: 83 testes; interface: 61; QA: 44 (incluindo os 10
+  novos); fmt, clippy e TypeScript passaram. Android: `BUILD SUCCESSFUL`,
+  41 tarefas (1 executada, 40 up-to-date; testes reutilizados pelo Gradle).
+  Log local: `.scratch/run-log/CLEAN-020-stage2-gate.log`.
+- Revisão final: `git diff --check` limpo, alterações restritas aos Primary
+  files e ao ticket, testes em commits separados da implementação. QA com
+  aplicativo/emulador real fica para a etapa 3 conforme o fluxo.
