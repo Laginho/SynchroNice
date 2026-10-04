@@ -1,0 +1,426 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs,array,tabularx,longtable}
+\usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=1.4em}
+\emergencystretch=2em
+
+\definecolor{sol}{HTML}{3B6EA8}
+\definecolor{ocioso}{HTML}{BBBBBB}
+\definecolor{perda}{HTML}{C0504D}
+
+\title{Sweatshop: gpt-6.1-sol no modo fast\\\large gpt-6.1-sol-fast (high) no stage 2, (max) no stage 3 e no hard}
+\author{Foreman, sessão \texttt{sweatshop/2026-10-04-1210}}
+\date{4 de outubro de 2026}
+
+\begin{document}
+\shorthandoff{"}
+\maketitle
+
+\section*{Resumo}
+
+Run curto sobre a fila \texttt{.scratch/qa/}: CLEAN-027, CLEAN-030 e
+CLEAN-032, triados pelo proxy logo antes do lançamento. Pedido do humano:
+testar o \emph{fast} do Codex, com \texttt{gpt-6.1-sol high} no stage 2 e
+\texttt{gpt-6.1-sol max} no stage 3 e no hard, todos no tier fast. O driver
+ganhou o token \texttt{fast} para isso (\texttt{b18746c}, Agent-Skills): a
+linha vira \texttt{gpt-6.1-sol-fast} no log e o \texttt{codex exec} recebe
+\texttt{--config service\_tier=fast}.
+
+\begin{itemize}
+  \item \textbf{Produzido:} \textbf{3 tickets mergeados}, todos de primeira,
+        todos \emph{Approve}. PR de sessão:
+        \href{https://github.com/Laginho/SynchroNice/pull/11}{\#11}. A revisão
+        do CLEAN-032 abriu o CLEAN-033 (\texttt{needs-triage}) em vez de
+        reabrir.
+  \item \textbf{Custo:} \textbf{\$7,57 registrado} (1 de 7 estágios com
+        preço): o preço do fast (o dobro da linha base) só entrou no driver no
+        meio do run (\texttt{dc530fb}). Aplicando esse preço ao uso que os
+        próprios logs registram, os seis estágios concluídos somam
+        \textbf{\$24,97}, mais a revisão que estourou o limite, sem uso
+        registrado. 211 min de estágio em 3\,h\,36 de relógio (12:10--15:46);
+        43,9\,M tokens de entrada (97,8\,\% em cache) e 197\,k de saída.
+  \item \textbf{O que deu errado:} a primeira revisão do CLEAN-032
+        \textbf{estourou os 40 min} no meio do gate, com a CPU dividida entre
+        este run e mais dois runs sol-fast em outros repositórios (PhysiSyst
+        desde 12:43, ClassyCall desde 13:26). Relançada com 60 min, terminou
+        aos 59:54.
+  \item \textbf{Veredito provisório:} o fast \textbf{acelerou a implementação}
+        (mediana 15 min contra 24 do sol normal neste repositório), a cerca de
+        1,8 vez o custo; \textbf{não acelerou a revisão} (33 contra 28 min), que
+        aqui é presa ao gate e ao emulador, a 3,3 vezes o custo. Três tickets e
+        concorrência na máquina: anedota, não medida.
+\end{itemize}
+
+\section{Linha do tempo}
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+12:09 & Triagem e stage 1 dos três tickets pelo proxy (\texttt{70534d5}).\\
+12:10 & Lançamento destacado (pid 14576). CLEAN-027 implementação (18 min):
+        here-document no stdin do \texttt{grep}, vermelho no harness que emula
+        o mksh do aparelho.\\
+12:28 & CLEAN-027 revisão (33 min): \texttt{wifi-off} real no
+        \texttt{SynchroNice\_API37} com dump de 170\,KB, acima do limite de
+        128\,KiB por argumento. Mergeado às 13:01.\\
+13:02 & CLEAN-030 implementação (13 min): \texttt{qa/process.ps1} com a cópia
+        exata do \texttt{Stop-AndWait}.\\
+13:15 & CLEAN-030 revisão (32 min). O primeiro gate falhou num teste Rust fora
+        do diff; a repetição passou. Mergeado às 13:46.\\
+13:47 & CLEAN-032 implementação (15 min), dois pares vermelho/verde.\\
+14:02 & CLEAN-032 revisão 1: \textbf{limite de 40 min} às 14:42, com o
+        \texttt{cargo test} ainda linkando. O driver marca \texttt{blocked}
+        e abre o PR \#11.\\
+14:45 & Foreman salva \texttt{recovery/20261004-1442/clean-032}, volta o
+        ticket a \texttt{to-review} (\texttt{b53df37}) e relança com
+        \texttt{-ReviewMinutes 60} (pid 14168).\\
+14:46 & CLEAN-032 revisão 2 (60 min): rebase sobre a sessão, gate verde,
+        parada real do qemu medida por sonda própria. Mergeado às 15:46;
+        ``Nothing runnable''.\\
+\bottomrule
+\end{tabularx}
+
+\section{Métricas por estágio}
+
+As 7 linhas de \texttt{.scratch/run-log.md} do run. ``Custo log'' é o que o
+driver gravou; ``Custo calc.'' aplica o preço de \texttt{dc530fb} (fast = 2
+vezes \texttt{gpt-6.1-sol}: \$4,00/M entrada, \$0,40/M em cache, \$20,00/M
+saída) à soma dos \texttt{turn.completed} do \texttt{.txt} de cada estágio;
+na última linha, os dois coincidem.
+
+\medskip
+\noindent{\footnotesize
+\begin{longtable}{@{}l l l r r r r r r l@{}}
+\toprule
+Fim & Ticket & Estágio & Min & Entrada & Cache & Saída & Custo log & Custo calc. & Desfecho\\
+\midrule
+\endhead
+12:28 & CLEAN-027 & impl. & 18 & 6,0\,M & 98\,\% & 13\,k & ? & 3,04 & to-review\\
+13:01 & CLEAN-027 & rev. & 33 & 9,1\,M & 98\,\% & 44\,k & ? & 5,15 & mergeado\\
+13:15 & CLEAN-030 & impl. & 13 & 4,6\,M & 98\,\% & 10\,k & ? & 2,42 & to-review\\
+13:46 & CLEAN-030 & rev. & 32 & 9,0\,M & 98\,\% & 39\,k & ? & 5,00 & mergeado\\
+14:02 & CLEAN-032 & impl. & 15 & 3,2\,M & 97\,\% & 12\,k & ? & 1,79 & to-review\\
+14:42 & CLEAN-032 & rev. & 40 & ? & ? & ? & ? & ? & \textcolor{perda}{limite, blocked}\\
+15:46 & CLEAN-032 & rev. & 60 & 12,1\,M & 97\,\% & 78\,k & 7,571 & 7,57 & mergeado\\
+\midrule
+\multicolumn{3}{@{}l}{Total} & 211 & 43,9\,M & 97,8\,\% & 197\,k & 7,57 & 24,97 & 6 com uso\\
+\bottomrule
+\end{longtable}}
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar stacked, bar width=22pt, width=0.7\linewidth, height=6cm,
+  ylabel={Minutos de estágio}, ymin=0,
+  symbolic x coords={CLEAN-027,CLEAN-030,CLEAN-032},
+  xtick=data, x tick label style={font=\small},
+  legend style={at={(0.02,0.97)},anchor=north west,draw=none,font=\small},
+  axis lines*=left, ymajorgrids, grid style={gray!25}]
+\addplot[fill=sol,draw=none] coordinates
+  {(CLEAN-027,51) (CLEAN-030,45) (CLEAN-032,75)};
+\addplot[fill=perda,draw=none] coordinates
+  {(CLEAN-027,0) (CLEAN-030,0) (CLEAN-032,40)};
+\legend{estágio concluído, perdido (limite)}
+\end{axis}
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Onde foi o custo.} Por ticket, calculado: CLEAN-027 \$8,18,
+CLEAN-030 \$7,42, CLEAN-032 \$9,36 mais a revisão perdida. A revisão custou
+71\,\% do run (\$17,72 de \$24,97): 9--12\,M tokens de entrada cada, quase
+tudo cache relido a cada turno de QA. A perda foi de tempo: os 40 min da
+primeira revisão do CLEAN-032, cujo trabalho (comentários reordenados e o
+CLEAN-033) sobreviveu na branch.
+
+\section{Comparação}
+
+Contra o sol normal, no mesmo repositório e na mesma lineup de esforço
+(\texttt{gpt-6.1-sol high} implementa, \texttt{gpt-6.1-sol max} revisa), todas
+as linhas de \texttt{run-log.md}; e contra o run anterior
+(\path{2026-10-03-sweatshop-astra-medium-sol-max.pdf}).
+
+\medskip
+\noindent{\small
+\begin{tabularx}{\linewidth}{@{}X r r r@{}}
+\toprule
+& sol normal (SynchroNice) & sol-fast, 04/10 & astra/sol, 03--04/10\\
+\midrule
+Implementações até \texttt{to-review} & 11 & 3 & 13\\
+Minutos por implementação, mediana & 24 & 15 & 11\\
+Custo por implementação, média & \$1,36 & \$2,42 (calc.) & \$4,49\\
+Revisões concluídas & 35 & 3 & 13\\
+Minutos por revisão concluída, mediana & 28 & 33 & 35\\
+Custo por revisão, média & \$1,79 & \$5,91 (calc.) & \$2,03\\
+Reaberturas no run & --- & 0 de 3 & 3 de 10\\
+Minutos de estágio por ticket mergeado & --- & 70 & 74\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+Ressalvas, nesta ordem de peso: \textbf{concorrência} --- a partir de 12:43
+dois outros drivers sol-fast rodavam na mesma máquina, e o gate deste
+repositório compila Rust; só a implementação do CLEAN-027 rodou sozinha
+(18 min); \textbf{amostra} --- 3 estágios de cada tipo; \textbf{tickets
+diferentes} --- os do sol normal incluem backend e Android, estes são scripts
+do kit. O preço por estágio subiu mais que o dobro do tier na revisão (3,3
+vezes) porque as revisões deste run leram mais tokens: QA no emulador com
+sonda própria e, no CLEAN-032, o gate inteiro duas vezes.
+
+Nos outros dois repositórios, no mesmo dia e mesma lineup, as revisões
+sol-fast levaram 5--17 min (ClassyCall e PhysiSyst não sobem emulador): o
+tempo da revisão aqui é do kit, não do modelo.
+
+\section{Atribuição das reaberturas}
+
+Nenhuma rodada reaberta e nenhum conserto da revisão em commit próprio: os
+commits das três revisões são relatório de QA, reordenação de comentários e
+o ticket CLEAN-033. Nada a rotular; \path{.scratch/reopen-attribution.md} não
+mudou. Descobertas pós-aprovação: as revisões dos PRs de sessão \#10 e \#11
+são só o Copilot sem cota; nenhum defeito confirmado.
+
+\paragraph{O que é do stage 3.} Sem \emph{drip-feeding} nem \emph{churn}. A
+revisão do CLEAN-032 achou, por leitura, um caminho de falha fora dos cinco
+critérios (repetição do \texttt{down} depois de uma parada que falhou perde a
+identidade do processo) e abriu o CLEAN-033 em vez de reabrir, como a
+recomendação 3 do relatório anterior pedia.
+
+\section{Scoreboard}
+
+Saída de \path{sweatshop/scripts/scoreboard.ps1} sobre os cinco repositórios
+desta máquina com \path{.scratch/run-log.md} (SynchroNice, ClassyCall,
+PhysiSyst, SIGAA-ME, slip), depois de registrar as intervenções. Cumulativo.
+
+\medskip
+\noindent{\scriptsize
+\begin{tabularx}{\linewidth}{@{}X r r r r r r@{}}
+\toprule
+Implementer & Stage runs & To review & Failed & Asked & Median min to review & Cost\\
+\midrule
+fable & 5 & 5 & 0 & 0 & 3m & ?\\
+sonnet & 121 & 75 & 31 & 15 & 7m & \$10.53 (4/121 priced)\\
+gpt-6-luna & 23 & 11 & 10 & 2 & 26m & ?\\
+gpt-6-sol & 6 & 5 & 1 & 0 & 17m & ?\\
+gpt-5.6-sol & 5 & 4 & 1 & 0 & 17m & ?\\
+gpt-6-astra & 18 & 11 & 6 & 1 & 8m & ?\\
+sonnet-5 xhigh & 11 & 6 & 2 & 3 & 8m & \$18.09 (11/11 priced)\\
+gpt-6.1-sol high & 38 & 33 & 0 & 5 & 8m & \$29.32 (38/38 priced)\\
+gpt-6-astra low & 2 & 2 & 0 & 0 & 30m & \$19.03 (2/2 priced)\\
+gpt-6.1-sol max & 3 & 1 & 2 & 0 & 17m & \$1.44 (1/3 priced)\\
+sonnet-5.5 xhigh & 9 & 8 & 1 & 0 & 25m & \$35.54 (9/9 priced)\\
+sonnet-5.5 high & 16 & 15 & 1 & 0 & 7m & \$28.15 (16/16 priced)\\
+gpt-6-astra medium & 57 & 47 & 1 & 9 & 10m & \$162.72 (57/57 priced)\\
+gpt-6.1-sol-fast high & 11 & 10 & 0 & 1 & 13m & \$4.44 (6/11 priced)\\
+gpt-6.1-sol-fast max & 8 & 6 & 0 & 2 & 13m & \$5.27 (4/8 priced)\\
+opus-5.5 & 35 & 31 & 4 & 0 & 6m & \$0.72 (1/35 priced)\\
+opus-5.5 high & 2 & 2 & 0 & 0 & 9m & \$2.31 (2/2 priced)\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+\noindent{\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}l l r r r r r r r@{}}
+\toprule
+Implementador & Revisor & Reviews & Reab. & Taxa & Por S2 & Taxa S2 & Sem rót. & S2 na rev.\\
+\midrule
+fable & fable & 4 & 1 & 25\% & 0 & $\geq$0\% & 1 & 0\\
+? & opus & 4 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+sonnet & opus & 68 & 20 & 29\% & 1 & $\geq$1\% & 19 & 0\\
+gpt-6-luna & gpt-6-sol & 11 & 7 & 64\% & 0 & $\geq$0\% & 7 & 0\\
+gpt-6-sol & gpt-5.6-sol & 5 & 4 & 80\% & 0 & $\geq$0\% & 4 & 0\\
+gpt-5.6-sol & gpt-6-astra & 4 & 3 & 75\% & 0 & $\geq$0\% & 3 & 0\\
+gpt-6-astra & gpt-5.6-sol & 11 & 5 & 45\% & 0 & $\geq$0\% & 5 & 0\\
+sonnet-5 xhigh & opus-5.5 xhigh & 5 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+gpt-6.1-sol high & gpt-6.1-sol max & 32 & 8 & 25\% & 7 & 22\% & 0 & 0\\
+gpt-6-astra low & gpt-6.1-sol max & 2 & 1 & 50\% & 1 & 50\% & 0 & 0\\
+gpt-6.1-sol max & gpt-6.1-sol max & 1 & 1 & 100\% & 1 & 100\% & 0 & 0\\
+sonnet-5.5 xhigh & gpt-6.1-sol max & 7 & 3 & 43\% & 3 & 43\% & 0 & 0\\
+sonnet-5.5 high & gpt-6.1-sol max & 12 & 3 & 25\% & 3 & 25\% & 0 & 0\\
+gpt-6-astra medium & gpt-6.1-sol max & 37 & 7 & 19\% & 6 & 16\% & 0 & 1\\
+gpt-6.1-sol-fast high & gpt-6.1-sol-fast max & 10 & 1 & 10\% & 0 & $\geq$0\% & 1 & 0\\
+gpt-6.1-sol-fast max & gpt-6.1-sol-fast max & 6 & 3 & 50\% & 0 & $\geq$0\% & 3 & 0\\
+opus-5.5 & fable-5.1 & 30 & 1 & 3\% & 0 & $\geq$0\% & 1 & 0\\
+opus-5.5 high & fable-5.1 high & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+opus-5.5 high & opus-5.5 xhigh & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+sonnet-5.5 high & opus-5.5 xhigh & 3 & 0 & 0\% & 0 & 0\% & 0 & 3\\
+sonnet-5.5 xhigh & opus-5.5 xhigh & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+gpt-6-astra medium & gpt-6-astra xhigh & 10 & 1 & 10\% & 1 & 10\% & 0 & 0\\
+sonnet & fable & 1 & 0 & 0\% & 0 & 0\% & 0 & 0\\
+\bottomrule
+\end{tabular}}
+
+\medskip
+\noindent{\scriptsize
+\begin{tabularx}{\linewidth}{@{}X r r r r r r@{}}
+\toprule
+Implementer $\to$ Reviewer & Rounds & S2 explicit code & S2 explicit test & S2 implicit & S1 & S3 noise\\
+\midrule
+sonnet $\to$ opus & 1 & 1 & 1 & 0 & 0 & 0\\
+gpt-6.1-sol high $\to$ gpt-6.1-sol max & 9 & 5 & 0 & 9 & 1 & 0\\
+gpt-6-astra low $\to$ gpt-6.1-sol max & 1 & 2 & 0 & 1 & 0 & 0\\
+gpt-6.1-sol max $\to$ gpt-6.1-sol max & 1 & 4 & 0 & 1 & 0 & 0\\
+sonnet-5.5 xhigh $\to$ gpt-6.1-sol max & 3 & 7 & 0 & 3 & 2 & 0\\
+sonnet-5.5 high $\to$ gpt-6.1-sol max & 3 & 5 & 0 & 2 & 3 & 0\\
+gpt-6-astra medium $\to$ gpt-6.1-sol max & 8 & 11 & 1 & 4 & 1 & 0\\
+sonnet-5.5 high $\to$ opus-5.5 xhigh & 3 & 1 & 2 & 0 & 0 & 0\\
+gpt-6-astra medium $\to$ gpt-6-astra xhigh & 1 & 1 & 0 & 0 & 0 & 0\\
+\bottomrule
+\end{tabularx}}
+
+\medskip
+\noindent{\scriptsize Cobertura de evidência (saída da mesma execução):
+68 achados registrados por \emph{ticket-review}; ``earlier review miss'' 0
+de 10 conhecidos e ``review-induced churn'' 0 de 10. Do fim do turno à saída
+do processo: 163,3\,s em 113 estágios medidos, 549 sem medida. Intervenções
+registradas: 2 resgates humanos, 6 recuperações automáticas, 10 decisões do
+proxy (este run: 3 decisões e 1 recuperação, primeiro registro do
+SynchroNice).}
+
+\paragraph{O que mudou desde o relatório de 03/10.}
+\begin{itemize}
+  \item \textbf{Duas linhas novas:} \texttt{gpt-6.1-sol-fast high} (11
+        estágios) e \texttt{gpt-6.1-sol-fast max} (8), três de cada vindas
+        deste run, o resto de ClassyCall e PhysiSyst no mesmo dia. Custo
+        parcial (6/11 e 4/8 com preço) porque o preço do fast entrou no meio
+        do dia.
+  \item \textbf{Par novo} \texttt{gpt-6.1-sol-fast high $\to$
+        gpt-6.1-sol-fast max}: 10 revisões, 1 reaberta (10\,\%), sem rótulo
+        (é de outro repositório). \textbf{Menos de 10 revisões rotuladas:
+        anedota.} O par \texttt{sol-fast max $\to$ sol-fast max} tem 6
+        revisões e 3 reaberturas sem rótulo, também de outro repositório.
+  \item \texttt{gpt-6-astra medium}: de 55 para 57 estágios e de 35 para 37
+        revisões sob sol max (outro repositório); taxa S2 de 17 para 16\,\%.
+  \item Intervenções: proxy de 7 para 10 e recuperações de 5 para 6, deste
+        run.
+\end{itemize}
+
+\paragraph{Fast contra normal, mesmo revisor?} Não dá ainda: o revisor do
+par fast também é fast, então \texttt{sol-fast high} só se compara com
+\texttt{sol high} (25\,\% de reabertura, 22\,\% S2, 32 revisões) quando as
+reaberturas do fast estiverem rotuladas e passarem de 10.
+
+\section{Observações sobre os modelos}
+
+\subsection*{gpt-6.1-sol-fast (high), implementação}
+\begin{itemize}
+  \item \textbf{Disciplina igual à do sol normal:} testes em commit próprio
+        antes do conserto nos dois tickets que os pediam; no CLEAN-032, dois
+        pares vermelho/verde, um por critério. Gate completo antes de
+        \texttt{to-review}.
+  \item \textbf{Sandbox:} o \texttt{-TestsOnly} dentro do sandbox do Codex
+        tomou \texttt{Access denied} nos testes do PC e rede negada no Gradle;
+        o modelo rodou o gate completo fora do sandbox e anotou a diferença no
+        ticket, sem esconder.
+  \item \textbf{Desvio leve repetido:} no CLEAN-027 e no CLEAN-030 a passagem a
+        \texttt{to-review} saiu num commit separado do último commit de
+        código; as duas revisões anotaram como desvio de processo sem efeito.
+\end{itemize}
+
+\subsection*{gpt-6.1-sol-fast (max), revisão}
+\begin{itemize}
+  \item \textbf{Reproduz de verdade:} \texttt{wifi-off} real com o dump do
+        emulador (170\,KB) no CLEAN-027; no CLEAN-032, sonda própria que
+        guardou o handle do qemu antes do \texttt{down} real e conferiu, no
+        retorno, processo morto e nenhum listener em 5554/5555.
+  \item \textbf{Contorna a infraestrutura sem afrouxar:} na retomada o
+        \texttt{up} real abortou (sem presença em 30\,s) e o pareamento foi
+        recusado pela tela bloqueada; a revisão registrou
+        \texttt{pairExit=1} como falha de infraestrutura e não usou a
+        retentativa como prova do critério 5.
+  \item \textbf{Teste instável tratado como tal:} no CLEAN-030, o primeiro
+        gate falhou num teste Rust fora do diff; a revisão repetiu o gate
+        inteiro, guardou as duas saídas e não reabriu.
+  \item \textbf{Longa por natureza:} 32--60 min com QA no emulador; o
+        modo fast não encurtou nada disso.
+\end{itemize}
+
+\section{Integração com o Codex, o Claude e o driver}
+\begin{itemize}
+  \item \textbf{Token \texttt{fast} no driver} (\texttt{b18746c}): a linha do
+        modelo ganha \texttt{-fast}, o Codex recebe
+        \texttt{--config service\_tier=fast}, e o Claude o recusa. O preço
+        (\texttt{dc530fb}, outra sessão) entrou com o run já rodando: as 6
+        primeiras linhas ficaram \texttt{?}. O humano chegou a duvidar que o
+        tier estivesse ativo; a outra sessão confirmou que estava.
+  \item \textbf{Concorrência entre drivers:} três sweatshops na mesma máquina
+        disputaram CPU; o \texttt{cargo test} do gate do SynchroNice é o mais
+        pesado deles e foi o que estourou o limite.
+  \item \textbf{Limite de revisão:} 40 min (padrão para \texttt{max}) não cabe
+        uma revisão com kit + gate completo sob carga; 60 min coube com 6\,s
+        de folga.
+  \item \textbf{Erro do foreman:} o primeiro commit da recuperação caiu no
+        \texttt{main} local (o driver deixa o repositório lá ao parar):
+        \texttt{f03289d}, só um comentário no CLEAN-032, sem push. O
+        classificador de permissões negou o reset e o revert; fica para o
+        humano.
+  \item \textbf{Teste Rust instável:}
+        \texttt{exclusao\_durante\_upload\_que\_falha\_descarta\_item\_e\_retry}
+        abortou com o erro 10053 do Windows (\texttt{tests/server.rs:570}) no
+        primeiro gate do CLEAN-030; passou na repetição.
+\end{itemize}
+
+\section{Recomendações}
+\begin{enumerate}
+  \item \textbf{Mergear o PR \#11} antes do próximo run.
+  \item \textbf{Triar o CLEAN-033} (retentativa do \texttt{down} depois de uma
+        parada que falhou).
+  \item \textbf{Fast só no stage 2, se em algum.} A implementação ganhou
+        tempo; a revisão, presa ao gate e ao emulador, não ganhou e custou
+        3,3 vezes mais. Para medir de verdade: um run com a máquina livre e
+        10 ou mais estágios de cada lado.
+  \item \textbf{Não rodar sweatshops em paralelo nesta máquina} quando o
+        objetivo for medir tempo, ou subir \texttt{-ReviewMinutes} para 75
+        nos tickets do kit.
+  \item \textbf{Preencher o custo das 6 linhas \texttt{?}?} Os valores da
+        coluna ``Custo calc.'' saem da fórmula do driver sobre os mesmos
+        logs; o foreman não os gravou no \texttt{run-log.md} sem o humano
+        decidir.
+  \item \textbf{Ticket para o teste Rust instável} (erro 10053), da mesma
+        família do upload concorrente que forçou
+        \texttt{RUST\_TEST\_THREADS=1} no SYN-030.
+  \item \textbf{Kit: \texttt{up} com tela bloqueada.} O \texttt{up} real da
+        retomada não achou presença em 30\,s e o pareamento foi recusado pela
+        tela bloqueada do emulador; vale um ticket de triagem para o
+        \texttt{up} acordar e desbloquear o AVD antes de parear.
+  \item \textbf{\texttt{main} local:} descartar \texttt{f03289d}
+        (\texttt{git branch -f main 70534d5}).
+\end{enumerate}
+
+\section{Decisões do proxy}
+\begin{itemize}
+  \item \textbf{CLEAN-027:} ``aceito (normal, Review: agent); wait\_wifi nunca
+        passa o dump como argumento, dumpsys com erro falha sem retentativa,
+        vermelho comportamental no harness (printf embutido desligado e printf
+        falso com limite de 128 KiB por argumento) e wifi-off real no emulador
+        como verificação --- o bash do harness tem printf embutido, então só
+        emulando o mksh do aparelho o teste reproduz o defeito; checagem
+        estática do script testaria a forma, não o comportamento.''
+  \item \textbf{CLEAN-030:} ``aceito como refatoração pequena (normal, Review:
+        agent); Stop-AndWait num único qa/process.ps1 carregado por up/down/pc
+        via \$PSScriptRoot, mesmos prazos e erros, sem teste novo --- os
+        wrappers já se chamam por \$PSScriptRoot, não há autocontenção a
+        preservar, e a política já precisou de duas correções no CLEAN-026;
+        teste de `não define cópia' seria de organização interna, que a spec
+        exclui.''
+  \item \textbf{CLEAN-032:} ``aceito (normal, Review: agent, sem Blocked by);
+        antes do emu kill o down guarda o dono do listener da porta do serial,
+        espera até 30 s ele sair depois que o serial some do adb e senão aplica
+        Stop-AndWait, e os testes nunca usam a 5554 --- o critério 5 do SYN-025
+        pede down sem qemu e o up logo após o down é o uso do loop; reusa o
+        Stop-AndWait existente, então não depende do CLEAN-030.''
+\end{itemize}
+
+\section{Débito humano}
+Nenhuma linha \texttt{Débito humano:} neste run: os três tickets são do kit e
+foram verificados por teste e no emulador. Sem aparelho: o passo do Redmi
+pós-run não rodou.
+
+\end{document}
