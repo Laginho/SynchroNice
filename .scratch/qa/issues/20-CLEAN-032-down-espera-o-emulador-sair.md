@@ -1,5 +1,5 @@
 # CLEAN-032: `down` só termina depois de o processo do emulador sair
-Stage: reviewing
+Stage: to-review
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -89,5 +89,4 @@ o PID, conferido por leitura como no CLEAN-026.
 - Verde e gate completo (2026-10-04): `powershell -ExecutionPolicy Bypass -File .\gate.ps1` terminou com exit 0 e `gate: passou`. Rust: 83 passaram, 0 falharam; UI: 61 passaram, 0 falharam; QA: 98 passaram, 0 falharam (23 em `down.test.mjs`, incluindo os dois novos testes e os 20 cenários anteriores). Saída espontânea em 10,6 s; parada forçada em 32,0 s, com asserção dos 30 s completos desde `emu kill`. Fmt, clippy e typecheck passaram; `gradle check` terminou `BUILD SUCCESSFUL`, com os testes Android já atualizados (`UP-TO-DATE`).
 - Handoff: critério 5 (`up/down` reais pelo kit e ausência de qemu/listeners 5554/5555) permanece para o stage 3. O caminho de processo impossível de parar foi conferido por leitura, conforme previsto no contrato. Diff revisado e `git diff --check` sem erros; commits de código não tocam os testes.
 - Stage 3 (2026-10-04): corrigida a ordem dos comentários do stage 2 para acrescentá-los ao fim do histórico, conforme `docs/agents/issue-tracker.md`; nenhuma alteração de código ou dos critérios.
-- 2026-10-04 Review ended at reviewing (timeout); branch clean-032 holds the review; left for a human
 - 2026-10-04 14:50 (foreman): revisão estourou os 40 min no gate, com dois runs Codex de outros repos (PhysiSyst, ClassyCall) dividindo a CPU — causa ambiental. Volta a to-review; a revisão seguinte retoma da branch clean-032 (cópia em recovery/20261004-1442/clean-032), com limite de 60 min.
