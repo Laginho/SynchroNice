@@ -1,5 +1,5 @@
 # CLEAN-030: Um só `Stop-AndWait` para os wrappers do kit
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -43,6 +43,12 @@ porque o escopo do PowerShell é dinâmico. O critério 1 o revisor confere no
 diff.
 
 ## Comments
+
+- Stage 2 (2026-10-04): extração pura autorizada pelo ticket, sem teste novo
+  ou prova red-green. Os chamadores de up, down e pc mantêm a seleção de
+  processos, inclusive pipeline vazio, processo já encerrado, falha de stop,
+  restauração do PC e limpeza do launcher. A função compartilhada preserva
+  integralmente o corpo anterior e o escopo dinâmico de Stop-Process.
 
 - Registrado como acompanhamento de manutenção, sem defeito de comportamento
   identificado e sem impedir a aprovação de CLEAN-026.
