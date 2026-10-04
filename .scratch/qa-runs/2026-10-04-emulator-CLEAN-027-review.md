@@ -87,4 +87,5 @@ As evidências locais foram preservadas. A conversão de finais de linha de
 `Cargo.toml` pelo build foi revertida após conferir ausência de mudança de
 conteúdo. `git diff --check` limpo.
 
-Standards: 1 desvio leve de processo; Spec: 0 achados. Revisão aprovada.
+Standards: 1 desvio leve de processo; Spec: 0 achados. Revisão aprovada;
+merge local na sessão `sweatshop/2026-10-04-1210`: `37108e9`.

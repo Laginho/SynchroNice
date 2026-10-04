@@ -1,5 +1,5 @@
 # CLEAN-027: Dump grande do Wi-Fi excede o limite de argumentos
-Stage: to-review
+Stage: done
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -96,3 +96,47 @@ aparelho:
 - Handoff: testes e produção em commits separados; diff limitado aos Primary
   files e ao ticket, `git diff --check` limpo. Critério 4 fica para o stage 3
   no `SynchroNice_API37`; stage 2 não iniciou o kit real, conforme a spec.
+
+#### Resolution (2026-10-04)
+Verdict: Approve
+
+- Decisão: os quatro critérios foram atendidos. Branch `clean-027` integrada
+  localmente à sessão `sweatshop/2026-10-04-1210`, merge `37108e9`, preservando
+  os commits de testes e produção. Nenhuma mudança de produção no stage 3.
+- Standards: um desvio formal de processo de baixo impacto, sem achados de
+  código ou smells. `to-review` foi registrado no commit de handoff separado
+  `6d57192`, em vez do último commit de código, como prevê a tabela da skill
+  `ticket-flow`. Estágio committed, gate verde e test-first preservado;
+  desvio registrado sem reescrever o histórico e sem motivo de reopen.
+- Spec: zero achados. Critério 1 ✅: dump de 409600 bytes mais cabeçalhos,
+  confirmação dos dois estados e duração solicitada. Critério 2 ✅:
+  `status-denied` mantém clock 0. Critério 3 ✅: os 13 cenários anteriores
+  passaram. Critério 4 ✅: CLI real no `SynchroNice_API37`, exit 0, duração
+  padrão de 15 s e log `QA_WIFI_DISABLED`/`QA_WIFI_RESTORED`; dump integral
+  medido antes da chamada com 170040 bytes, Wi-Fi enabled depois.
+- Examinados: callers de desligamento e restore; traps EXIT/INT/TERM;
+  dumpsys nonzero, dump grande/vazio/sem estado válido, estados atrasados,
+  recusa silenciosa, retries da restauração, reconexão/mDNS e leitura dos
+  marcadores. Não exercitados: aparelho físico, telas e presença durante a
+  queda; fora dos critérios deste ticket. A linha `Proxy decided` existente
+  sobre harness, consulta sem espera e QA real foi conferida contra as
+  evidências; não houve nova decisão de proxy nesta revisão.
+- Red-green independente: testes atuais contra o wrapper da base `ab85fe7`,
+  numa cópia isolada: 15 testes, 13 pass e 2 fail (`large-dump` e o pai),
+  falha correta `Argument list too long`. Na branch corrigida, teste de
+  estado 15/15, incluindo os 14 subcenários. Testes chamam a produção.
+- Gate em primeiro plano:
+  `powershell -ExecutionPolicy Bypass -File .\gate.ps1`, exit 0,
+  `gate: passou`; fmt, Clippy e TypeScript passaram;
+  Rust 83/83, UI 61/61, QA 96/96. Android `check`: `BUILD SUCCESSFUL in 14s`,
+  testes UP-TO-DATE; relatórios das tarefas de teste com 166 testes em
+  17 suítes, sem falhas, erros ou skips.
+- QA: `up` com SDK físico saiu 0, APK e PC debug compilados, PC isolado
+  online; presença posterior HTTP 200. `down` saiu 0, estado active false,
+  PC isolado e AVD encerrados. Sem arquivos de usuário criados ou apagados,
+  sem temporários de Wi-Fi restantes e sem débito humano.
+- Arquivos: produção em `qa/phone.ps1`, testes em `qa/phone.test.mjs`;
+  evidências e revisão em [relatório do CLEAN-027](../../qa-runs/2026-10-04-emulator-CLEAN-027-review.md).
+  Alteração de finais de linha de `Cargo.toml` pelo build revertida após
+  confirmar ausência de mudança de conteúdo; diff final sem alterações
+  de fonte fora dos Primary files, `git diff --check` limpo.
