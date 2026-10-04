@@ -243,7 +243,7 @@ Leia `pc.stderr.log` para diagnosticar falhas do app.
 | Colar imagem | `paste-image -Path 'qa-foto.png'` | clipboard nativo do Windows, foco no composer e Ctrl+V pelo CDP |
 | Colar arquivos | `paste-files -Paths 'qa-a.pdf','qa-b.txt'` | CF_HDROP nativo; uma bolha por arquivo |
 | Registrar chegada | `track -Path 'C:\Users\bruno\Downloads\SynchroNice\qa-foto.png' -RunDir '<execução>'` | registra um arquivo novo da Pasta para limpeza |
-| Limpar | `clean -RunDir '<execução>'` | arquivos registrados enviados à Lixeira do Windows |
+| Limpar | `clean -RunDir '<execução>'` | destino confirmado: `Lixeira do Windows` ou `remocao permanente` |
 
 Para vários caminhos, chame `& .\qa\pc.ps1 paste-files -Paths @('qa-a.pdf',
 'qa-b.txt')` **dentro do PowerShell**: `powershell -File` não recebe arrays
@@ -315,9 +315,13 @@ Fontes locais copiadas para o clipboard não entram automaticamente na lista.
 
 `clean` percorre apenas os arquivos registrados, recusa diretórios e compara
 o SHA-256 antes de apagar: arquivo alterado fica preservado e gera erro.
-No PC, usa `FileSystem.DeleteFile` com `SendToRecycleBin`. No celular,
-atualiza `is_trashed=1` no MediaStore e confirma por query; se não puder,
-usa `rm` apenas no caminho registrado. O manifesto fica vinculado à Pasta
+No PC, usa `FileSystem.DeleteFile` com `SendToRecycleBin` e confere a nova
+entrada na Lixeira; se o Windows apagou sem reciclar, relata `remocao permanente`.
+No celular, atualiza `is_trashed=1` no MediaStore e confirma por query ou pela
+saída do caminho original após o update. Tenta a URI de Downloads se a URI
+de arquivo não reciclar; só então usa `rm` no caminho registrado e confere
+se sumiu. Se continuar presente, sai com erro e mantém o arquivo rastreado.
+O manifesto fica vinculado à Pasta
 ou ao aparelho; não o reutilize para outro alvo. Lista vazia não apaga nada.
 Os resultados ficam também em `cleanup` nos manifestos, inclusive após
 uma interrupção; `clean` pode ser repetido sem apagar arquivos adicionais.

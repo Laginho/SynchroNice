@@ -5,6 +5,108 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+test('cleanup reports the actual MediaStore or rm destination and retains failures', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-019-phone-'));
+  try {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    assert.equal(git.status, 0, git.stderr);
+    const bash = resolve(git.stdout.trim(), '../../../bin/bash.exe');
+    const adb = join(directory, 'adb.ps1');
+    const source = join(directory, 'fixture.pdf');
+    writeFileSync(source, 'QA cleanup payload');
+    writeFileSync(join(directory, 'content'), `#!/bin/sh
+printf '%s\\n' "$@" > "$QA_CLEAN_STORAGE/query-argv"
+echo 'Row: 0 is_trashed=1'
+`);
+    writeFileSync(adb, `
+$command = $args -join ' '
+$target = Join-Path $env:QA_CLEAN_STORAGE 'payload'
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($command -match 'get-state') { 'device'; exit 0 }
+if ($command -match 'getprop ro.serialno') { 'QA-phone'; exit 0 }
+if ($command -match 'dumpsys window policy') { 'mShowingLockscreen=false'; exit 0 }
+if ($command -match 'set -C') { [IO.File]::WriteAllText($target, ''); exit 0 }
+if ($args[2] -eq 'push') { Copy-Item -LiteralPath $args[3] -Destination $target; exit 0 }
+if ($command.Contains('if [ -f')) { if (Test-Path -LiteralPath $target) { 'exists' }; exit 0 }
+if ($command -match 'sha256sum') { (Get-FileHash -LiteralPath $target).Hash + '  payload'; exit 0 }
+if ($command -match 'content query.*--where') {
+  'Row: 0 _id=42, _data=/storage/emulated/0/Pictures/SynchroNiceQA/fixture.pdf'; exit 0
+}
+if ($command -match 'content update') {
+  [IO.File]::AppendAllText((Join-Path $env:QA_CLEAN_STORAGE 'updates'), $command + "\n")
+  if ($env:QA_CLEAN_SCENARIO -notin 'rm','rm-fails' -and
+      ($env:QA_CLEAN_SCENARIO -ne 'downloads' -or $command -match '/downloads/42')) {
+    Move-Item -LiteralPath $target -Destination (Join-Path $env:QA_CLEAN_STORAGE '.trashed-payload')
+  }
+  'Updated 1 rows.'; exit 0
+}
+if ($command -match 'content query') {
+  if ($env:QA_CLEAN_SCENARIO -eq 'query-error') { '[ERROR] Binding not well formed'; exit 0 }
+  if ($env:QA_CLEAN_SCENARIO -eq 'query-exit') { 'query failed'; exit 1 }
+  if ($env:QA_CLEAN_SCENARIO -eq 'query-empty' -or (Test-Path -LiteralPath $target)) { 'Row: 0 is_trashed=0'; exit 0 }
+  # Execute exactly the shell text adb would join, not a reconstructed query.
+  [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'query.sh'), ($args[3..($args.Count-1)] -join ' '))
+  [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'shell-argc'), [string]($args.Count-3))
+  & $env:QA_CLEAN_BASH -c 'cd "$QA_CLEAN_TOOLS" && PATH="$PWD:$PATH" sh "$QA_CLEAN_STORAGE/query.sh"'
+  exit $LASTEXITCODE
+}
+if ($command -match 'rm -f --') {
+  [IO.File]::WriteAllText((Join-Path $env:QA_CLEAN_STORAGE 'rm-called'), '')
+  if ($env:QA_CLEAN_SCENARIO -ne 'rm-fails') { Remove-Item -LiteralPath $target -ErrorAction SilentlyContinue }
+  exit 0
+}
+exit 0
+`);
+    for (const scenario of ['confirmed', 'query-error', 'query-exit', 'query-empty', 'downloads', 'rm', 'rm-fails']) {
+      await t.test(scenario, () => {
+        const storage = join(directory, scenario);
+        mkdirSync(storage);
+        const runDir = join(storage, 'run');
+        const run = action => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), action, '-Path', source, '-RunDir', runDir,
+          '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env,
+            QA_CLEAN_STORAGE: storage.replaceAll('\\', '/'), QA_CLEAN_SCENARIO: scenario,
+            QA_CLEAN_BASH: bash, QA_CLEAN_TOOLS: directory.replaceAll('\\', '/') },
+        });
+        const pushed = run('push');
+        assert.equal(pushed.status, 0, pushed.stdout + pushed.stderr);
+        const cleaned = run('clean');
+        assert.ifError(cleaned.error);
+        assert.equal(cleaned.status, scenario === 'rm-fails' ? 1 : 0, cleaned.stdout + cleaned.stderr);
+        const state = JSON.parse(readFileSync(join(runDir, 'phone-files.json'), 'utf8').replace(/^\uFEFF/, ''));
+        if (scenario === 'rm-fails') {
+          assert.equal(state.tracked.length, 1);
+          assert.equal(state.cleanup.length, 0);
+          assert.equal(existsSync(join(storage, 'payload')), true);
+          return;
+        }
+        assert.equal(state.tracked.length, 0);
+        assert.equal(existsSync(join(storage, 'payload')), false);
+        if (scenario === 'confirmed') {
+          assert.ok(existsSync(join(storage, 'query-argv')), `shell did not run content: ${cleaned.stderr}`);
+        }
+        assert.equal(JSON.parse(cleaned.stdout)[0].destination,
+          scenario === 'rm' ? 'rm (MediaStore indisponivel)' : 'Lixeira do MediaStore');
+        assert.equal(existsSync(join(storage, 'rm-called')), scenario === 'rm');
+        assert.equal(existsSync(join(storage, '.trashed-payload')), scenario !== 'rm');
+        if (scenario === 'downloads' || scenario === 'rm') {
+          assert.match(readFileSync(join(storage, 'updates'), 'utf8'), /\/downloads\/42/);
+        }
+        if (scenario === 'confirmed') {
+          assert.equal(readFileSync(join(storage, 'shell-argc'), 'utf8'), '1');
+          const argv = readFileSync(join(storage, 'query-argv'), 'utf8').trim().split(/\r?\n/);
+          const extra = argv[argv.indexOf('--extra') + 1];
+          // Content.java splits at unescaped colons and then unescapes the key.
+          assert.deepEqual(extra.split(/(?<!\\):/).map(field => field.replaceAll('\\:', ':')),
+            ['android:query-arg-match-trashed', 'i', '1']);
+        }
+        assert.equal(run('clean').status, 0);
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('pair validates inputs, delivers the QR and rejects activity errors', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'clean-018-pair-'));
   try {

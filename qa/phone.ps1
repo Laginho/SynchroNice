@@ -284,13 +284,31 @@ sleep __SECONDS__
                     if (-not $expectedHash) { $expectedHash = Upload-PrefixHash $entry }
                     if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
                     $destination = 'rm (MediaStore indisponivel)'
-                    try {
-                        $uri = Media-Uri $remote
-                        $result = Adb-Run @('shell','content','update','--uri',$uri,'--bind','is_trashed:i:1')
-                        $trashed = Adb-Run @('shell','content','query','--uri',$uri,'--projection','is_trashed','--extra','android:query-arg-match-trashed:i:1')
-                        if ($result -match 'Exception|Error' -or $trashed -notmatch 'is_trashed=1\b') { throw 'MediaStore nao confirmou lixeira' }
-                        $destination = 'Lixeira do MediaStore'
-                    } catch { Adb-Run @('shell',"rm -f -- $quoted") | Out-Null }
+                    $uri = $null
+                    try { $uri = Media-Uri $remote } catch { }
+                    if ($uri) {
+                        # Some Downloads entries only accept trash through the downloads collection.
+                        foreach ($candidate in @($uri, $uri.Replace('/file/', '/downloads/'))) {
+                            $confirmed = $false
+                            try {
+                                $result = Adb-Run @('shell','content','update','--uri',$candidate,'--bind','is_trashed:i:1')
+                                $trashed = Adb-Run @('shell',"content query --uri $candidate --projection is_trashed --extra 'android\:query-arg-match-trashed:i:1'")
+                                $confirmed = $result -notmatch 'Exception|Error' -and
+                                    $trashed -notmatch 'Exception|Error' -and $trashed -match 'is_trashed=1\b'
+                            } catch { }
+                            # A failed query does not undo a successful move into .trashed-*.
+                            $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
+                            if ($confirmed -or $exists.Trim() -ne 'exists') {
+                                $destination = 'Lixeira do MediaStore'
+                                break
+                            }
+                        }
+                    }
+                    if ($destination -ne 'Lixeira do MediaStore') {
+                        Adb-Run @('shell',"rm -f -- $quoted") | Out-Null
+                        $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
+                        if ($exists.Trim() -eq 'exists') { throw "Limpeza nao removeu arquivo; mantido no manifesto: $remote" }
+                    }
                 }
                 $fileState.cleanup = @($fileState.cleanup) + @{ path=$remote; destination=$destination }
                 $fileState.tracked = @($fileState.tracked | Where-Object { $_.path -cne $remote })
