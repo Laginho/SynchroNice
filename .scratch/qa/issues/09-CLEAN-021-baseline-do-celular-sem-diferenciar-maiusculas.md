@@ -1,5 +1,5 @@
 # CLEAN-021: Baseline do celular sem diferenciar maiúsculas
-Stage: to-implement
+Stage: implementing
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -50,6 +50,13 @@ temporário no NTFS, que não diferencia maiúsculas como o FUSE. O teste semeia
 `Foto.jpg` e roda `list-files`, `track` e `clean` para os critérios 1 a 4.
 
 ## Comments
+
+- Stage 2 (2026-10-03): seam confirmado pelo ticket: CLI `phone.ps1`, manifesto
+  e armazenamento NTFS temporário via adb falso. Consumidores examinados: `track`
+  e `clean` usados pelo roteiro de QA; `push`/`share` também alimentam `tracked`.
+  Cobertura inclui baseline, dedupe, limpeza repetida/vazia e interrupção por
+  arquivo alterado entre duas entradas antigas de grafia diferente. As quatro
+  regressões falharam no código original (5 falhas contando o teste pai).
 
 - `qa/phone.ps1:165` (track) e `:276` (clean) comparam com o baseline por
   `-ccontains`, que diferencia maiúsculas. O `/storage/emulated/0` não
