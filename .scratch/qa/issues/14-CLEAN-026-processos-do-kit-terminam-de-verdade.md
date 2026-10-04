@@ -1,5 +1,5 @@
 # CLEAN-026: Processos do kit terminam de verdade antes do passo seguinte
-Stage: to-review
+Stage: reviewing
 Status: ready-for-agent
 Blocked by: CLEAN-020
 Review: agent
@@ -83,3 +83,25 @@ stage 3 confere os critérios 1 e 2 por leitura, e o caminho feliz rodando
   (Q9). `Difficulty: hard` pela parte (c), que é concorrente: quem conserta
   sem cuidado troca uma corrida por outra. Fica bloqueado pelo CLEAN-020
   porque os dois mexem nas mesmas linhas do `down.ps1`.
+
+#### Stage 3 — correção de revisão (2026-10-04)
+
+- A revisão dos dois eixos, contra `092e14c`, encontrou duas corridas no
+  cleanup do launcher: `StartTime` não retém o handle entre lançamento e
+  falha, e o filtro de filhos por limite inferior aceita filhos de um futuro
+  dono do PID quando o launcher já desapareceu. Ambas afetam o critério 2.
+- Correção dentro de `qa/pc.ps1 start`, sem teste automatizado novo conforme
+  a exceção aprovada: autorização exclusiva antes de criar o filho, captura
+  e validação do handle/comando do launcher, retenção até o fim do cleanup,
+  e captura do handle do filho com criação limitada à vida do launcher.
+  Candidato não validado aguarda sua saída sem ser morto; o launcher sai
+  sozinho sem autorização. Revalidação do gate e QA após o fix pendentes.
+- Chamadores, falhas e interações examinados: `up` → rebuild/start/presence/
+  rollback, `down` → encerramento/restauração, start isolado e não isolado,
+  launcher encerrado, PID ausente/tardio, falha de identidade/autorização,
+  falha após PID e CDP, reutilização de PID do pai e do filho, estado ausente/
+  inativo e os 14 cenários de down. A reprodução de reutilização de PID e
+  processo resistente à parada não foi executada; critérios 1–2 usam a
+  leitura prevista pelo contrato. A instância real estava fechada no QA.
+- Gate anterior ao fix aprovado: Rust 83, UI 61, kit 88, Android check
+  BUILD SUCCESSFUL. `up` real anterior ao fix aprovado, presença 200.
