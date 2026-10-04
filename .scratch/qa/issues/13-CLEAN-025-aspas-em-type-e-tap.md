@@ -1,5 +1,5 @@
 # CLEAN-025: Aspas em `type` e `tap -Value` do celular
-Stage: to-review
+Stage: to-implement
 Status: ready-for-agent
 Blocked by: none
 Review: agent
@@ -102,3 +102,46 @@ camada nativa do PS 5.1. O `type` passa a escapar `"` para essa camada, como o
   wontfix, porque o kit precisa do clipboard real e restaurar formatos
   arbitrários é frágil. A nota de doc do (e) virou o critério 4 deste
   ticket (Q18, proxy).
+
+#### Review stage 3 (2026-10-04)
+
+Verdict: Reopen — critério 1: `tap` não encontra o texto com aspas no XML real do uiautomator.
+
+- Standards: 0 achados; Spec: 1 achado, confirmado no emulador. A revisão
+  estática inicial não identificou o delimitador simples que o QA real revelou.
+- ❌ Critério 1: o composer contém exatamente `say "hi"`, com bounds
+  `[215,1328][789,1475]` (centro `(502, 1401)`), mas o XML serializa o atributo
+  como `text='say "hi"'`. `findNode` reconhece apenas atributos delimitados
+  por aspas duplas e devolve `null`. Duas tentativas reais de
+  `tap -By text -Value 'say "hi"'` saíram com código 1 e
+  `elemento nao achado: text=say "hi"`.
+- ✅ Critério 2: seletor `CLEAN-025 plain` tocado com código 0 no emulador;
+  enviado e recebido no PC isolado.
+- ✅ Critério 3: o gate verifica o comando nativo
+  `input text 'say%s"hi"'`; o adb real preservou as aspas no composer e no
+  Item entregue ao PC.
+- ✅ Critério 4: as duas linhas de clipboard documentam a sobrescrita sem
+  restauração.
+- Restante para o stage 2: acrescentar uma regressão em `qa/phone.test.mjs`
+  com `text='say "hi"'` e corrigir a leitura de atributos em `qa/dump.mjs`,
+  mantendo o caso `text="say &quot;hi&quot;"` já coberto. Exige novo teste,
+  portanto a revisão não fez o fix. Continuar nesta branch, somente com o
+  item ❌; contrato e demais critérios preservados.
+- Callers, caminhos de falha e interações examinados: wrapper `tap`, CLI
+  `dump.mjs`, importação de `findNode`, argv posicional, stdin JSON/UTF-8,
+  seletor ausente, nó ausente, bounds inválidos, falha do parser e temporários;
+  `type`, validação ASCII/`%`, `Adb-Run` e demais callers do helper inalterado
+  `Shell-Quote` (hash, upload, MediaStore, limpeza). QA real cobriu composer,
+  envio e entrega no PC. Unicode em `tap` e JSON inválido por stdin não
+  receberam testes específicos nesta revisão.
+- Fluxo e validação: commits de testes precedem as respectivas correções;
+  commits de produção não alteram testes; diff de implementação limitado aos
+  Primary files e ao ticket. Rebase sobre `sweatshop/2026-10-03-1608` já
+  atualizado. Gate completo código 0: fmt, clippy, typecheck, 83 testes Rust,
+  61 da UI, 86 QA e `gradle check`; testes Android `UP-TO-DATE`, 166 nos XML
+  existentes, zero falhas/erros. O caso real que reprova ainda não é coberto
+  pelos novos testes verdes.
+- Relatório: `.scratch/qa-runs/2026-10-04-clean-025-review.md`. `up` com o
+  SDK do projeto confirmou presença 200; `down` encerrou o emulador e o PC
+  isolado (código 0, `stopped=true`). A primeira tentativa de `up`, com SDK
+  padrão ausente, foi infraestrutura e não motivou a reprovação.
