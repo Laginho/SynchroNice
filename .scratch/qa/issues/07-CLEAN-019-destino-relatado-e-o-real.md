@@ -31,7 +31,9 @@ acontece, nos dois lados.
 - Quando a confirmação falha, o catch roda `rm` no caminho antigo e relata
   `rm (MediaStore indisponivel)`, mesmo que o update já tenha movido o arquivo
   para `.trashed-*`. O destino relatado passa a ser o que aconteceu:
-  - arquivo fora do caminho original depois do update: Lixeira do MediaStore;
+  - confirmação positiva de `is_trashed=1`: Lixeira do MediaStore;
+  - arquivo fora do caminho original sem confirmação: erro e rastreamento
+    preservado para nova tentativa (correção CLEAN-031);
   - o `rm` rodou e o arquivo sumiu: rm;
   - o arquivo continua lá depois do `rm`: erro, e o arquivo fica rastreado.
 - No AVD de 2026-10-02, um PDF em `Download/SynchroNice` não foi para a
@@ -57,8 +59,9 @@ permanente.
 2. Update aceito e confirmação `is_trashed=1`: destino
    `Lixeira do MediaStore`, sem `rm`.
 3. Update aceito, mas a confirmação falha (erro do `content` ou resposta sem
-   `is_trashed=1`), e o arquivo já saiu do caminho original: destino
-   `Lixeira do MediaStore`, sem `rm`.
+   `is_trashed=1`), e o arquivo já saiu do caminho original: erro, sem relato
+   de Lixeira e com URI/rastreamento preservados para nova tentativa.
+   CLEAN-031 substitui a hipótese anterior de que ausência provava reciclagem.
 4. O update pela URI de arquivo não leva o item à Lixeira, e pela URI de
    Downloads leva: destino `Lixeira do MediaStore`, sem `rm`.
 5. Nenhuma das URIs leva à Lixeira, e o `rm` remove o arquivo: destino
@@ -295,3 +298,8 @@ Evidência local: `phone-criteria-evidence.json`, campos
 `mediaStoreConfirmation` e `cleanupFollowup`.
 
 - 2026-10-04 Proxy decided: a observação vira o ticket novo CLEAN-031 (`needs-triage`, `19-CLEAN-031-limpeza-do-celular-relata-lixeira-para-pendente.md`); este ticket segue done, sem mudar critérios — é um destino relatado que não confere com o real, o que as histórias 9 e 10 pedem acertar, e nenhum aberto (CLEAN-027 a 030) trata da limpeza do celular.
+
+- 2026-10-04, correção direta solicitada na revisão do PR #10: CLEAN-031
+  substitui a hipótese do critério 3. Ausência do caminho original não prova
+  Lixeira; confirmação indisponível mantém URI e hash no manifesto e retorna
+  erro. Os comentários anteriores permanecem como histórico da decisão.

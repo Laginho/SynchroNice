@@ -234,7 +234,12 @@ O `start` não isolado registra PID e exe em
 `.scratch/qa-runs/real-pc/state.json`, independente de `-RunDir`, antes de
 aguardar o CDP. No fim, `down` só encerra e relança esse PID se o caminho do
 exe ainda corresponder; registro de processo morto ou diferente é apenas
-removido. `down -RealPcStatePath` permite injetar outro registro nos testes.
+removido quando não há restauração pendente. Antes de encerrar o processo,
+o kit registra a intenção de restauração: se o relançamento falhar, repetir
+`down` retoma essa intenção. O PC já restaurado fica protegido em tentativas
+seguintes de limpeza do emulador, inclusive quando usa o exe de debug;
+nesse caso não se abre também o release. `down -RealPcStatePath` permite
+injetar outro registro nos testes.
 
 | Ação | Exemplo de argumentos | Resultado |
 | --- | --- | --- |
@@ -324,10 +329,13 @@ Fontes locais copiadas para o clipboard não entram automaticamente na lista.
 o SHA-256 antes de apagar: arquivo alterado fica preservado e gera erro.
 No PC, usa `FileSystem.DeleteFile` com `SendToRecycleBin` e confere a nova
 entrada na Lixeira; se o Windows apagou sem reciclar, relata `remocao permanente`.
-No celular, atualiza `is_trashed=1` no MediaStore e confirma por query ou pela
-saída do caminho original após o update. Tenta a URI de Downloads se a URI
-de arquivo não reciclar; só então usa `rm` no caminho registrado e confere
-se sumiu. Se continuar presente, sai com erro e mantém o arquivo rastreado.
+No celular, registra a URI e o hash antes do update e confirma `is_trashed=1`
+por query que inclui itens pendentes e na Lixeira. O desaparecimento do
+caminho original não prova reciclagem. Tenta a URI de Downloads se a URI
+de arquivo não reciclar; só então usa `rm` no caminho verificado e confere
+se sumiu. Se o destino não puder ser confirmado, sai com erro e mantém o
+arquivo rastreado. Uma nova chamada recupera a URI registrada e confere
+caminho e hash antes de atuar sobre um derivado `.pending-*` ou `.trashed-*`.
 O manifesto fica vinculado à Pasta
 ou ao aparelho; não o reutilize para outro alvo. Lista vazia não apaga nada.
 Os resultados ficam também em `cleanup` nos manifestos, inclusive após

@@ -11,6 +11,28 @@ $RunDir = [IO.Path]::GetFullPath($RunDir)
 $statePath = Join-Path $RunDir 'emulator.json'
 $debugExe = [IO.Path]::GetFullPath($DebugExe)
 $releaseExe = [IO.Path]::GetFullPath($ReleaseExe)
+function Save-State([string]$Path, $State) {
+    $temporary = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        [IO.File]::WriteAllText($temporary, ($State | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+        # A failed write must leave the last complete restoration record intact.
+        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, [NullString]::Value) }
+        else { [IO.File]::Move($temporary, $Path) }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
+    }
+}
+function Get-RecordedPc($Record) {
+    $candidate = Get-Process -Id $Record.pid -ErrorAction SilentlyContinue
+    if (-not $candidate) { return }
+    try {
+        if ($candidate.HasExited -or $candidate.Path -ne $Record.exe -or
+            ($Record.startTime -and $candidate.StartTime.Ticks.ToString() -ne [string]$Record.startTime)) { return }
+        $candidate
+    } catch {
+        if (-not $candidate.HasExited) { throw }
+    }
+}
 function Stop-AndWait {
     param([Parameter(ValueFromPipeline)][Diagnostics.Process]$Process)
     process {
@@ -48,6 +70,9 @@ function Start-NormalPc([string]$Executable) {
             ProcessStartupInformation=$startup
         }
         if ($launch.ReturnValue -ne 0) { throw "PC real nao reabriu (WMI $($launch.ReturnValue)); repita down" }
+        $started = Get-RecordedPc ([pscustomobject]@{ pid=$launch.ProcessId; exe=$Executable })
+        if (-not $started) { throw 'PC real nao permaneceu aberto; repita down' }
+        $started
     } finally {
         $env:SYNCHRONICE_DATA_DIR = $previousData
         $env:WEBVIEW2_USER_DATA_FOLDER = $previousProfile
@@ -57,28 +82,52 @@ function Start-NormalPc([string]$Executable) {
 
 try {
     $restoredReal = $false
+    $realRestoration = $false
+    $restoredPc = $null
     if (Test-Path -LiteralPath $RealPcStatePath) {
         $real = Get-Content -LiteralPath $RealPcStatePath -Raw | ConvertFrom-Json
-        $process = Get-Process -Id $real.pid -ErrorAction SilentlyContinue
-        if ($process -and $process.Path -eq $real.exe) {
-            $process | Stop-AndWait
-            Start-NormalPc $real.exe
+        $process = Get-RecordedPc $real
+        if ($real.restoreComplete) {
+            # Emulator cleanup may have failed after this normal PC was restored.
+            # A user-closed restored PC is not a new launch request.
+            $restoredPc = $process
+            $realRestoration = $true
+        } elseif ($real.restorePending -or $process) {
+            if (-not $real.restorePending) {
+                $real | Add-Member -NotePropertyName restorePending -NotePropertyValue $true -Force
+                $real | Add-Member -NotePropertyName startTime -NotePropertyValue $process.StartTime.Ticks.ToString() -Force
+                Save-State $RealPcStatePath $real
+            }
+            # A failed stop can leave the original alive even with pending intent.
+            if ($process) { $process | Stop-AndWait }
+            $restoredPc = Start-NormalPc $real.exe
+            $real.pid = $restoredPc.Id
+            $real | Add-Member -NotePropertyName startTime -NotePropertyValue $restoredPc.StartTime.Ticks.ToString() -Force
+            $real | Add-Member -NotePropertyName restorePending -NotePropertyValue $false -Force
+            $real | Add-Member -NotePropertyName restoreComplete -NotePropertyValue $true -Force
+            Save-State $RealPcStatePath $real
             $restoredReal = $true
+            $realRestoration = $true
         }
-        Remove-Item -LiteralPath $RealPcStatePath
     }
-    if (-not (Test-Path -LiteralPath $statePath)) {
-        @{ stopped=$true; restored=$restoredReal } | ConvertTo-Json -Compress; exit 0
-    }
-    $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    if (-not $state.active) {
+    $state = if (Test-Path -LiteralPath $statePath) { Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json }
+    if (-not $state -or -not $state.active) {
+        if (Test-Path -LiteralPath $RealPcStatePath) { Remove-Item -LiteralPath $RealPcStatePath }
         @{ stopped=$true; restored=$restoredReal } | ConvertTo-Json -Compress; exit 0
     }
     # Restore the PC before any emulator error can interrupt cleanup.
+    if ($realRestoration) {
+        # The explicit real-PC record takes precedence over the older release fallback.
+        $state.realWasRunning = $false
+        Save-State $statePath $state
+    }
     # The kit owns this debug executable and the fixed HTTP port during the run.
-    Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $debugExe } | Stop-AndWait
+    Get-Process pc -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -eq $debugExe -and -not ($restoredPc -and $_.Id -eq $real.pid -and
+            $_.StartTime.Ticks.ToString() -eq [string]$real.startTime)
+    } | Stop-AndWait
     if ($state.realWasRunning -and -not (Get-Process pc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $releaseExe })) {
-        Start-NormalPc $releaseExe
+        $null = Start-NormalPc $releaseExe
     }
     if ($state.serial -match '^emulator-\d+$') {
         $devices = & $adb devices
@@ -98,6 +147,7 @@ try {
     }
     if ($state.endpoint) { & $adb disconnect $state.endpoint | Out-Null }
     $state.active = $false
-    $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
+    Save-State $statePath $state
+    if (Test-Path -LiteralPath $RealPcStatePath) { Remove-Item -LiteralPath $RealPcStatePath }
     @{ stopped=$true; restored=($restoredReal -or $state.realWasRunning) } | ConvertTo-Json -Compress
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }

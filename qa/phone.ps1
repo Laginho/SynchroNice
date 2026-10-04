@@ -102,6 +102,28 @@ function Media-Uri([string]$remote) {
         return $uri
     } finally { Remove-Item -LiteralPath $local }
 }
+function Cleanup-MediaState([string]$uri) {
+    if ($uri -notmatch '^content://media/external/(file|downloads)/\d+$') { throw 'URI de limpeza invalida; arquivo preservado' }
+    $query = Adb-Run @('shell',"content query --uri $uri --projection is_trashed:is_pending:_data --extra 'android\:query-arg-match-trashed:i:1' --extra 'android\:query-arg-match-pending:i:1'")
+    if ($query -match 'Exception|Error') { throw "MediaStore nao confirmou destino: $query" }
+    $rows = @($query -split '\r?\n' | Where-Object { $_ -match '^Row: \d+ is_trashed=([01]), is_pending=([01]), _data=(.+)$' })
+    if ($rows.Count -ne 1) { throw 'MediaStore nao confirmou destino; arquivo preservado' }
+    $null = $rows[0] -match '^Row: \d+ is_trashed=([01]), is_pending=([01]), _data=(.+)$'
+    return [pscustomobject]@{ trashed=($Matches[1] -eq '1'); path=$Matches[3] }
+}
+function Check-MediaIdentity($entry, $media) {
+    # A provider rename keeps the original directory/name; bytes alone cannot identify an unrelated file.
+    $directory = $entry.path.Substring(0, $entry.path.LastIndexOf('/') + 1)
+    $name = $entry.path.Substring($directory.Length)
+    $renamed = '^' + [regex]::Escape($directory) + '\.(pending|trashed)-\d+-' + [regex]::Escape($name) + '$'
+    if (($media.path -ine $entry.path -and $media.path -notmatch $renamed) -or
+        @($script:fileState.baseline) -contains $media.path) {
+        throw 'Destino do MediaStore nao corresponde ao arquivo rastreado; preservado'
+    }
+    if (-not $entry.hash -or (Phone-Hash $media.path) -ine $entry.hash) {
+        throw "Arquivo alterado; preservado: $($media.path)"
+    }
+}
 function Prepare-Optional([string[]]$Arguments) {
     try { Adb-Run $Arguments | Out-Null }
     catch {
@@ -289,32 +311,53 @@ sleep __SECONDS__
                 $quoted = Shell-Quote $remote
                 $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
                 $destination = 'ja ausente'
-                if ($exists.Trim() -eq 'exists') {
-                    $expectedHash = $entry.hash
-                    if (-not $expectedHash) { $expectedHash = Upload-PrefixHash $entry }
-                    if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
+                $uri = $entry.mediaUri
+                if ($uri -and $uri -notmatch '^content://media/external/file/\d+$') { throw 'URI de limpeza invalida; arquivo preservado' }
+                $media = $null
+                if ($uri) {
+                    # Provider ids may be reused while a failed cleanup is waiting for retry.
+                    $media = Cleanup-MediaState $uri
+                    Check-MediaIdentity $entry $media
+                }
+                if ($exists.Trim() -eq 'exists' -or $uri) {
                     $destination = 'rm (MediaStore indisponivel)'
-                    $uri = $null
-                    try { $uri = Media-Uri $remote } catch { }
-                    if ($uri) {
+                    if ($exists.Trim() -eq 'exists') {
+                        $expectedHash = $entry.hash
+                        if (-not $expectedHash) { $expectedHash = Upload-PrefixHash $entry }
+                        if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
+                        if (-not $uri) { try { $uri = Media-Uri $remote } catch { } }
+                        if ($uri) {
+                            # Save the verified identity before the provider can rename the source.
+                            $entry.hash = $expectedHash
+                            $entry | Add-Member -NotePropertyName mediaUri -NotePropertyValue $uri -Force
+                            Save-Files
+                        }
+                    } else {
+                        # A previous update may have moved it into pending, rather than trash.
+                        if ($media.trashed) { $destination = 'Lixeira do MediaStore' }
+                    }
+                    if ($uri -and $destination -ne 'Lixeira do MediaStore') {
                         # Some Downloads entries only accept trash through the downloads collection.
                         foreach ($candidate in @($uri, $uri.Replace('/file/', '/downloads/'))) {
-                            $confirmed = $false
+                            try { Adb-Run @('shell','content','update','--uri',$candidate,'--bind','is_trashed:i:1') | Out-Null } catch { }
+                            $media = $null
                             try {
-                                $result = Adb-Run @('shell','content','update','--uri',$candidate,'--bind','is_trashed:i:1')
-                                $trashed = Adb-Run @('shell',"content query --uri $candidate --projection is_trashed --extra 'android\:query-arg-match-trashed:i:1'")
-                                $confirmed = $result -notmatch 'Exception|Error' -and
-                                    $trashed -notmatch 'Exception|Error' -and $trashed -match 'is_trashed=1\b'
+                                $media = Cleanup-MediaState $candidate
                             } catch { }
-                            # A failed query does not undo a successful move into .trashed-*.
-                            $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
-                            if ($confirmed -or $exists.Trim() -ne 'exists') {
+                            if ($media) { Check-MediaIdentity $entry $media }
+                            if ($media -and $media.trashed) {
                                 $destination = 'Lixeira do MediaStore'
                                 break
+                            }
+                            $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
+                            if ($exists.Trim() -ne 'exists') {
+                                throw "Lixeira nao confirmada; arquivo mantido no manifesto: $remote"
                             }
                         }
                     }
                     if ($destination -ne 'Lixeira do MediaStore') {
+                        # Never apply fallback rm to an unconfirmed provider derivative.
+                        if ((Phone-Hash $remote) -ine $expectedHash) { throw "Arquivo alterado; preservado: $remote" }
                         Adb-Run @('shell',"rm -f -- $quoted") | Out-Null
                         $exists = Adb-Run @('shell',"if [ -f $quoted ]; then echo exists; fi")
                         if ($exists.Trim() -eq 'exists') { throw "Limpeza nao removeu arquivo; mantido no manifesto: $remote" }
