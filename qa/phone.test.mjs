@@ -6,6 +6,90 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
+test('type preserves quotes through native argv and the device shell', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-025-type-'));
+  try {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    assert.equal(git.status, 0, git.stderr);
+    const bash = resolve(git.stdout.trim(), '../../../bin/bash.exe');
+    const adb = join(directory, 'adb.ps1');
+    const capture = join(directory, 'capture.cjs');
+    const commandFile = join(directory, 'command');
+    writeFileSync(capture, `require('node:fs').writeFileSync(process.env.QA_TYPE_COMMAND, process.argv[2]);`);
+    writeFileSync(adb, `
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($args[2] -eq 'get-state') { 'device'; exit 0 }
+if ($args[2] -eq 'shell' -and $args[3] -like 'input text *') {
+  # Cross the real PS 5.1 native boundary with exactly the argument intended for adb.
+  & node $env:QA_TYPE_CAPTURE $args[3]
+  exit $LASTEXITCODE
+}
+exit 0
+`);
+    for (const [value, expected] of [['say "hi"', 'say%s"hi"'], ['plain text', 'plain%stext'],
+      ["it's fine", "it's%sfine"], ['"$HOME; echo nope"', '"$HOME;%secho%snope"']]) {
+      await t.test(value, () => {
+        writeFileSync(commandFile, '');
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), 'type', '-Text', value, '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000,
+          env: { ...process.env, QA_TYPE_CAPTURE: capture, QA_TYPE_COMMAND: commandFile },
+        });
+        assert.ifError(result.error);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        const command = readFileSync(commandFile, 'utf8');
+        if (value === 'say "hi"') assert.equal(command, `input text 'say%s"hi"'`);
+        const shell = spawnSync(bash, ['-c', `input() { printf '%s\\n' "$@"; }; ${command}`],
+          { encoding: 'utf8', timeout: 30000 });
+        assert.ifError(shell.error);
+        assert.equal(shell.status, 0, shell.stderr);
+        assert.deepEqual(shell.stdout.trimEnd().split(/\r?\n/), ['text', expected]);
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('tap preserves quoted and plain selectors through native node argv', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'clean-025-tap-'));
+  try {
+    const adb = join(directory, 'adb.ps1');
+    const calls = join(directory, 'calls');
+    writeFileSync(adb, `
+if ($args[0] -eq 'connect') { 'connected'; exit 0 }
+if ($args[2] -eq 'get-state') { 'device'; exit 0 }
+if ($args[2] -eq 'exec-out') {
+  $env:QA_TAP_XML
+  exit 0
+}
+if ($args[3] -eq 'input' -and $args[4] -eq 'tap') {
+  [IO.File]::WriteAllText($env:QA_TAP_CALLS, ($args -join ' '))
+}
+exit 0
+`);
+    const originalXml = '<hierarchy><node text="say &quot;hi&quot;" bounds="[10,20][50,80]"/><node text="plain" bounds="[100,200][140,260]"/></hierarchy>';
+    for (const [name, value, point, xml] of [
+      ['entity-escaped quotes', 'say "hi"', '30 50', originalXml],
+      ['plain text', 'plain', '120 230', originalXml],
+      ['uiautomator single-quoted attribute', 'say "hi"', '502 1401',
+        `<hierarchy><node text='say "hi"' bounds='[215,1328][789,1475]'/></hierarchy>`],
+      ['apostrophe inside double-quoted attribute', "it's fine", '30 50',
+        `<hierarchy><node text="it's fine" bounds="[10,20][50,80]"/></hierarchy>`],
+    ]) {
+      await t.test(name, () => {
+        writeFileSync(calls, '');
+        const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+          resolve('qa/phone.ps1'), 'tap', '-By', 'text', '-Value', value,
+          '-Adb', adb, '-Serial', '127.0.0.1:5555'], {
+          encoding: 'utf8', timeout: 30000, env: { ...process.env, QA_TAP_CALLS: calls, QA_TAP_XML: xml },
+        });
+        assert.ifError(result.error);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        assert.equal(readFileSync(calls, 'utf8'), `-s 127.0.0.1:5555 shell input tap ${point}`);
+      });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('automatic discovery ignores loopback and keeps wireless phone selection', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'clean-022-discovery-'));
   try {

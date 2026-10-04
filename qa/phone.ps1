@@ -332,7 +332,8 @@ sleep __SECONDS__
             $local = [IO.Path]::GetTempFileName()
             try {
                 [IO.File]::WriteAllText($local, (Dump), [Text.UTF8Encoding]::new($false))
-                $point = & node "$PSScriptRoot/dump.mjs" $local $By $Value
+                # JSON over stdin preserves quotes and Unicode through Windows PowerShell.
+                $point = ConvertTo-Json -InputObject $Value -Compress | & node "$PSScriptRoot/dump.mjs" $local $By
                 if ($LASTEXITCODE -ne 0) { throw 'parser do dump falhou' }
                 $point = $point | ConvertFrom-Json
                 if ($null -eq $point) { throw "elemento nao achado: $By=$Value" }
@@ -342,7 +343,7 @@ sleep __SECONDS__
         'type' {
             # adb input text has no Unicode support and interprets %s as a space.
             if (-not $Text -or $Text -match '[^\x20-\x7e]|%') { throw 'Use texto ASCII imprimivel sem % (limite do adb input text)' }
-            $quoted = "'" + $Text.Replace("'", "'\''").Replace(' ', '%s') + "'"
+            $quoted = Shell-Quote ($Text.Replace(' ', '%s'))
             Adb-Run @('shell',"input text $quoted")
         }
         'key' {
