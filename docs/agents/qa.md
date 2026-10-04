@@ -247,8 +247,8 @@ removido. `down -RealPcStatePath` permite injetar outro registro nos testes.
 | Comando Tauri | `invoke -Command list_items -Json '{}'` | retorno JSON do comando real |
 | Presença | `presence` | `{"status":200,"online":true}` ou 204/false |
 | Listar Pasta | `list-files -RunDir '<execução>'` | caminhos; fotografia inicial para proteger arquivos anteriores |
-| Colar imagem | `paste-image -Path 'qa-foto.png'` | clipboard nativo do Windows, foco no composer e Ctrl+V pelo CDP |
-| Colar arquivos | `paste-files -Paths 'qa-a.pdf','qa-b.txt'` | CF_HDROP nativo; uma bolha por arquivo |
+| Colar imagem | `paste-image -Path 'qa-foto.png'` | clipboard nativo do Windows, foco no composer e Ctrl+V pelo CDP; sobrescreve o clipboard do usuário e não o restaura |
+| Colar arquivos | `paste-files -Paths 'qa-a.pdf','qa-b.txt'` | CF_HDROP nativo; uma bolha por arquivo; sobrescreve o clipboard do usuário e não o restaura |
 | Registrar chegada | `track -Path 'C:\Users\bruno\Downloads\SynchroNice\qa-foto.png' -RunDir '<execução>'` | registra um arquivo novo da Pasta para limpeza |
 | Limpar | `clean -RunDir '<execução>'` | destino confirmado: `Lixeira do Windows` ou `remocao permanente` |
 

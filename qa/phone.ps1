@@ -343,7 +343,7 @@ sleep __SECONDS__
         'type' {
             # adb input text has no Unicode support and interprets %s as a space.
             if (-not $Text -or $Text -match '[^\x20-\x7e]|%') { throw 'Use texto ASCII imprimivel sem % (limite do adb input text)' }
-            $quoted = "'" + $Text.Replace("'", "'\''").Replace(' ', '%s') + "'"
+            $quoted = Shell-Quote ($Text.Replace(' ', '%s'))
             Adb-Run @('shell',"input text $quoted")
         }
         'key' {
